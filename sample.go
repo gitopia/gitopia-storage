@@ -19,7 +19,6 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/cache"
 	"github.com/go-git/go-git/v5/plumbing/format/pktline"
 	"github.com/go-git/go-git/v5/plumbing/protocol/packp"
-	"github.com/go-git/go-git/v5/plumbing/storer"
 	"github.com/go-git/go-git/v5/plumbing/transport/server"
 	"regexp"
 	// "github.com/go-git/go-git/v5/storage/memory"
@@ -27,13 +26,7 @@ import (
 	"github.com/go-git/go-git/v5/storage/filesystem"
 )
 
-type mySimpleLoader struct{}
 
-func (mySimpleLoader) Load(_ *transport.Endpoint) (storer.Storer, error) {
-	fs := filesystem.NewStorage(osfs.New("/Users/parthoberoi/Code/gitopia-wd/gitsmart/repos/hat.git"), cache.NewObjectLRUDefault()) // this does not work.
-	return fs, fs.Init()
-	// return memory.NewStorage(), nil // this works.
-}
 
 func newWriteFlusher(w http.ResponseWriter) io.Writer {
 	return writeFlusher{w.(interface {
@@ -369,13 +362,25 @@ func (s *Server) getInfoRefs(_ string, w http.ResponseWriter, r *Request) {
 		http.Error(w, "Not Found", 404)
 		return
 	}
+	fs := osfs.New(r.RepoPath)
+	_, err := fs.Stat(".git")
+	if err == nil {
+		fs, err = fs.Chroot(".git")
+		if err != nil {
+			return 
+		}
+	}
+	storage := filesystem.NewStorageWithOptions(fs, cache.NewObjectLRUDefault(), filesystem.Options{KeepDescriptors: true})
+	ep, _ := transport.NewEndpoint(r.RepoPath)
+	loader := server.MapLoader{}
+	loader[ep.String()] = storage
+	session := server.NewServer(loader)
 
-	session := server.NewServer(mySimpleLoader{})
 
 
 	switch rpc {
 	case "git-receive-pack":
-		ts, err := session.NewReceivePackSession(&transport.Endpoint{}, nil)
+		ts, err := session.NewReceivePackSession(ep, nil)
 		if err != nil {
 			logError(context, err)
 		}
@@ -396,7 +401,7 @@ func (s *Server) getInfoRefs(_ string, w http.ResponseWriter, r *Request) {
 		}
 
 	case "git-upload-pack":
-		ts, err := session.NewReceivePackSession(&transport.Endpoint{}, nil)
+		ts, err := session.NewReceivePackSession(ep, nil)
 		if err != nil {
 			logError(context, err)
 		}
@@ -455,7 +460,19 @@ func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
 	// 		return
 	// 	}
 	// }
-	session := server.NewServer(mySimpleLoader{})
+	fs := osfs.New(r.RepoPath)
+	_, err := fs.Stat(".git")
+	if err == nil {
+		fs, err = fs.Chroot(".git")
+		if err != nil {
+			return 
+		}
+	}
+	storage := filesystem.NewStorageWithOptions(fs, cache.NewObjectLRUDefault(), filesystem.Options{KeepDescriptors: true})
+	ep, _ := transport.NewEndpoint(r.RepoPath)
+	loader := server.MapLoader{}
+	loader[ep.String()] = storage
+	session := server.NewServer(loader)
 
 	w.Header().Add("Content-Type", fmt.Sprintf("application/x-%s-result", rpc))
 	w.Header().Add("Cache-Control", "no-cache")
@@ -463,8 +480,7 @@ func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
 
 	switch rpc {
 	case "git-receive-pack":
-
-		ts, err := session.NewReceivePackSession(&transport.Endpoint{}, nil)
+		ts, err := session.NewReceivePackSession(ep, nil)
 		if err != nil {
 			fmt.Println(err)
 		}
@@ -487,7 +503,7 @@ func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
 		}
 
 	case "git-upload-pack":
-		ts, err := session.NewUploadPackSession(&transport.Endpoint{}, nil)
+		ts, err := session.NewUploadPackSession(ep, nil)
 		if err != nil {
 			fmt.Println(err)
 		}
