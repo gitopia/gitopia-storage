@@ -566,7 +566,7 @@ func main() {
 
 	// Configure git service
 	service := New(Config{
-		Dir:        "/Users/parthoberoi/Code/gitopia-wd/gitsmart/repos",
+		Dir:        "/var/repos",
 		AutoCreate: true,
 	})
 
