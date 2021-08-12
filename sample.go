@@ -14,13 +14,19 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
-	// "time"
+
+	"regexp"
+	"time"
+
 	"github.com/go-git/go-billy/v5/osfs"
+	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/cache"
 	"github.com/go-git/go-git/v5/plumbing/format/pktline"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/protocol/packp"
 	"github.com/go-git/go-git/v5/plumbing/transport/server"
-	"regexp"
+
 	// "github.com/go-git/go-git/v5/storage/memory"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/storage/filesystem"
@@ -279,6 +285,59 @@ func (s *Server) findService(req *http.Request) (*service, string) {
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	logInfo("request", r.Method+" "+r.Host+r.URL.String())
 
+	// Serve loose git objects
+	if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/objects") {
+		defer r.Body.Close()
+
+		blocks := strings.Split(r.URL.Path, "/")
+
+		if len(blocks) != 4 {
+			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+			return
+		}
+
+		repositoryId := blocks[2]
+		objectHash := blocks[3]
+
+		RepoPath := path.Join(s.config.Dir, fmt.Sprintf("%s.git", repositoryId))
+		repo, err := git.PlainOpen(RepoPath)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+			return
+		}
+
+		hash := plumbing.NewHash(objectHash)
+		var blob *object.Blob
+		blob, err = repo.BlobObject(hash)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+
+		// Set header cache forever
+		now := time.Now().Unix()
+		expires := now + 31536000
+		w.Header().Set("Date", fmt.Sprintf("%d", now))
+		w.Header().Set("Expires", fmt.Sprintf("%d", expires))
+		w.Header().Set("Cache-Control", "public, max-age=31536000")
+
+		w.Header().Set("Content-Type", "application/octet-stream")
+
+		var br io.ReadCloser
+		var b []byte
+		br, err = blob.Reader()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		b, err = io.ReadAll(br)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		w.Write(b)
+
+		return
+	}
+
 	// Find the git subservice to handle the request
 	svc, repoUrlPath := s.findService(r)
 	if svc == nil {
@@ -367,7 +426,7 @@ func (s *Server) getInfoRefs(_ string, w http.ResponseWriter, r *Request) {
 	if err == nil {
 		fs, err = fs.Chroot(".git")
 		if err != nil {
-			return 
+			return
 		}
 	}
 	storage := filesystem.NewStorageWithOptions(fs, cache.NewObjectLRUDefault(), filesystem.Options{KeepDescriptors: true})
@@ -465,7 +524,7 @@ func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
 	if err == nil {
 		fs, err = fs.Chroot(".git")
 		if err != nil {
-			return 
+			return
 		}
 	}
 	storage := filesystem.NewStorageWithOptions(fs, cache.NewObjectLRUDefault(), filesystem.Options{KeepDescriptors: true})
