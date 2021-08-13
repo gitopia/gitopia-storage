@@ -3,6 +3,7 @@ package main
 import (
 	contextB "context"
 	// "compress/gzip"
+
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -12,18 +13,17 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
-
-	"regexp"
 	"time"
 
 	"github.com/go-git/go-billy/v5/osfs"
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/cache"
+	"github.com/go-git/go-git/v5/plumbing/format/objfile"
 	"github.com/go-git/go-git/v5/plumbing/format/pktline"
-	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/protocol/packp"
 	"github.com/go-git/go-git/v5/plumbing/transport/server"
 
@@ -31,8 +31,6 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/storage/filesystem"
 )
-
-
 
 func newWriteFlusher(w http.ResponseWriter) io.Writer {
 	return writeFlusher{w.(interface {
@@ -307,8 +305,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		hash := plumbing.NewHash(objectHash)
-		var blob *object.Blob
-		blob, err = repo.BlobObject(hash)
+		var obj plumbing.EncodedObject
+		obj, err = repo.Storer.EncodedObject(plumbing.AnyObject, hash)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
@@ -323,17 +321,25 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Content-Type", "application/octet-stream")
 
-		var br io.ReadCloser
-		var b []byte
-		br, err = blob.Reader()
+		var readCloser io.ReadCloser
+		readCloser, err = obj.Reader()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
-		b, err = io.ReadAll(br)
+
+		objWriter := objfile.NewWriter(w)
+
+		err = objWriter.WriteHeader(obj.Type(), obj.Size())
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
-		w.Write(b)
+
+		_, err = io.Copy(objWriter, readCloser)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		readCloser.Close()
+		objWriter.Close()
 
 		return
 	}
@@ -435,8 +441,6 @@ func (s *Server) getInfoRefs(_ string, w http.ResponseWriter, r *Request) {
 	loader[ep.String()] = storage
 	session := server.NewServer(loader)
 
-
-
 	switch rpc {
 	case "git-receive-pack":
 		ts, err := session.NewReceivePackSession(ep, nil)
@@ -480,7 +484,6 @@ func (s *Server) getInfoRefs(_ string, w http.ResponseWriter, r *Request) {
 			return
 		}
 	}
-
 
 	// cmd, pipe := gitCommand(s.config.GitPath, subCommand(rpc), "--stateless-rpc", "--advertise-refs", r.RepoPath)
 	// if err := cmd.Start(); err != nil {
