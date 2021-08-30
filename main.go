@@ -514,7 +514,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "public, max-age=31536000")
 		w.Header().Set("Content-Type", "text/plain")
 
-		w.Write([]byte(patch.String()))
+		switch blocks[1] {
+		case "diff":
+			w.Write([]byte(patch.String()))
+		case "diff-stat":
+			w.Write([]byte(patch.Stats().String()))
+		default:
+			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+		}
 
 		return
 	}
