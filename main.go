@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	contextB "context"
+	"encoding/json"
+
 	// "compress/gzip"
 
 	"fmt"
@@ -18,6 +21,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/everFinance/goar"
+	"github.com/everFinance/goar/types"
 	"github.com/go-git/go-billy/v5/osfs"
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -25,12 +30,23 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/format/objfile"
 	"github.com/go-git/go-git/v5/plumbing/format/pktline"
 	"github.com/go-git/go-git/v5/plumbing/protocol/packp"
+	"github.com/go-git/go-git/v5/plumbing/revlist"
 	"github.com/go-git/go-git/v5/plumbing/transport/server"
 
 	// "github.com/go-git/go-git/v5/storage/memory"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/storage/filesystem"
 )
+
+const (
+	arweaveGatewayURL = "http://35.247.189.120:1984"
+)
+
+type SaveToArweavePostBody struct {
+	RepositoryID    uint64 `json:"repository_id"`
+	LocalCommitSHA  string `json:"local_commit_sha"`
+	RemoteCommitSHA string `json:"remote_commit_sha"`
+}
 
 func newWriteFlusher(w http.ResponseWriter) io.Writer {
 	return writeFlusher{w.(interface {
@@ -321,25 +337,125 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Content-Type", "application/octet-stream")
 
-		var readCloser io.ReadCloser
-		readCloser, err = obj.Reader()
+		readCloser, err := obj.Reader()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
+		defer readCloser.Close()
 
 		objWriter := objfile.NewWriter(w)
+		defer objWriter.Close()
 
 		err = objWriter.WriteHeader(obj.Type(), obj.Size())
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
 
 		_, err = io.Copy(objWriter, readCloser)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
-		readCloser.Close()
-		objWriter.Close()
+
+		return
+	}
+
+	// Save objects to Arweave
+	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/save") {
+		defer r.Body.Close()
+
+		decoder := json.NewDecoder(r.Body)
+		var saveToArweavePostBody SaveToArweavePostBody
+		err := decoder.Decode(&saveToArweavePostBody)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+
+		RepoPath := path.Join(s.config.Dir, fmt.Sprintf("%v.git", saveToArweavePostBody.RepositoryID))
+		repo, err := git.PlainOpen(RepoPath)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+			return
+		}
+
+		prevBranchHash := plumbing.NewHash(saveToArweavePostBody.RemoteCommitSHA)
+		newBranchHash := plumbing.NewHash(saveToArweavePostBody.LocalCommitSHA)
+		hashes, err := revlist.Objects(repo.Storer, []plumbing.Hash{prevBranchHash, newBranchHash}, nil)
+
+		// Initialize arweave client
+		wallet, err := goar.NewWalletFromPath("./test-keyfile.json", arweaveGatewayURL)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		for _, hash := range hashes {
+			obj, err := repo.Storer.EncodedObject(plumbing.AnyObject, hash)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			readCloser, err := obj.Reader()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			defer readCloser.Close()
+
+			var buf bytes.Buffer
+			objWriter := objfile.NewWriter(&buf)
+			defer objWriter.Close()
+
+			err = objWriter.WriteHeader(obj.Type(), obj.Size())
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			_, err = io.Copy(objWriter, readCloser)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			// Upload object to Arweave
+			_, err = wallet.SendData(
+				buf.Bytes(),
+				[]types.Tag{
+					{
+						Name:  "App-Name",
+						Value: "gitopia",
+					},
+					{
+						Name:  "App-Version",
+						Value: "0.1.0",
+					},
+					{
+						Name:  "Object-Hash",
+						Value: hash.String(),
+					},
+				},
+			)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		// Mine Arweave block in testnet
+		arweaveMineURL := fmt.Sprintf("%s/mine", arweaveGatewayURL)
+		client := &http.Client{}
+		req, err := http.NewRequest("POST", arweaveMineURL, nil)
+		req.Header.Add("X-Network", "arweave.testnet")
+		resp, err := client.Do(req)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer resp.Body.Close()
 
 		return
 	}
@@ -628,7 +744,7 @@ func main() {
 
 	// Configure git service
 	service := New(Config{
-		Dir:        "/var/repos",
+		Dir:        "/Users/faza/Code/tmp",
 		AutoCreate: true,
 	})
 
