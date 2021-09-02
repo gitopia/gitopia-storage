@@ -29,6 +29,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/cache"
 	"github.com/go-git/go-git/v5/plumbing/format/objfile"
 	"github.com/go-git/go-git/v5/plumbing/format/pktline"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/protocol/packp"
 	"github.com/go-git/go-git/v5/plumbing/revlist"
 	"github.com/go-git/go-git/v5/plumbing/transport/server"
@@ -456,6 +457,71 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer resp.Body.Close()
+
+		return
+	}
+
+	// Calculate commit diff
+	if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/diff") {
+		defer r.Body.Close()
+
+		blocks := strings.Split(r.URL.Path, "/")
+
+		if len(blocks) != 5 {
+			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+			return
+		}
+
+		repositoryId := blocks[2]
+		objectHash1 := blocks[3]
+		objectHash2 := blocks[4]
+
+		RepoPath := path.Join(s.config.Dir, fmt.Sprintf("%s.git", repositoryId))
+		repo, err := git.PlainOpen(RepoPath)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+			return
+		}
+
+		hash1 := plumbing.NewHash(objectHash1)
+		hash2 := plumbing.NewHash(objectHash2)
+
+		var commit1, commit2 *object.Commit
+
+		commit1, err = object.GetCommit(repo.Storer, hash1)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		commit2, err = object.GetCommit(repo.Storer, hash2)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+
+		patch, err := commit1.Patch(commit2)
+		if err != nil {
+			logError("commit-diff", fmt.Errorf("can't generate diff"))
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		// Set header cache forever
+		now := time.Now().Unix()
+		expires := now + 31536000
+		w.Header().Set("Date", fmt.Sprintf("%d", now))
+		w.Header().Set("Expires", fmt.Sprintf("%d", expires))
+		w.Header().Set("Cache-Control", "public, max-age=31536000")
+		w.Header().Set("Content-Type", "text/plain")
+
+		switch blocks[1] {
+		case "diff":
+			w.Write([]byte(patch.String()))
+		case "diff-stat":
+			w.Write([]byte(patch.Stats().String()))
+		default:
+			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+		}
 
 		return
 	}
