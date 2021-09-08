@@ -46,7 +46,7 @@ import (
 )
 
 const (
-	apiURL            = "34.87.152.178:9090"
+	apiURL            = "34.87.90.147:9090"
 	arweaveGatewayURL = "http://35.247.189.120:1984"
 	branchPrefix      = "refs/heads/"
 	tagPrefix         = "refs/tags/"
