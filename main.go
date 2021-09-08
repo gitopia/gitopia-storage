@@ -6,6 +6,7 @@ import (
 	contextB "context"
 	"encoding/json"
 	"errors"
+	"strconv"
 
 	// "compress/gzip"
 
@@ -424,8 +425,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					http.Error(w, errors.New("fatal: mismatch in remote ref sha").Error(), http.StatusBadRequest)
 					return
 				}
-
-				hashes, err = revlist.Objects(repo.Storer, []plumbing.Hash{prevHash}, nil)
+				if !prevHash.IsZero() { // new branch
+					hashes, err = revlist.Objects(repo.Storer, []plumbing.Hash{prevHash}, nil)
+				}
 			}
 
 			if err != nil {
@@ -453,8 +455,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					http.Error(w, errors.New("fatal: mismatch in remote ref sha").Error(), http.StatusBadRequest)
 					return
 				}
-
-				hashes, err = revlist.Objects(repo.Storer, []plumbing.Hash{prevHash}, nil)
+				if !prevHash.IsZero() { // new tag
+					hashes, err = revlist.Objects(repo.Storer, []plumbing.Hash{prevHash}, nil)
+				}
 			}
 
 			if err != nil {
@@ -502,6 +505,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
+			repositoryId := strconv.FormatUint(body.RepositoryID, 10)
+
 			// Upload object to Arweave
 			_, err = wallet.SendData(
 				buf.Bytes(),
@@ -513,6 +518,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					{
 						Name:  "App-Version",
 						Value: "0.1.0",
+					},
+					{
+						Name:  "Repository-Id",
+						Value: repositoryId,
 					},
 					{
 						Name:  "Object-Hash",
