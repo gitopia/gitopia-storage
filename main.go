@@ -2,8 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	contextB "context"
 	"encoding/json"
+	"errors"
+	"strconv"
 
 	// "compress/gzip"
 
@@ -33,20 +36,27 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/protocol/packp"
 	"github.com/go-git/go-git/v5/plumbing/revlist"
 	"github.com/go-git/go-git/v5/plumbing/transport/server"
+	"google.golang.org/grpc"
 
 	// "github.com/go-git/go-git/v5/storage/memory"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/storage/filesystem"
+
+	gitopiaTypes "github.com/gitopia/gitopia/x/gitopia/types"
 )
 
 const (
+	apiURL            = "34.87.152.178:9090"
 	arweaveGatewayURL = "http://35.247.189.120:1984"
+	branchPrefix      = "refs/heads/"
+	tagPrefix         = "refs/tags/"
 )
 
 type SaveToArweavePostBody struct {
-	RepositoryID    uint64 `json:"repository_id"`
-	LocalCommitSHA  string `json:"local_commit_sha"`
-	RemoteCommitSHA string `json:"remote_commit_sha"`
+	RepositoryID     uint64 `json:"repository_id"`
+	RemoteRefName    string `json:"remote_ref_name"`
+	NewRemoteRefSha  string `json:"new_remote_ref_sha"`
+	PrevRemoteRefSha string `json:"prev_remote_ref_sha"`
 }
 
 func newWriteFlusher(w http.ResponseWriter) io.Writer {
@@ -368,23 +378,96 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 
 		decoder := json.NewDecoder(r.Body)
-		var saveToArweavePostBody SaveToArweavePostBody
-		err := decoder.Decode(&saveToArweavePostBody)
+		var body SaveToArweavePostBody
+		err := decoder.Decode(&body)
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
 		}
 
-		RepoPath := path.Join(s.config.Dir, fmt.Sprintf("%v.git", saveToArweavePostBody.RepositoryID))
+		RepoPath := path.Join(s.config.Dir, fmt.Sprintf("%v.git", body.RepositoryID))
 		repo, err := git.PlainOpen(RepoPath)
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 			return
 		}
 
-		prevBranchHash := plumbing.NewHash(saveToArweavePostBody.RemoteCommitSHA)
-		newBranchHash := plumbing.NewHash(saveToArweavePostBody.LocalCommitSHA)
-		hashes, err := revlist.Objects(repo.Storer, []plumbing.Hash{prevBranchHash, newBranchHash}, nil)
+		prevHash := plumbing.NewHash(body.PrevRemoteRefSha)
+
+		grpcConn, err := grpc.Dial(apiURL,
+			grpc.WithInsecure(),
+		)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer grpcConn.Close()
+
+		queryClient := gitopiaTypes.NewQueryClient(grpcConn)
+
+		var ignore []plumbing.Hash
+
+		branchAllRes, err := queryClient.BranchAll(context.Background(), &gitopiaTypes.QueryGetAllBranchRequest{
+			RepositoryId: body.RepositoryID,
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		for _, branch := range branchAllRes.Branches {
+			var hashes []plumbing.Hash
+
+			if body.RemoteRefName != branchPrefix+branch.Name {
+				hashes, err = revlist.Objects(repo.Storer, []plumbing.Hash{plumbing.NewHash(branch.Sha)}, nil)
+			} else {
+				if body.NewRemoteRefSha != branch.Sha {
+					http.Error(w, errors.New("fatal: mismatch in remote ref sha").Error(), http.StatusBadRequest)
+					return
+				}
+				if !prevHash.IsZero() { // new branch
+					hashes, err = revlist.Objects(repo.Storer, []plumbing.Hash{prevHash}, nil)
+				}
+			}
+
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			ignore = append(ignore, hashes...)
+		}
+
+		tagAllRes, err := queryClient.TagAll(context.Background(), &gitopiaTypes.QueryGetAllTagRequest{
+			RepositoryId: body.RepositoryID,
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		for _, tag := range tagAllRes.Tags {
+			var hashes []plumbing.Hash
+
+			if body.RemoteRefName != tagPrefix+tag.Name {
+				hashes, err = revlist.Objects(repo.Storer, []plumbing.Hash{plumbing.NewHash(tag.Sha)}, nil)
+			} else {
+				if body.NewRemoteRefSha != tag.Sha {
+					http.Error(w, errors.New("fatal: mismatch in remote ref sha").Error(), http.StatusBadRequest)
+					return
+				}
+				if !prevHash.IsZero() { // new tag
+					hashes, err = revlist.Objects(repo.Storer, []plumbing.Hash{prevHash}, nil)
+				}
+			}
+
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			ignore = append(ignore, hashes...)
+		}
+
+		hashes, err := revlist.Objects(repo.Storer, []plumbing.Hash{plumbing.NewHash(body.NewRemoteRefSha)}, ignore)
 
 		// Initialize arweave client
 		wallet, err := goar.NewWalletFromPath("./test-keyfile.json", arweaveGatewayURL)
@@ -422,6 +505,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
+			repositoryId := strconv.FormatUint(body.RepositoryID, 10)
+
 			// Upload object to Arweave
 			_, err = wallet.SendData(
 				buf.Bytes(),
@@ -433,6 +518,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					{
 						Name:  "App-Version",
 						Value: "0.1.0",
+					},
+					{
+						Name:  "Repository-Id",
+						Value: repositoryId,
 					},
 					{
 						Name:  "Object-Hash",
@@ -810,7 +899,7 @@ func main() {
 
 	// Configure git service
 	service := New(Config{
-		Dir:        "/Users/faza/Code/tmp",
+		Dir:        "/var/repos",
 		AutoCreate: true,
 	})
 
