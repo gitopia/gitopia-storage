@@ -7,6 +7,7 @@ require (
 	github.com/gitopia/gitopia v0.7.1-0.20210908110428-fc917f964514 // indirect
 	github.com/go-git/go-billy/v5 v5.3.1
 	github.com/go-git/go-git/v5 v5.4.2
+	github.com/spf13/viper v1.8.1 // indirect
 	google.golang.org/grpc v1.40.0 // indirect
 )
 

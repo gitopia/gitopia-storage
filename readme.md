@@ -12,6 +12,12 @@ make build
 
 ## Usage
 
+Make necessary changes in `config.toml` for production and also set the following environment variable.
+
+```sh
+export ENV=PRODUCTION
+```
+
 To start the server, execute the following command
 
 ```sh

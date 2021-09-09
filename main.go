@@ -22,7 +22,6 @@ import (
 	"regexp"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/everFinance/goar"
 	"github.com/everFinance/goar/types"
@@ -36,6 +35,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/protocol/packp"
 	"github.com/go-git/go-git/v5/plumbing/revlist"
 	"github.com/go-git/go-git/v5/plumbing/transport/server"
+	"github.com/spf13/viper"
 	"google.golang.org/grpc"
 
 	// "github.com/go-git/go-git/v5/storage/memory"
@@ -46,10 +46,8 @@ import (
 )
 
 const (
-	apiURL            = "34.87.90.147:9090"
-	arweaveGatewayURL = "http://35.247.189.120:1984"
-	branchPrefix      = "refs/heads/"
-	tagPrefix         = "refs/tags/"
+	branchPrefix = "refs/heads/"
+	tagPrefix    = "refs/tags/"
 )
 
 type SaveToArweavePostBody struct {
@@ -339,13 +337,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Set header cache forever
-		now := time.Now().Unix()
-		expires := now + 31536000
-		w.Header().Set("Date", fmt.Sprintf("%d", now))
-		w.Header().Set("Expires", fmt.Sprintf("%d", expires))
-		w.Header().Set("Cache-Control", "public, max-age=31536000")
-
 		w.Header().Set("Content-Type", "application/octet-stream")
 
 		readCloser, err := obj.Reader()
@@ -394,7 +385,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		prevHash := plumbing.NewHash(body.PrevRemoteRefSha)
 
-		grpcConn, err := grpc.Dial(apiURL,
+		grpcUrl := viper.GetString("gitopia_grpc_url")
+		grpcConn, err := grpc.Dial(grpcUrl,
 			grpc.WithInsecure(),
 		)
 		if err != nil {
@@ -470,7 +462,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		hashes, err := revlist.Objects(repo.Storer, []plumbing.Hash{plumbing.NewHash(body.NewRemoteRefSha)}, ignore)
 
 		// Initialize arweave client
-		wallet, err := goar.NewWalletFromPath("./test-keyfile.json", arweaveGatewayURL)
+		arweaveGatewayUrl := viper.GetString("arweave_gateway_url")
+		wallet, err := goar.NewWalletFromPath("./test-keyfile.json", arweaveGatewayUrl)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -536,7 +529,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Mine Arweave block in testnet
-		arweaveMineURL := fmt.Sprintf("%s/mine", arweaveGatewayURL)
+		arweaveMineURL := fmt.Sprintf("%s/mine", arweaveGatewayUrl)
 		client := &http.Client{}
 		req, err := http.NewRequest("POST", arweaveMineURL, nil)
 		req.Header.Add("X-Network", "arweave.testnet")
@@ -595,12 +588,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Set header cache forever
-		now := time.Now().Unix()
-		expires := now + 31536000
-		w.Header().Set("Date", fmt.Sprintf("%d", now))
-		w.Header().Set("Expires", fmt.Sprintf("%d", expires))
-		w.Header().Set("Cache-Control", "public, max-age=31536000")
 		w.Header().Set("Content-Type", "text/plain")
 
 		switch blocks[1] {
@@ -897,6 +884,17 @@ func gitCommand(name string, args ...string) (*exec.Cmd, io.Reader) {
 
 func main() {
 
+	viper.AddConfigPath(".")
+	if os.Getenv("ENV") == "PRODUCTION" {
+		viper.SetConfigName("config")
+	} else {
+		viper.SetConfigName("devconfig")
+	}
+	err := viper.ReadInConfig()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	// Configure git service
 	service := New(Config{
 		Dir:        "/var/repos",
@@ -905,7 +903,7 @@ func main() {
 
 	// Configure git server. Will create git repos path if it does not exist.
 	// If hooks are set, it will also update all repos with new version of hook scripts.
-	if err := service.Setup(); err != nil {
+	if err = service.Setup(); err != nil {
 		log.Fatal(err)
 	}
 
