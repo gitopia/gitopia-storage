@@ -57,6 +57,14 @@ type SaveToArweavePostBody struct {
 	PrevRemoteRefSha string `json:"prev_remote_ref_sha"`
 }
 
+type DiffRequestBody struct {
+	RepositoryID      uint64 `json:"repository_id"`
+	PreviousCommitSha string `json:"previous_commit_sha"`
+	CommitSha         string `json:"commit_sha"`
+	NextKey           string `json:"next_key"`
+	OnlyStat          bool   `json:"only_stat"`
+}
+
 func newWriteFlusher(w http.ResponseWriter) io.Writer {
 	return writeFlusher{w.(interface {
 		io.Writer
@@ -545,44 +553,85 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Calculate commit diff
-	if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/diff") {
+	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/diff") {
 		defer r.Body.Close()
+
+		decoder := json.NewDecoder(r.Body)
+		var body DiffRequestBody
+		err := decoder.Decode(&body)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
 
 		blocks := strings.Split(r.URL.Path, "/")
 
-		if len(blocks) != 5 {
+		if len(blocks) != 2 {
 			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
 			return
 		}
 
-		repositoryId := blocks[2]
-		objectHash1 := blocks[3]
-		objectHash2 := blocks[4]
-
-		RepoPath := path.Join(s.config.Dir, fmt.Sprintf("%s.git", repositoryId))
+		RepoPath := path.Join(s.config.Dir, fmt.Sprintf("%d.git", body.RepositoryID))
 		repo, err := git.PlainOpen(RepoPath)
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 			return
 		}
 
-		hash1 := plumbing.NewHash(objectHash1)
-		hash2 := plumbing.NewHash(objectHash2)
+		if body.CommitSha == "" {
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
 
-		var commit1, commit2 *object.Commit
+		PreviousCommitHash := plumbing.NewHash(body.PreviousCommitSha)
+		CommitHash := plumbing.NewHash(body.CommitSha)
 
-		commit1, err = object.GetCommit(repo.Storer, hash1)
+		var previousCommit, commit *object.Commit
+
+		if body.PreviousCommitSha == "" {
+			previousCommit = nil
+		} else {
+			previousCommit, err = object.GetCommit(repo.Storer, PreviousCommitHash)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			}
+		}
+
+		commit, err = object.GetCommit(repo.Storer, CommitHash)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
-		commit2, err = object.GetCommit(repo.Storer, hash2)
+
+		var previousTree, tree *object.Tree
+
+		if previousCommit == nil {
+			previousCommit, err = commit.Parent(0)
+			if err != nil {
+				previousTree = nil
+			} else {
+				previousTree, err = object.GetTree(repo.Storer, previousCommit.TreeHash)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusNotFound)
+					return
+				}
+			}
+		} else {
+			previousTree, err = object.GetTree(repo.Storer, previousCommit.TreeHash)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			}
+		}
+
+		tree, err = object.GetTree(repo.Storer, commit.TreeHash)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
 
-		patch, err := commit1.Patch(commit2)
+		patch, err := previousTree.Patch(tree)
 		if err != nil {
 			logError("commit-diff", fmt.Errorf("can't generate diff"))
 			w.WriteHeader(http.StatusBadRequest)
@@ -592,15 +641,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 
-		switch blocks[1] {
-		case "diff":
-			w.Write([]byte(patch.String()))
-		case "diff-stat":
+		if body.OnlyStat {
 			w.Write([]byte(patch.Stats().String()))
-		default:
-			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+			return
 		}
 
+		w.Write([]byte(patch.String()))
 		return
 	}
 
