@@ -3,6 +3,7 @@ module main
 go 1.16
 
 require (
+    github.com/cosmos/cosmos-sdk v0.42.4 // indirect
 	github.com/gitopia/gitopia v0.7.1-0.20210908110428-fc917f964514
 	github.com/gitopia/goar v0.0.0-20210912164232-a48c38a69bc2
 	github.com/go-git/go-billy/v5 v5.3.1

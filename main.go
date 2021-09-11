@@ -6,6 +6,7 @@ import (
 	contextB "context"
 	"encoding/json"
 	"errors"
+	"main/utils"
 	"strconv"
 
 	// "compress/gzip"
@@ -23,6 +24,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/cosmos/cosmos-sdk/types/query"
 	"github.com/gitopia/goar"
 	"github.com/gitopia/goar/types"
 	"github.com/go-git/go-billy/v5/osfs"
@@ -58,11 +60,22 @@ type SaveToArweavePostBody struct {
 }
 
 type DiffRequestBody struct {
-	RepositoryID      uint64 `json:"repository_id"`
-	PreviousCommitSha string `json:"previous_commit_sha"`
-	CommitSha         string `json:"commit_sha"`
-	NextKey           string `json:"next_key"`
-	OnlyStat          bool   `json:"only_stat"`
+	RepositoryID      uint64             `json:"repository_id"`
+	PreviousCommitSha string             `json:"previous_commit_sha"`
+	CommitSha         string             `json:"commit_sha"`
+	OnlyStat          bool               `json:"only_stat"`
+	Pagination        *query.PageRequest `json:"pagination"`
+}
+
+type DiffResponse struct {
+	Diff       []*Diff             `json:"diff,omitempty"`
+	Pagination *query.PageResponse `json:"pagination,omitempty"`
+}
+
+type Diff struct {
+	FileName string `json:"file_name,omitempty"`
+	Stat     string `json:"stat,omitempty"`
+	Patch    string `json:"patch,omitempty"`
 }
 
 func newWriteFlusher(w http.ResponseWriter) io.Writer {
@@ -631,22 +644,45 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		patch, err := previousTree.Patch(tree)
+		var changes object.Changes
+		changes, err = previousTree.Diff(tree)
 		if err != nil {
 			logError("commit-diff", fmt.Errorf("can't generate diff"))
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 
-		w.Header().Set("Content-Type", "text/plain")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-
 		if body.OnlyStat {
+			patch, err := changes.Patch()
+			if err != nil {
+				logError("commit-diff", fmt.Errorf("can't generate diff stats"))
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "text/plain")
+			w.Header().Set("Access-Control-Allow-Origin", "*")
 			w.Write([]byte(patch.Stats().String()))
 			return
 		}
 
-		w.Write([]byte(patch.String()))
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		var diffs []*Diff
+		pageRes, err := PaginateDiffResponse(changes, body.Pagination, 10, func(diff Diff) error {
+			diffs = append(diffs, &diff)
+			return nil
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+
+		diffResponse := DiffResponse{
+			Diff:       diffs,
+			Pagination: pageRes,
+		}
+		diffResponseJson, err := json.Marshal(diffResponse)
+		w.Write(diffResponseJson)
 		return
 	}
 
@@ -718,6 +754,102 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	svc.handler(svc.rpc, w, req)
+}
+
+func PaginateDiffResponse(
+	changes object.Changes,
+	pageRequest *query.PageRequest,
+	defaultLimit uint64,
+	onResult func(diff Diff) error,
+) (*query.PageResponse, error) {
+
+	totalDiffCount := uint64(len(changes))
+
+	// if the PageRequest is nil, use default PageRequest
+	if pageRequest == nil {
+		pageRequest = &query.PageRequest{}
+	}
+
+	offset := pageRequest.Offset
+	key := pageRequest.Key
+	limit := pageRequest.Limit
+	countTotal := pageRequest.CountTotal
+
+	if offset > 0 && key != nil {
+		return nil, fmt.Errorf("invalid request, either offset or key is expected, got both")
+	}
+
+	if limit == 0 {
+		limit = defaultLimit
+
+		// show total issue count when the limit is zero/not supplied
+		countTotal = true
+	}
+
+	if len(key) != 0 {
+
+		var count uint64
+		var nextKey []byte
+
+		for i := utils.BytesToUInt64(key); uint64(i) <= totalDiffCount; i++ {
+			if count == limit {
+				nextKey = utils.UInt64ToBytes(uint64(i))
+				break
+			}
+
+			patch, err := changes[i].Patch()
+			if err != nil {
+				return nil, err
+			}
+			diff := Diff{
+				FileName: changes[i].From.Name,
+				Stat:     patch.Stats().String(),
+				Patch:    patch.String(),
+			}
+			err = onResult(diff)
+			if err != nil {
+				return nil, err
+			}
+
+			count++
+		}
+
+		return &query.PageResponse{
+			NextKey: nextKey,
+		}, nil
+	}
+
+	end := offset + limit
+
+	var nextKey []byte
+
+	for i := offset; uint64(i) < totalDiffCount; i++ {
+		if uint64(i) < end {
+			patch, err := changes[i].Patch()
+			if err != nil {
+				return nil, err
+			}
+			diff := Diff{
+				FileName: changes[i].From.Name,
+				Stat:     patch.Stats().String(),
+				Patch:    patch.String(),
+			}
+			err = onResult(diff)
+			if err != nil {
+				return nil, err
+			}
+		} else if uint64(i) == end+1 {
+			nextKey = utils.UInt64ToBytes(uint64(i))
+			break
+		}
+	}
+
+	res := &query.PageResponse{NextKey: nextKey}
+	if countTotal {
+		res.Total = totalDiffCount
+	}
+
+	return res, nil
 }
 
 func (s *Server) getInfoRefs(_ string, w http.ResponseWriter, r *Request) {
