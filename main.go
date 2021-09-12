@@ -23,8 +23,8 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/everFinance/goar"
-	"github.com/everFinance/goar/types"
+	"github.com/gitopia/goar"
+	"github.com/gitopia/goar/types"
 	"github.com/go-git/go-billy/v5/osfs"
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -338,6 +338,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
 
 		readCloser, err := obj.Reader()
 		if err != nil {
@@ -589,6 +590,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
 
 		switch blocks[1] {
 		case "diff":
