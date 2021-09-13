@@ -72,9 +72,14 @@ type DiffResponse struct {
 }
 
 type Diff struct {
-	FileName string `json:"file_name,omitempty"`
-	Stat     string `json:"stat,omitempty"`
-	Patch    string `json:"patch,omitempty"`
+	FileName string   `json:"file_name,omitempty"`
+	Stat     DiffStat `json:"stat,omitempty"`
+	Patch    string   `json:"patch,omitempty"`
+}
+
+type DiffStat struct {
+	Addition uint64 `json:"addition"`
+	Deletion uint64 `json:"deletion"`
 }
 
 type PageRequest struct {
@@ -664,6 +669,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
 		if body.OnlyStat {
 			patch, err := changes.Patch()
 			if err != nil {
@@ -671,14 +679,21 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
-			w.Header().Set("Content-Type", "text/plain")
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Write([]byte(patch.Stats().String()))
+			addition := 0
+			deletion := 0
+			stats := patch.Stats()
+			for _, l := range stats {
+				addition += l.Addition
+				deletion += l.Deletion
+			}
+			diffStat := DiffStat{
+				Addition: uint64(addition),
+				Deletion: uint64(deletion),
+			}
+			diffStatJson, err := json.Marshal(diffStat)
+			w.Write(diffStatJson)
 			return
 		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 
 		var diffs []*Diff
 		pageRes, err := PaginateDiffResponse(changes, body.Pagination, 10, func(diff Diff) error {
@@ -775,7 +790,7 @@ func PaginateDiffResponse(
 	onResult func(diff Diff) error,
 ) (*PageResponse, error) {
 
-	totalDiffCount := uint64(len(changes))
+	totalDiffCount := uint64(changes.Len())
 
 	// if the PageRequest is nil, use default PageRequest
 	if pageRequest == nil {
@@ -813,9 +828,20 @@ func PaginateDiffResponse(
 			if err != nil {
 				return nil, err
 			}
+			addition := 0
+			deletion := 0
+			stats := patch.Stats()
+			for _, l := range stats {
+				addition += l.Addition
+				deletion += l.Deletion
+			}
+			diffStat := DiffStat{
+				Addition: uint64(addition),
+				Deletion: uint64(deletion),
+			}
 			diff := Diff{
-				FileName: changes[i].From.Name,
-				Stat:     patch.Stats().String(),
+				FileName: stats[0].Name,
+				Stat:     diffStat,
 				Patch:    patch.String(),
 			}
 			err = onResult(diff)
@@ -841,9 +867,20 @@ func PaginateDiffResponse(
 			if err != nil {
 				return nil, err
 			}
+			addition := 0
+			deletion := 0
+			stats := patch.Stats()
+			for _, l := range stats {
+				addition += l.Addition
+				deletion += l.Deletion
+			}
+			diffStat := DiffStat{
+				Addition: uint64(addition),
+				Deletion: uint64(deletion),
+			}
 			diff := Diff{
-				FileName: changes[i].From.Name,
-				Stat:     patch.Stats().String(),
+				FileName: stats[0].Name,
+				Stat:     diffStat,
 				Patch:    patch.String(),
 			}
 			err = onResult(diff)
