@@ -24,7 +24,6 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/cosmos/cosmos-sdk/types/query"
 	"github.com/gitopia/goar"
 	"github.com/gitopia/goar/types"
 	"github.com/go-git/go-billy/v5/osfs"
@@ -60,22 +59,35 @@ type SaveToArweavePostBody struct {
 }
 
 type DiffRequestBody struct {
-	RepositoryID      uint64             `json:"repository_id"`
-	PreviousCommitSha string             `json:"previous_commit_sha"`
-	CommitSha         string             `json:"commit_sha"`
-	OnlyStat          bool               `json:"only_stat"`
-	Pagination        *query.PageRequest `json:"pagination"`
+	RepositoryID      uint64       `json:"repository_id"`
+	PreviousCommitSha string       `json:"previous_commit_sha"`
+	CommitSha         string       `json:"commit_sha"`
+	OnlyStat          bool         `json:"only_stat"`
+	Pagination        *PageRequest `json:"pagination"`
 }
 
 type DiffResponse struct {
-	Diff       []*Diff             `json:"diff,omitempty"`
-	Pagination *query.PageResponse `json:"pagination,omitempty"`
+	Diff       []*Diff       `json:"diff,omitempty"`
+	Pagination *PageResponse `json:"pagination,omitempty"`
 }
 
 type Diff struct {
 	FileName string `json:"file_name,omitempty"`
 	Stat     string `json:"stat,omitempty"`
 	Patch    string `json:"patch,omitempty"`
+}
+
+type PageRequest struct {
+	Key        []byte `json:"key,omitempty"`
+	Offset     uint64 `json:"offset,omitempty"`
+	Limit      uint64 `json:"limit,omitempty"`
+	CountTotal bool   `json:"count_total,omitempty"`
+	Reverse    bool   `json:"reverse,omitempty"`
+}
+
+type PageResponse struct {
+	NextKey []byte `json:"next_key,omitempty"`
+	Total   uint64 `json:"total,omitempty"`
 }
 
 func newWriteFlusher(w http.ResponseWriter) io.Writer {
@@ -758,16 +770,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func PaginateDiffResponse(
 	changes object.Changes,
-	pageRequest *query.PageRequest,
+	pageRequest *PageRequest,
 	defaultLimit uint64,
 	onResult func(diff Diff) error,
-) (*query.PageResponse, error) {
+) (*PageResponse, error) {
 
 	totalDiffCount := uint64(len(changes))
 
 	// if the PageRequest is nil, use default PageRequest
 	if pageRequest == nil {
-		pageRequest = &query.PageRequest{}
+		pageRequest = &PageRequest{}
 	}
 
 	offset := pageRequest.Offset
@@ -814,7 +826,7 @@ func PaginateDiffResponse(
 			count++
 		}
 
-		return &query.PageResponse{
+		return &PageResponse{
 			NextKey: nextKey,
 		}, nil
 	}
@@ -844,7 +856,7 @@ func PaginateDiffResponse(
 		}
 	}
 
-	res := &query.PageResponse{NextKey: nextKey}
+	res := &PageResponse{NextKey: nextKey}
 	if countTotal {
 		res.Total = totalDiffCount
 	}
