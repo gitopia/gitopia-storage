@@ -531,16 +531,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Mine Arweave block in testnet
-		arweaveMineURL := fmt.Sprintf("%s/mine", arweaveGatewayUrl)
-		client := &http.Client{}
-		req, err := http.NewRequest("POST", arweaveMineURL, nil)
-		req.Header.Add("X-Network", "arweave.testnet")
-		resp, err := client.Do(req)
+		err = mineArweaveTestnetBlock()
 		if err != nil {
+			logError("error mining arweave testnet block", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
 		}
-		defer resp.Body.Close()
 
 		return
 	}
@@ -677,6 +672,20 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		diffResponseJson, err := json.Marshal(diffResponse)
 		w.Write(diffResponseJson)
+		return
+	}
+
+	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/upload") {
+		defer r.Body.Close()
+
+		uploadAttachmentHandler(w, r)
+		return
+	}
+
+	if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/attachments") {
+		defer r.Body.Close()
+
+		getAttachmentHandler(w, r)
 		return
 	}
 
@@ -975,7 +984,7 @@ func main() {
 
 	// Configure git service
 	service := New(Config{
-		Dir:        "var/repos",
+		Dir:        viper.GetString("git_dir"),
 		AutoCreate: true,
 	})
 

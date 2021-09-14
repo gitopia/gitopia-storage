@@ -1,2 +1,4 @@
 gitopia_grpc_url = "34.126.73.232:9090"
 arweave_gateway_url = "35.247.189.120:1984"
+git_dir = "/var/repos"
+attachment_dir = "/var/attachments"
