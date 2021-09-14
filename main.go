@@ -82,6 +82,11 @@ type DiffStat struct {
 	Deletion uint64 `json:"deletion"`
 }
 
+type DiffStatResponse struct {
+	Stat         DiffStat `json:"stat"`
+	FilesChanged uint64   `json:"files_changed"`
+}
+
 type PageRequest struct {
 	Key        []byte `json:"key,omitempty"`
 	Offset     uint64 `json:"offset,omitempty"`
@@ -690,8 +695,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				Addition: uint64(addition),
 				Deletion: uint64(deletion),
 			}
-			diffStatJson, err := json.Marshal(diffStat)
-			w.Write(diffStatJson)
+			DiffStatResponse := DiffStatResponse{
+				Stat:         diffStat,
+				FilesChanged: uint64(changes.Len()),
+			}
+			DiffStatResponseJson, err := json.Marshal(DiffStatResponse)
+			w.Write(DiffStatResponseJson)
 			return
 		}
 
