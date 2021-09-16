@@ -91,6 +91,7 @@ func GrabDiff(change object.Change) (res *Diff, err error) {
 	} else if from.Name == to.Name {
 		diffType += MODIFY.String()
 	} else if from.Name != to.Name {
+		fileName = change.From.Name + " -> " + change.To.Name
 		diffType += RENAME.String()
 	}
 
