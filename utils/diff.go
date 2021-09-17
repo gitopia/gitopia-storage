@@ -38,7 +38,8 @@ type Diff struct {
 	FileName string   `json:"file_name"`
 	Stat     DiffStat `json:"stat"`
 	Patch    string   `json:"patch"`
-	Type     string   `json:"type"`
+	Type     []string `json:"type"`
+	FileSize int64    `json:"file_size"`
 }
 
 type DiffStat struct {
@@ -65,34 +66,50 @@ func GrabDiff(change object.Change) (res *Diff, err error) {
 		deletion += l.Deletion
 	}
 
-	var fileName, diffType string
+	var fileName string
+	var diffType []string
+	var fileSize int64
 
 	from, to, err := change.Files()
-	if from != nil {
-		if ok, _ := from.IsBinary(); ok {
-			diffType = BINARY.String()
-		}
-		fileName = change.From.Name
-	}
-	if to != nil {
-		if ok, _ := to.IsBinary(); ok {
-			diffType = BINARY.String()
-		}
-		fileName = change.To.Name
-	}
 
 	if from == nil {
-		diffType += ADD.String()
-		if addition == 0 && deletion == 0 && diffType == ADD.String() {
-			diffType = EMPTY.String()
+		fileName = change.To.Name
+		diffType = append(diffType, ADD.String())
+		if ok, _ := to.IsBinary(); ok {
+			diffType = append(diffType, BINARY.String())
+		} else if addition == 0 && deletion == 0 {
+			diffType = append(diffType, EMPTY.String())
 		}
+		fileSize = to.Size
 	} else if to == nil {
-		diffType += DELETE.String()
+		fileName = change.From.Name
+		diffType = append(diffType, DELETE.String())
+		if ok, _ := from.IsBinary(); ok {
+			diffType = append(diffType, BINARY.String())
+		} else if addition == 0 && deletion == 0 {
+			diffType = append(diffType, EMPTY.String())
+		}
+		fileSize = from.Size
 	} else if from.Name == to.Name {
-		diffType += MODIFY.String()
+		fileName = change.From.Name
+		diffType = append(diffType, MODIFY.String())
+		if ok, _ := from.IsBinary(); ok {
+			diffType = append(diffType, BINARY.String())
+		} else if addition == 0 && deletion == 0 {
+			diffType = append(diffType, EMPTY.String())
+		}
+		fileSize = to.Size
 	} else if from.Name != to.Name {
 		fileName = change.From.Name + " -> " + change.To.Name
-		diffType += RENAME.String()
+		diffType = append(diffType, RENAME.String())
+		if ok, _ := from.IsBinary(); ok {
+			diffType = append(diffType, BINARY.String())
+		} else if addition == 0 && deletion == 0 {
+			diffType = append(diffType, EMPTY.String())
+		} else {
+			diffType = append(diffType, MODIFY.String())
+		}
+		fileSize = to.Size
 	}
 
 	diffStat := DiffStat{
@@ -104,6 +121,7 @@ func GrabDiff(change object.Change) (res *Diff, err error) {
 		Stat:     diffStat,
 		Patch:    patch.String(),
 		Type:     diffType,
+		FileSize: fileSize,
 	}
 	return &diff, nil
 }
