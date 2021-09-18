@@ -58,48 +58,6 @@ type SaveToArweavePostBody struct {
 	PrevRemoteRefSha string `json:"prev_remote_ref_sha"`
 }
 
-type DiffRequestBody struct {
-	RepositoryID      uint64       `json:"repository_id"`
-	PreviousCommitSha string       `json:"previous_commit_sha"`
-	CommitSha         string       `json:"commit_sha"`
-	OnlyStat          bool         `json:"only_stat"`
-	Pagination        *PageRequest `json:"pagination"`
-}
-
-type DiffResponse struct {
-	Diff       []*Diff       `json:"diff,omitempty"`
-	Pagination *PageResponse `json:"pagination,omitempty"`
-}
-
-type Diff struct {
-	FileName string   `json:"file_name,omitempty"`
-	Stat     DiffStat `json:"stat,omitempty"`
-	Patch    string   `json:"patch,omitempty"`
-}
-
-type DiffStat struct {
-	Addition uint64 `json:"addition"`
-	Deletion uint64 `json:"deletion"`
-}
-
-type DiffStatResponse struct {
-	Stat         DiffStat `json:"stat"`
-	FilesChanged uint64   `json:"files_changed"`
-}
-
-type PageRequest struct {
-	Key        []byte `json:"key,omitempty"`
-	Offset     uint64 `json:"offset,omitempty"`
-	Limit      uint64 `json:"limit,omitempty"`
-	CountTotal bool   `json:"count_total,omitempty"`
-	Reverse    bool   `json:"reverse,omitempty"`
-}
-
-type PageResponse struct {
-	NextKey []byte `json:"next_key,omitempty"`
-	Total   uint64 `json:"total,omitempty"`
-}
-
 func newWriteFlusher(w http.ResponseWriter) io.Writer {
 	return writeFlusher{w.(interface {
 		io.Writer
@@ -592,7 +550,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 
 		decoder := json.NewDecoder(r.Body)
-		var body DiffRequestBody
+		var body utils.DiffRequestBody
 		err := decoder.Decode(&body)
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
@@ -691,11 +649,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				addition += l.Addition
 				deletion += l.Deletion
 			}
-			diffStat := DiffStat{
+			diffStat := utils.DiffStat{
 				Addition: uint64(addition),
 				Deletion: uint64(deletion),
 			}
-			DiffStatResponse := DiffStatResponse{
+			DiffStatResponse := utils.DiffStatResponse{
 				Stat:         diffStat,
 				FilesChanged: uint64(changes.Len()),
 			}
@@ -704,8 +662,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		var diffs []*Diff
-		pageRes, err := PaginateDiffResponse(changes, body.Pagination, 10, func(diff Diff) error {
+		var diffs []*utils.Diff
+		pageRes, err := utils.PaginateDiffResponse(changes, body.Pagination, 10, func(diff utils.Diff) error {
 			diffs = append(diffs, &diff)
 			return nil
 		})
@@ -713,7 +671,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 		}
 
-		diffResponse := DiffResponse{
+		diffResponse := utils.DiffResponse{
 			Diff:       diffs,
 			Pagination: pageRes,
 		}
@@ -790,124 +748,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	svc.handler(svc.rpc, w, req)
-}
-
-func PaginateDiffResponse(
-	changes object.Changes,
-	pageRequest *PageRequest,
-	defaultLimit uint64,
-	onResult func(diff Diff) error,
-) (*PageResponse, error) {
-
-	totalDiffCount := uint64(changes.Len())
-
-	// if the PageRequest is nil, use default PageRequest
-	if pageRequest == nil {
-		pageRequest = &PageRequest{}
-	}
-
-	offset := pageRequest.Offset
-	key := pageRequest.Key
-	limit := pageRequest.Limit
-	countTotal := pageRequest.CountTotal
-
-	if offset > 0 && key != nil {
-		return nil, fmt.Errorf("invalid request, either offset or key is expected, got both")
-	}
-
-	if limit == 0 {
-		limit = defaultLimit
-
-		// show total issue count when the limit is zero/not supplied
-		countTotal = true
-	}
-
-	if len(key) != 0 {
-
-		var count uint64
-		var nextKey []byte
-
-		for i := utils.BytesToUInt64(key); uint64(i) <= totalDiffCount; i++ {
-			if count == limit {
-				nextKey = utils.UInt64ToBytes(uint64(i))
-				break
-			}
-
-			patch, err := changes[i].Patch()
-			if err != nil {
-				return nil, err
-			}
-			addition := 0
-			deletion := 0
-			stats := patch.Stats()
-			for _, l := range stats {
-				addition += l.Addition
-				deletion += l.Deletion
-			}
-			diffStat := DiffStat{
-				Addition: uint64(addition),
-				Deletion: uint64(deletion),
-			}
-			diff := Diff{
-				FileName: stats[0].Name,
-				Stat:     diffStat,
-				Patch:    patch.String(),
-			}
-			err = onResult(diff)
-			if err != nil {
-				return nil, err
-			}
-
-			count++
-		}
-
-		return &PageResponse{
-			NextKey: nextKey,
-		}, nil
-	}
-
-	end := offset + limit
-
-	var nextKey []byte
-
-	for i := offset; uint64(i) < totalDiffCount; i++ {
-		if uint64(i) < end {
-			patch, err := changes[i].Patch()
-			if err != nil {
-				return nil, err
-			}
-			addition := 0
-			deletion := 0
-			stats := patch.Stats()
-			for _, l := range stats {
-				addition += l.Addition
-				deletion += l.Deletion
-			}
-			diffStat := DiffStat{
-				Addition: uint64(addition),
-				Deletion: uint64(deletion),
-			}
-			diff := Diff{
-				FileName: stats[0].Name,
-				Stat:     diffStat,
-				Patch:    patch.String(),
-			}
-			err = onResult(diff)
-			if err != nil {
-				return nil, err
-			}
-		} else if uint64(i) == end+1 {
-			nextKey = utils.UInt64ToBytes(uint64(i))
-			break
-		}
-	}
-
-	res := &PageResponse{NextKey: nextKey}
-	if countTotal {
-		res.Total = totalDiffCount
-	}
-
-	return res, nil
 }
 
 func (s *Server) getInfoRefs(_ string, w http.ResponseWriter, r *Request) {
@@ -1135,7 +975,7 @@ func main() {
 
 	// Configure git service
 	service := New(Config{
-		Dir:        "/var/repos",
+		Dir:        "var/repos",
 		AutoCreate: true,
 	})
 
