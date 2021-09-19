@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -11,7 +12,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/gitopia/gitopia/x/gitopia/types"
 	"github.com/spf13/viper"
+	"google.golang.org/grpc"
 )
 
 type uploadAttachmentResponse struct {
@@ -71,12 +74,41 @@ func uploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 func getAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 	blocks := strings.Split(r.URL.Path, "/")
 
-	if len(blocks) != 3 {
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+	if len(blocks) != 6 {
+		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
 		return
 	}
 
-	sha := blocks[2]
+	address := blocks[2]
+	repositoryName := blocks[3]
+	tagName := blocks[4]
+	fileName := blocks[5]
+
+	grpcUrl := viper.GetString("gitopia_grpc_url")
+	grpcConn, err := grpc.Dial(grpcUrl,
+		grpc.WithInsecure(),
+	)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer grpcConn.Close()
+
+	queryClient := types.NewQueryClient(grpcConn)
+
+	res, err := queryClient.RepositoryRelease(context.Background(), &types.QueryGetRepositoryReleaseRequest{
+		UserId:         address,
+		RepositoryName: repositoryName,
+		TagName:        tagName,
+	})
+
+	i, exists := ReleaseAttachmentExists(res.Release.Attachments, fileName)
+	if !exists {
+		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+		return
+	}
+
+	sha := res.Release.Attachments[i].Sha
 	filePath := fmt.Sprintf("%s/%s", viper.GetString("attachment_dir"), sha)
 	file, err := os.Open(filePath)
 	if err != nil {

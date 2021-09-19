@@ -682,7 +682,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/attachments") {
+	if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/releases") {
 		defer r.Body.Close()
 
 		getAttachmentHandler(w, r)

@@ -31,7 +31,7 @@ The server will be listening at port `5000`
 - `GET` /objects/<repository_id>/<object_hash> : get loose git object
 - `POST` /save : save newly pushed objects to Arweave
 - `POST` /upload : upload release/issue/pull_request/comment attachments
-- `GET` /attachments/<sha> : get attachment
+- `GET` /releases/<address>/<repositoryName>/<tagName>/<fileName> : get attachment
 - `GET` /info/refs
 - `POST` /git-upload-pack
 - `POST` /git-receive-pack

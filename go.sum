@@ -218,6 +218,10 @@ github.com/gitopia/gitopia v0.7.1-0.20210908110428-fc917f964514 h1:+e/5GIMHivlPD
 github.com/gitopia/gitopia v0.7.1-0.20210908110428-fc917f964514/go.mod h1:dNVXmTrslR7J20yRTu6DwfoVhgyG8zW1Oo9C5zTuLcI=
 github.com/gitopia/gitopia v0.9.0 h1:yQy1xWeZI/Da6k5xh79RQhHouoCBf2MuuqdATCOIa9M=
 github.com/gitopia/gitopia v0.9.0/go.mod h1:dNVXmTrslR7J20yRTu6DwfoVhgyG8zW1Oo9C5zTuLcI=
+github.com/gitopia/gitopia v0.10.0-rc.3 h1:wA0K7jHxW/sKGhOVTVnebKyJUc8dvZnNQGlgf+MoXHM=
+github.com/gitopia/gitopia v0.10.0-rc.3/go.mod h1:dNVXmTrslR7J20yRTu6DwfoVhgyG8zW1Oo9C5zTuLcI=
+github.com/gitopia/gitopia v0.10.0 h1:MQV90FrbLJ5Ti9we4cUzHUQs0tBU+jC5k5ooBHRmIGM=
+github.com/gitopia/gitopia v0.10.0/go.mod h1:dNVXmTrslR7J20yRTu6DwfoVhgyG8zW1Oo9C5zTuLcI=
 github.com/gitopia/goar v0.0.0-20210912164232-a48c38a69bc2 h1:j8wY0gyxrl0fkY0eXI9UwJDntosPD2EHUhOOtR+Mu30=
 github.com/gitopia/goar v0.0.0-20210912164232-a48c38a69bc2/go.mod h1:HstGs3h4mFqmP5tvLCTkZsPAjSPaj7drI5ff5qfNxKA=
 github.com/gliderlabs/ssh v0.2.2 h1:6zsha5zo/TWhRhwqCD3+EarCAgZ2yN28ipRnGPnwkI0=

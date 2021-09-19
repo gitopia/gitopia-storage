@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/gitopia/gitopia/x/gitopia/types"
 	"github.com/spf13/viper"
 )
 
@@ -20,4 +21,13 @@ func mineArweaveTestnetBlock() error {
 	defer resp.Body.Close()
 
 	return nil
+}
+
+func ReleaseAttachmentExists(attachments []*types.Attachment, name string) (int, bool) {
+	for i, v := range attachments {
+		if v.Name == name {
+			return i, true
+		}
+	}
+	return 0, false
 }
