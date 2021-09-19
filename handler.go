@@ -72,9 +72,12 @@ func uploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func getAttachmentHandler(w http.ResponseWriter, r *http.Request) {
-	blocks := strings.Split(r.URL.Path, "/")
+	fileName := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
 
-	if len(blocks) != 6 {
+	releaseURL := strings.TrimSuffix(r.URL.Path, "/"+fileName)
+	blocks := strings.SplitN(releaseURL, "/", 5)
+
+	if len(blocks) != 5 {
 		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
 		return
 	}
@@ -82,7 +85,6 @@ func getAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 	address := blocks[2]
 	repositoryName := blocks[3]
 	tagName := blocks[4]
-	fileName := blocks[5]
 
 	grpcUrl := viper.GetString("gitopia_grpc_url")
 	grpcConn, err := grpc.Dial(grpcUrl,
@@ -101,6 +103,11 @@ func getAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 		RepositoryName: repositoryName,
 		TagName:        tagName,
 	})
+	if err != nil {
+		logError("cannot find release", err)
+		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+		return
+	}
 
 	i, exists := ReleaseAttachmentExists(res.Release.Attachments, fileName)
 	if !exists {
