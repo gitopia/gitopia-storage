@@ -1,4 +1,4 @@
-gitopia_grpc_url = "34.126.73.232:9090"
-arweave_gateway_url = "35.247.189.120:1984"
+gitopia_grpc_url = "grpc.testnet.gitopia.com"
+arweave_gateway_url = "arweave.testnet.gitopia.com"
 git_dir = "/var/repos"
 attachment_dir = "/var/attachments"
