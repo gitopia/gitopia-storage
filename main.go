@@ -36,6 +36,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/protocol/packp"
 	"github.com/go-git/go-git/v5/plumbing/revlist"
 	"github.com/go-git/go-git/v5/plumbing/transport/server"
+	"github.com/rs/cors"
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
 
@@ -994,10 +995,13 @@ func main() {
 		log.Fatal(err)
 	}
 
-	http.Handle("/", service)
+	mux := http.NewServeMux()
+
+	mux.Handle("/", service)
+	handler := cors.Default().Handler(mux)
 
 	// Start HTTP server
-	if err := http.ListenAndServe(":5000", nil); err != nil {
+	if err := http.ListenAndServe(":5000", handler); err != nil {
 		log.Fatal(err)
 	}
 }
