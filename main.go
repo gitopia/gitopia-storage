@@ -690,6 +690,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/fork") {
+		defer r.Body.Close()
+
+		s.forkRepositoryHandler(w, r)
+		return
+	}
+
 	// Find the git subservice to handle the request
 	svc, repoUrlPath := s.findService(r)
 	if svc == nil {

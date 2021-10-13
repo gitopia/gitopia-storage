@@ -10,9 +10,11 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"path"
 	"strings"
 
 	"github.com/gitopia/gitopia/x/gitopia/types"
+	"github.com/go-git/go-git/v5"
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
 )
@@ -20,6 +22,11 @@ import (
 type uploadAttachmentResponse struct {
 	Sha  string `json:"sha"`
 	Size int64  `json:"size"`
+}
+
+type forkRepositoryPostBody struct {
+	SourceRepositoryID uint64 `json:"source_repository_id"`
+	TargetRepositoryID uint64 `json:"target_repository_id"`
 }
 
 func uploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
@@ -129,6 +136,38 @@ func getAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+
+	return
+}
+
+func (s *Server) forkRepositoryHandler(w http.ResponseWriter, r *http.Request) {
+	decoder := json.NewDecoder(r.Body)
+	var body forkRepositoryPostBody
+	err := decoder.Decode(&body)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	sourceRepoPath := path.Join(s.config.Dir, fmt.Sprintf("%v.git", body.SourceRepositoryID))
+	targetRepoPath := path.Join(s.config.Dir, fmt.Sprintf("%v.git", body.TargetRepositoryID))
+	repo, err := git.PlainClone(targetRepoPath, true, &git.CloneOptions{
+		URL: sourceRepoPath,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Create alternates file.
+	altpath := path.Join(targetRepoPath, "objects", "info", "alternates")
+	f, err := os.Open(altpath)
+
+	f.Write([]byte(path.Join(sourceRepoPath, "objects")))
+	f.Close()
+
+	// Remove all git objects
+	repo.RepackObjects(&git.RepackConfig{})
 
 	return
 }
