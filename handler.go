@@ -149,6 +149,11 @@ func (s *Server) forkRepositoryHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if body.TargetRepositoryID == 0 {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
 	sourceRepoPath := path.Join(s.config.Dir, fmt.Sprintf("%v.git", body.SourceRepositoryID))
 	targetRepoPath := path.Join(s.config.Dir, fmt.Sprintf("%v.git", body.TargetRepositoryID))
 	repo, err := git.PlainClone(targetRepoPath, true, &git.CloneOptions{
