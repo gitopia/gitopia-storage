@@ -53,6 +53,9 @@ func uploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 	filePath := fmt.Sprintf("%s/%s", attachmentDir, shaString)
 	localFile, err := os.Create(filePath)
 	defer localFile.Close()
+
+	tmpFile.Seek(0, io.SeekStart)
+
 	_, err = io.Copy(localFile, tmpFile)
 	if err != nil {
 		logError("cannot copy from temp file to attachment dir", err)
