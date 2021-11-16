@@ -1,0 +1,58 @@
+openapi: "3.0.0"
+info:
+  version: 0.3.0
+  title: git server
+servers:
+  - url: http://localhost:5000
+paths:
+  /objects/{repositoryId}/{objectHash}:
+    get:
+      summary: Get a loose git object
+      operationId: getObject
+      parameters:
+        - name: repositoryId
+          in: path
+          description: ID of the repository
+          required: true
+          schema:
+            type: integer
+            format: uint64
+            example: 1
+        - name: objectHash
+          in: path
+          description: Hash of the git object
+          required: true
+          schema:
+            type: string
+            example: 90181d7cd2c04f326af077e28587bb1e8c6d4cb5
+      responses:
+        '200':
+          description: A loose git object
+        '400':
+          description: Bad Request
+        default:
+          description: unexpected error
+  /fork:
+    post:
+      summary: Fork a repository
+      operationId: forkRepository
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                source_repository_id:
+                  type: integer
+                  example: 1
+                target_repository_id:
+                  type: integer
+                  example: 2
+      responses:
+        '200':
+          description: Successful fork
+        '400':
+          description: Bad Request
+        default:
+          description: unexpected error
