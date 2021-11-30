@@ -26,9 +26,9 @@ paths:
             type: string
             example: 90181d7cd2c04f326af077e28587bb1e8c6d4cb5
       responses:
-        '200':
+        "200":
           description: A loose git object
-        '400':
+        "400":
           description: Bad Request
         default:
           description: unexpected error
@@ -50,9 +50,84 @@ paths:
                   type: integer
                   example: 2
       responses:
-        '200':
+        "200":
           description: Successful fork
-        '400':
+        "400":
+          description: Bad Request
+        default:
+          description: unexpected error
+  /pull/commits:
+    post:
+      summary: Commits between base repo and head repo
+      operationId: pullRequestCommits
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                base_repository_id:
+                  type: integer
+                  example: 1
+                head_repository_id:
+                  type: integer
+                  example: 2
+                base_branch:
+                  type: string
+                  example: master
+                head_branch:
+                  type: string
+                  example: master
+      responses:
+        "200":
+          description: Successful request
+        "400":
+          description: Bad Request
+        default:
+          description: unexpected error
+  /pull/merge:
+    post:
+      summary: Merge pull request
+      operationId: pullRequestMerge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                base_repository_id:
+                  type: integer
+                  example: 1
+                head_repository_id:
+                  type: integer
+                  example: 2
+                base_branch:
+                  type: string
+                  example: master
+                head_branch:
+                  type: string
+                  example: master
+                merge_style:
+                  type: string
+                  example: merge
+                user_name:
+                  type: string
+                  example: name
+                user_email:
+                  type: string
+                  example: email
+                sender:
+                  type: string
+                  example: gitopia1pwk0f2mhwurtnuy22hp2tyr5443ewlr8swsraq
+                pull_request_iid:
+                  type: integer
+                  example: 12
+      responses:
+        "200":
+          description: Successful request
+        "400":
           description: Bad Request
         default:
           description: unexpected error

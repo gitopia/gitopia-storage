@@ -8,13 +8,17 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path"
+	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/gitopia/git-server/utils"
 	"github.com/gitopia/gitopia/x/gitopia/types"
-	"github.com/go-git/go-git/v5"
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
 )
@@ -159,23 +163,259 @@ func (s *Server) forkRepositoryHandler(w http.ResponseWriter, r *http.Request) {
 
 	sourceRepoPath := path.Join(s.config.Dir, fmt.Sprintf("%v.git", body.SourceRepositoryID))
 	targetRepoPath := path.Join(s.config.Dir, fmt.Sprintf("%v.git", body.TargetRepositoryID))
-	repo, err := git.PlainClone(targetRepoPath, true, &git.CloneOptions{
-		URL: sourceRepoPath,
-	})
+	cmd := exec.Command("git", "clone", "--shared", sourceRepoPath, targetRepoPath)
+	out, err := cmd.Output()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Println("Unable to fork repository: %s", string(out))
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+	}
+
+	return
+}
+
+func (s *Server) pullRequestCommitsHandler(w http.ResponseWriter, r *http.Request) {
+	decoder := json.NewDecoder(r.Body)
+	var body utils.PullRequestCommitsPostBody
+	err := decoder.Decode(&body)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 
-	// Create alternates file.
-	altpath := path.Join(targetRepoPath, "objects", "info", "alternates")
-	f, err := os.Open(altpath)
+	quarantineRepoPath, err := utils.CreateQuarantineRepo(body.BaseRepositoryID, body.HeadRepositoryID, body.BaseBranch, body.HeadBranch)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	defer os.RemoveAll(quarantineRepoPath)
 
-	f.Write([]byte(path.Join(sourceRepoPath, "objects")))
-	f.Close()
+	baseBranch := fmt.Sprintf("origin/%s", body.BaseBranch)
+	headBranch := fmt.Sprintf("head_repo/%s", body.HeadBranch)
+	cmd := exec.Command("git", "rev-list", headBranch, fmt.Sprintf("^%s", baseBranch))
+	cmd.Dir = quarantineRepoPath
+	out, err := cmd.Output()
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
 
-	// Remove all git objects
-	repo.RepackObjects(&git.RepackConfig{})
+	logs := string(out)
+	logs = strings.TrimSpace(logs)
+	if len(logs) == 0 {
+		json.NewEncoder(w).Encode([]string{})
+		return
+	}
 
-	return
+	commitShas := strings.Split(logs, "\n")
+	json.NewEncoder(w).Encode(commitShas)
+}
+
+func (s *Server) pullRequestMergeHandler(w http.ResponseWriter, r *http.Request) {
+
+	decoder := json.NewDecoder(r.Body)
+	var body utils.PullRequestMergePostBody
+	err := decoder.Decode(&body)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	message := fmt.Sprintf("Merge pull request #%v from %s/%s", body.PullRequestIID, body.Sender, body.HeadBranch)
+
+	quarantineRepoPath, err := utils.CreateQuarantineRepo(body.BaseRepositoryID, body.HeadRepositoryID, body.BaseBranch, body.HeadBranch)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	defer os.RemoveAll(quarantineRepoPath)
+
+	baseBranch := "base"
+	trackingBranch := "tracking"
+	stagingBranch := "staging"
+
+	// Read base branch index
+	cmd := exec.Command("git", "read-tree", "HEAD")
+	cmd.Dir = quarantineRepoPath
+	out, err := cmd.Output()
+	if err != nil {
+		log.Printf("git read-tree HEAD: %v\n%s\n", err, string(out))
+		http.Error(w, fmt.Sprintf("Unable to read base branch in to the index: %v\n%s\n", err, string(out)), http.StatusInternalServerError)
+		return
+	}
+
+	commitTimeStr := time.Now().Format(time.RFC3339)
+
+	// Because this may call hooks we should pass in the environment
+	env := append(os.Environ(),
+		"GIT_AUTHOR_NAME="+body.UserName,
+		"GIT_AUTHOR_EMAIL="+body.UserEmail,
+		"GIT_AUTHOR_DATE="+commitTimeStr,
+		"GIT_COMMITTER_NAME="+body.UserName,
+		"GIT_COMMITTER_EMAIL="+body.UserEmail,
+		"GIT_COMMITTER_DATE="+commitTimeStr,
+	)
+
+	// Merge commits.
+	switch body.MergeStyle {
+	case utils.MergeStyleMerge:
+		cmd := exec.Command("git", "merge", "--no-ff", "--no-commit", trackingBranch)
+		if err := utils.RunMergeCommand(&body, cmd, quarantineRepoPath); err != nil {
+			log.Printf("Unable to merge tracking into base: %v\n", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if err := utils.CommitAndSignNoAuthor(&body, message, "", quarantineRepoPath, env); err != nil {
+			log.Printf("Unable to make final commit: %v\n", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	case utils.MergeStyleRebase:
+		fallthrough
+	case utils.MergeStyleRebaseUpdate:
+		fallthrough
+	case utils.MergeStyleRebaseMerge:
+		// Checkout head branch
+		cmd = exec.Command("git", "checkout", "-b", stagingBranch, trackingBranch)
+		cmd.Dir = quarantineRepoPath
+		out, err = cmd.Output()
+		if err != nil {
+			err = fmt.Errorf("git checkout base prior to merge post staging rebase  [%v:%s -> %v:%s]: %v\n%s", body.HeadRepositoryID, body.HeadBranch, body.BaseRepositoryID, body.BaseBranch, err, string(out))
+			log.Println(err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// Rebase before merging
+		cmd = exec.Command("git", "rebase", baseBranch)
+		cmd.Dir = quarantineRepoPath
+		out, err = cmd.Output()
+		if err != nil {
+			// Rebase will leave a REBASE_HEAD file in .git if there is a conflict
+			if _, statErr := os.Stat(filepath.Join(quarantineRepoPath, ".git", "REBASE_HEAD")); statErr == nil {
+				var commitSha string
+				ok := false
+				failingCommitPaths := []string{
+					filepath.Join(quarantineRepoPath, ".git", "rebase-apply", "original-commit"), // Git < 2.26
+					filepath.Join(quarantineRepoPath, ".git", "rebase-merge", "stopped-sha"),     // Git >= 2.26
+				}
+				for _, failingCommitPath := range failingCommitPaths {
+					if _, statErr := os.Stat(filepath.Join(failingCommitPath)); statErr == nil {
+						commitShaBytes, readErr := os.ReadFile(filepath.Join(failingCommitPath))
+						if readErr != nil {
+							// Abandon this attempt to handle the error
+							err = fmt.Errorf("git rebase staging on to base [%v:%s -> %v:%s]: %v\n%s", body.HeadRepositoryID, body.HeadBranch, body.BaseRepositoryID, body.BaseBranch, err, string(out))
+						}
+						commitSha = strings.TrimSpace(string(commitShaBytes))
+						ok = true
+						break
+					}
+				}
+				if !ok {
+					err = fmt.Errorf("git rebase staging on to base [%v:%s -> %v:%s]: %v\n%s", body.HeadRepositoryID, body.HeadBranch, body.BaseRepositoryID, body.BaseBranch, err, string(out))
+					log.Println(out)
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				err = fmt.Errorf("RebaseConflict at %s [%v:%s -> %v:%s]: %v\n%s", commitSha, body.HeadRepositoryID, body.HeadBranch, body.BaseRepositoryID, body.BaseBranch, err, string(out))
+				log.Println(err)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			err = fmt.Errorf("git rebase staging on to base [%v:%s -> %v:%s]: %v\n%s", body.HeadRepositoryID, body.HeadBranch, body.BaseRepositoryID, body.BaseBranch, err, string(out))
+			log.Println(err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// not need merge, just update by rebase. so skip
+		if body.MergeStyle == utils.MergeStyleRebaseUpdate {
+			break
+		}
+
+		// Checkout base branch again
+		cmd = exec.Command("git", "checkout", baseBranch)
+		cmd.Dir = quarantineRepoPath
+		out, err = cmd.Output()
+		if err != nil {
+			err = fmt.Errorf("git checkout base prior to merge post staging rebase  [%v:%s -> %v:%s]: %v\n%s", body.HeadRepositoryID, body.HeadBranch, body.BaseRepositoryID, body.BaseBranch, err, string(out))
+			log.Println(err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		cmd = exec.Command("git", "merge")
+		if body.MergeStyle == utils.MergeStyleRebase {
+			cmd.Args = append(cmd.Args, "--ff-only")
+		} else {
+			cmd.Args = append(cmd.Args, "--no-ff", "--no-commit")
+		}
+		cmd.Args = append(cmd.Args, stagingBranch)
+
+		// Prepare merge with commit
+		if err := utils.RunMergeCommand(&body, cmd, quarantineRepoPath); err != nil {
+			log.Printf("Unable to merge staging into base: %v\n", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if body.MergeStyle == utils.MergeStyleRebaseMerge {
+			if err := utils.CommitAndSignNoAuthor(&body, message, "", quarantineRepoPath, env); err != nil {
+				log.Printf("Unable to make final commit: %v\n", err)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+	case utils.MergeStyleSquash:
+		// Merge with squash
+		cmd := exec.Command("git", "merge", "--squash", trackingBranch)
+		if err := utils.RunMergeCommand(&body, cmd, quarantineRepoPath); err != nil {
+			log.Printf("Unable to merge --squash tracking into base: %v\n", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		cmd = exec.Command("git", "commit", fmt.Sprintf("--author='%s <%s>'", body.UserName, body.UserEmail), "-m", message)
+		cmd.Env = env
+		cmd.Dir = quarantineRepoPath
+		out, err = cmd.Output()
+		if err != nil {
+			err = fmt.Errorf("git commit [%v:%s -> %v:%s]: %v\n%s", body.HeadRepositoryID, body.HeadBranch, body.BaseRepositoryID, body.BaseBranch, err, string(out))
+		}
+
+	default:
+		err = fmt.Errorf("Invalid merge style: %v", body.MergeStyle)
+		log.Println(err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	env = append(os.Environ(),
+		"GIT_AUTHOR_NAME="+body.UserName,
+		"GIT_AUTHOR_EMAIL="+body.UserEmail,
+		"GIT_COMMITTER_NAME="+body.UserName,
+		"GIT_COMMITTER_EMAIL="+body.UserEmail)
+
+	var pushCmd *exec.Cmd
+	if body.MergeStyle == utils.MergeStyleRebaseUpdate {
+		// force push the rebase result to head brach
+		pushCmd = exec.Command("git", "push", "-f", "head_repo", stagingBranch+":refs/heads/"+body.HeadBranch)
+	} else {
+		pushCmd = exec.Command("git", "push", "origin", baseBranch+":refs/heads/"+body.BaseBranch)
+	}
+
+	// Push back to upstream.
+	pushCmd.Env = env
+	pushCmd.Dir = quarantineRepoPath
+	out, err = pushCmd.Output()
+	if err != nil {
+		if strings.Contains(string(out), "non-fast-forward") {
+
+		} else if strings.Contains(string(out), "! [remote rejected]") {
+
+		}
+		err = fmt.Errorf("git push: %s", string(out))
+		log.Println(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+
 }

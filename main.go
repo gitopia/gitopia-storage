@@ -6,8 +6,9 @@ import (
 	contextB "context"
 	"encoding/json"
 	"errors"
-	"main/utils"
 	"strconv"
+
+	"github.com/gitopia/git-server/utils"
 
 	// "compress/gzip"
 
@@ -553,13 +554,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		blocks := strings.Split(r.URL.Path, "/")
-
-		if len(blocks) != 2 {
-			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
-			return
-		}
-
 		RepoPath := path.Join(s.config.Dir, fmt.Sprintf("%d.git", body.RepositoryID))
 		repo, err := git.PlainOpen(RepoPath)
 		if err != nil {
@@ -687,13 +681,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		blocks := strings.Split(r.URL.Path, "/")
-
-		if len(blocks) != 3 {
-			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
-			return
-		}
-
 		headRepositoryPath := path.Join(s.config.Dir, fmt.Sprintf("%d.git", body.HeadRepositoryID))
 		headRepository, err := git.PlainOpen(headRepositoryPath)
 		if err != nil {
@@ -818,6 +805,20 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 
 		s.forkRepositoryHandler(w, r)
+		return
+	}
+
+	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/pull/commits") {
+		defer r.Body.Close()
+
+		s.pullRequestCommitsHandler(w, r)
+		return
+	}
+
+	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/pull/merge") {
+		defer r.Body.Close()
+
+		s.pullRequestMergeHandler(w, r)
 		return
 	}
 
