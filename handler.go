@@ -163,10 +163,10 @@ func (s *Server) forkRepositoryHandler(w http.ResponseWriter, r *http.Request) {
 
 	sourceRepoPath := path.Join(s.config.Dir, fmt.Sprintf("%v.git", body.SourceRepositoryID))
 	targetRepoPath := path.Join(s.config.Dir, fmt.Sprintf("%v.git", body.TargetRepositoryID))
-	cmd := exec.Command("git", "clone", "--shared", sourceRepoPath, targetRepoPath)
+	cmd := exec.Command("git", "clone", "--shared", "--bare", sourceRepoPath, targetRepoPath)
 	out, err := cmd.Output()
 	if err != nil {
-		log.Println("Unable to fork repository: %s", string(out))
+		log.Printf("Unable to fork repository: %s\n", string(out))
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 	}
 
@@ -259,6 +259,7 @@ func (s *Server) pullRequestMergeHandler(w http.ResponseWriter, r *http.Request)
 	switch body.MergeStyle {
 	case utils.MergeStyleMerge:
 		cmd := exec.Command("git", "merge", "--no-ff", "--no-commit", trackingBranch)
+		cmd.Env = env
 		if err := utils.RunMergeCommand(&body, cmd, quarantineRepoPath); err != nil {
 			log.Printf("Unable to merge tracking into base: %v\n", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
