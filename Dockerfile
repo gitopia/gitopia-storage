@@ -9,6 +9,8 @@ ADD . /app
 RUN apt-get update && apt-get -y install cmake libssl-dev
 RUN ./scripts/install_libgit2.sh
 RUN git config --global url."https://${USER}:${PERSONAL_ACCESS_TOKEN}@github.com".insteadOf "https://github.com"
+RUN git config --global gc.auto 0
+
 RUN make build
 
 EXPOSE 5000

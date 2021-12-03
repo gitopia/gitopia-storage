@@ -33,6 +33,24 @@ type forkRepositoryPostBody struct {
 	TargetRepositoryID uint64 `json:"target_repository_id"`
 }
 
+type forkRepositoryResponseData struct {
+	Forked bool `json:"forked"`
+}
+
+type forkRepositoryResponse struct {
+	Data  forkRepositoryResponseData `json:"data"`
+	Error string                     `json:"error"`
+}
+
+type pullRequestMergeResponseData struct {
+	Merged bool `json:"merged"`
+}
+
+type pullRequestMergeResponse struct {
+	Data  pullRequestMergeResponseData `json:"data"`
+	Error string                       `json:"error"`
+}
+
 func uploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 
 	err := r.ParseMultipartForm(32 << 20)
@@ -148,16 +166,22 @@ func getAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) forkRepositoryHandler(w http.ResponseWriter, r *http.Request) {
-	decoder := json.NewDecoder(r.Body)
 	var body forkRepositoryPostBody
+	var resp forkRepositoryResponse
+
+	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&body)
 	if err != nil {
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		resp.Error = http.StatusText(http.StatusBadRequest)
+		b, _ := json.Marshal(resp)
+		http.Error(w, string(b), http.StatusBadRequest)
 		return
 	}
 
 	if body.TargetRepositoryID == 0 {
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		resp.Error = http.StatusText(http.StatusBadRequest)
+		b, _ := json.Marshal(resp)
+		http.Error(w, string(b), http.StatusBadRequest)
 		return
 	}
 
@@ -167,15 +191,20 @@ func (s *Server) forkRepositoryHandler(w http.ResponseWriter, r *http.Request) {
 	out, err := cmd.Output()
 	if err != nil {
 		log.Printf("Unable to fork repository: %s\n", string(out))
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		resp.Error = string(out)
+		b, _ := json.Marshal(resp)
+		http.Error(w, string(b), http.StatusInternalServerError)
+		return
 	}
 
-	return
+	resp.Data.Forked = true
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (s *Server) pullRequestCommitsHandler(w http.ResponseWriter, r *http.Request) {
-	decoder := json.NewDecoder(r.Body)
 	var body utils.PullRequestCommitsPostBody
+
+	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&body)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
@@ -211,12 +240,15 @@ func (s *Server) pullRequestCommitsHandler(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) pullRequestMergeHandler(w http.ResponseWriter, r *http.Request) {
+	var body utils.PullRequestMergePostBody
+	var resp pullRequestMergeResponse
 
 	decoder := json.NewDecoder(r.Body)
-	var body utils.PullRequestMergePostBody
 	err := decoder.Decode(&body)
 	if err != nil {
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		resp.Error = http.StatusText(http.StatusBadRequest)
+		b, _ := json.Marshal(resp)
+		http.Error(w, string(b), http.StatusBadRequest)
 		return
 	}
 
@@ -224,7 +256,9 @@ func (s *Server) pullRequestMergeHandler(w http.ResponseWriter, r *http.Request)
 
 	quarantineRepoPath, err := utils.CreateQuarantineRepo(body.BaseRepositoryID, body.HeadRepositoryID, body.BaseBranch, body.HeadBranch)
 	if err != nil {
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		resp.Error = http.StatusText(http.StatusInternalServerError)
+		b, _ := json.Marshal(resp)
+		http.Error(w, string(b), http.StatusInternalServerError)
 		return
 	}
 	defer os.RemoveAll(quarantineRepoPath)
@@ -239,7 +273,9 @@ func (s *Server) pullRequestMergeHandler(w http.ResponseWriter, r *http.Request)
 	out, err := cmd.Output()
 	if err != nil {
 		log.Printf("git read-tree HEAD: %v\n%s\n", err, string(out))
-		http.Error(w, fmt.Sprintf("Unable to read base branch in to the index: %v\n%s\n", err, string(out)), http.StatusInternalServerError)
+		resp.Error = fmt.Sprintf("Unable to read base branch in to the index: %v\n%s\n", err, string(out))
+		b, _ := json.Marshal(resp)
+		http.Error(w, string(b), http.StatusInternalServerError)
 		return
 	}
 
@@ -262,13 +298,17 @@ func (s *Server) pullRequestMergeHandler(w http.ResponseWriter, r *http.Request)
 		cmd.Env = env
 		if err := utils.RunMergeCommand(&body, cmd, quarantineRepoPath); err != nil {
 			log.Printf("Unable to merge tracking into base: %v\n", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			resp.Error = err.Error()
+			b, _ := json.Marshal(resp)
+			http.Error(w, string(b), http.StatusInternalServerError)
 			return
 		}
 
 		if err := utils.CommitAndSignNoAuthor(&body, message, "", quarantineRepoPath, env); err != nil {
 			log.Printf("Unable to make final commit: %v\n", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			resp.Error = err.Error()
+			b, _ := json.Marshal(resp)
+			http.Error(w, string(b), http.StatusInternalServerError)
 			return
 		}
 	case utils.MergeStyleRebase:
@@ -283,7 +323,9 @@ func (s *Server) pullRequestMergeHandler(w http.ResponseWriter, r *http.Request)
 		if err != nil {
 			err = fmt.Errorf("git checkout base prior to merge post staging rebase  [%v:%s -> %v:%s]: %v\n%s", body.HeadRepositoryID, body.HeadBranch, body.BaseRepositoryID, body.BaseBranch, err, string(out))
 			log.Println(err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			resp.Error = err.Error()
+			b, _ := json.Marshal(resp)
+			http.Error(w, string(b), http.StatusInternalServerError)
 			return
 		}
 
@@ -315,17 +357,23 @@ func (s *Server) pullRequestMergeHandler(w http.ResponseWriter, r *http.Request)
 				if !ok {
 					err = fmt.Errorf("git rebase staging on to base [%v:%s -> %v:%s]: %v\n%s", body.HeadRepositoryID, body.HeadBranch, body.BaseRepositoryID, body.BaseBranch, err, string(out))
 					log.Println(out)
-					http.Error(w, err.Error(), http.StatusInternalServerError)
+					resp.Error = err.Error()
+					b, _ := json.Marshal(resp)
+					http.Error(w, string(b), http.StatusInternalServerError)
 					return
 				}
 				err = fmt.Errorf("RebaseConflict at %s [%v:%s -> %v:%s]: %v\n%s", commitSha, body.HeadRepositoryID, body.HeadBranch, body.BaseRepositoryID, body.BaseBranch, err, string(out))
 				log.Println(err)
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				resp.Error = err.Error()
+				b, _ := json.Marshal(resp)
+				http.Error(w, string(b), http.StatusInternalServerError)
 				return
 			}
 			err = fmt.Errorf("git rebase staging on to base [%v:%s -> %v:%s]: %v\n%s", body.HeadRepositoryID, body.HeadBranch, body.BaseRepositoryID, body.BaseBranch, err, string(out))
 			log.Println(err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			resp.Error = err.Error()
+			b, _ := json.Marshal(resp)
+			http.Error(w, string(b), http.StatusInternalServerError)
 			return
 		}
 
@@ -341,7 +389,9 @@ func (s *Server) pullRequestMergeHandler(w http.ResponseWriter, r *http.Request)
 		if err != nil {
 			err = fmt.Errorf("git checkout base prior to merge post staging rebase  [%v:%s -> %v:%s]: %v\n%s", body.HeadRepositoryID, body.HeadBranch, body.BaseRepositoryID, body.BaseBranch, err, string(out))
 			log.Println(err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			resp.Error = err.Error()
+			b, _ := json.Marshal(resp)
+			http.Error(w, string(b), http.StatusInternalServerError)
 			return
 		}
 
@@ -356,13 +406,17 @@ func (s *Server) pullRequestMergeHandler(w http.ResponseWriter, r *http.Request)
 		// Prepare merge with commit
 		if err := utils.RunMergeCommand(&body, cmd, quarantineRepoPath); err != nil {
 			log.Printf("Unable to merge staging into base: %v\n", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			resp.Error = err.Error()
+			b, _ := json.Marshal(resp)
+			http.Error(w, string(b), http.StatusInternalServerError)
 			return
 		}
 		if body.MergeStyle == utils.MergeStyleRebaseMerge {
 			if err := utils.CommitAndSignNoAuthor(&body, message, "", quarantineRepoPath, env); err != nil {
 				log.Printf("Unable to make final commit: %v\n", err)
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				resp.Error = err.Error()
+				b, _ := json.Marshal(resp)
+				http.Error(w, string(b), http.StatusInternalServerError)
 				return
 			}
 		}
@@ -371,7 +425,9 @@ func (s *Server) pullRequestMergeHandler(w http.ResponseWriter, r *http.Request)
 		cmd := exec.Command("git", "merge", "--squash", trackingBranch)
 		if err := utils.RunMergeCommand(&body, cmd, quarantineRepoPath); err != nil {
 			log.Printf("Unable to merge --squash tracking into base: %v\n", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			resp.Error = err.Error()
+			b, _ := json.Marshal(resp)
+			http.Error(w, string(b), http.StatusInternalServerError)
 			return
 		}
 
@@ -381,12 +437,19 @@ func (s *Server) pullRequestMergeHandler(w http.ResponseWriter, r *http.Request)
 		out, err = cmd.Output()
 		if err != nil {
 			err = fmt.Errorf("git commit [%v:%s -> %v:%s]: %v\n%s", body.HeadRepositoryID, body.HeadBranch, body.BaseRepositoryID, body.BaseBranch, err, string(out))
+			log.Println(err)
+			resp.Error = err.Error()
+			b, _ := json.Marshal(resp)
+			http.Error(w, string(b), http.StatusInternalServerError)
+			return
 		}
 
 	default:
 		err = fmt.Errorf("Invalid merge style: %v", body.MergeStyle)
 		log.Println(err)
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		resp.Error = err.Error()
+		b, _ := json.Marshal(resp)
+		http.Error(w, string(b), http.StatusBadRequest)
 		return
 	}
 
@@ -416,7 +479,10 @@ func (s *Server) pullRequestMergeHandler(w http.ResponseWriter, r *http.Request)
 		}
 		err = fmt.Errorf("git push: %s", string(out))
 		log.Println(err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		resp.Error = err.Error()
+		b, _ := json.Marshal(resp)
+		http.Error(w, string(b), http.StatusInternalServerError)
 	}
 
+	resp.Data.Merged = true
 }
