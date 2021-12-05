@@ -43,7 +43,8 @@ type forkRepositoryResponse struct {
 }
 
 type pullRequestMergeResponseData struct {
-	Merged bool `json:"merged"`
+	Merged         bool   `json:"merged"`
+	MergeCommitSha string `json:"merge_commit_sha"`
 }
 
 type pullRequestMergeResponse struct {
@@ -453,6 +454,15 @@ func (s *Server) pullRequestMergeHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	mergeCommitSha, err := utils.GetFullCommitSha(quarantineRepoPath, baseBranch)
+	if err != nil {
+		log.Println(err)
+		resp.Error = err.Error()
+		b, _ := json.Marshal(resp)
+		http.Error(w, string(b), http.StatusInternalServerError)
+		return
+	}
+
 	env = append(os.Environ(),
 		"GIT_AUTHOR_NAME="+body.UserName,
 		"GIT_AUTHOR_EMAIL="+body.UserEmail,
@@ -485,4 +495,6 @@ func (s *Server) pullRequestMergeHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	resp.Data.Merged = true
+	resp.Data.MergeCommitSha = mergeCommitSha
+	json.NewEncoder(w).Encode(resp)
 }
