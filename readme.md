@@ -20,6 +20,7 @@ To start the server, execute the following command
 ```sh
 docker run -it \
   --name git-server \
+  --mount type=bind,source="$(pwd)/../tmp",target=/var/attachments \
   --mount type=bind,source="$(pwd)/../tmp",target=/var/repos -p 5000:5000 \
   git-server
 ```
@@ -38,4 +39,5 @@ The server will be listening at port `5000`
 - `POST` /fork
 - `POST` /pull/diff
 - `POST` /pull/commits
+- `POST` /pull/check
 - `POST` /pull/merge

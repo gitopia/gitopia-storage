@@ -815,6 +815,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/pull/check") {
+		defer r.Body.Close()
+
+		s.pullRequestCheckHandler(w, r)
+		return
+	}
+
 	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/pull/merge") {
 		defer r.Body.Close()
 

@@ -86,6 +86,63 @@ paths:
           description: Bad Request
         default:
           description: unexpected error
+  /pull/check:
+    post:
+      summary: Check pull request
+      operationId: pullRequestCheck
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                base_repository_id:
+                  type: integer
+                  example: 1
+                head_repository_id:
+                  type: integer
+                  example: 2
+                base_branch:
+                  type: string
+                  example: master
+                head_branch:
+                  type: string
+                  example: master
+                merge_style:
+                  type: string
+                  example: merge
+                user_name:
+                  type: string
+                  example: name
+                user_email:
+                  type: string
+                  example: email
+                sender:
+                  type: string
+                  example: gitopia1pwk0f2mhwurtnuy22hp2tyr5443ewlr8swsraq
+                pull_request_iid:
+                  type: integer
+                  example: 12
+      responses:
+        "200":
+          description: Successful request
+          schema:
+            type: object
+            properties:
+              data:
+                type: object
+                properties:
+                  is_mergeable:
+                    type: boolean
+                    description: Is pull request mergeable.
+              error:
+                type: string
+                description: The error log.
+        "400":
+          description: Bad Request
+        default:
+          description: unexpected error
   /pull/merge:
     post:
       summary: Merge pull request
