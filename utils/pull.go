@@ -30,6 +30,8 @@ type PullRequestCommitsPostBody struct {
 	HeadRepositoryID uint64 `json:"head_repository_id"`
 	BaseBranch       string `json:"base_branch"`
 	HeadBranch       string `json:"head_branch"`
+	BaseCommitSha    string `json:"base_commit_sha"`
+	HeadCommitSha    string `json:"head_commit_sha"`
 }
 
 type PullRequestMergePostBody struct {

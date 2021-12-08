@@ -228,9 +228,15 @@ func (s *Server) pullRequestCommitsHandler(w http.ResponseWriter, r *http.Reques
 	}
 	defer os.RemoveAll(quarantineRepoPath)
 
-	baseBranch := fmt.Sprintf("origin/%s", body.BaseBranch)
-	headBranch := fmt.Sprintf("head_repo/%s", body.HeadBranch)
-	cmd := exec.Command("git", "rev-list", headBranch, fmt.Sprintf("^%s", baseBranch))
+	var cmd *exec.Cmd
+	if len(body.BaseCommitSha) == 0 {
+		baseBranch := fmt.Sprintf("origin/%s", body.BaseBranch)
+		headBranch := fmt.Sprintf("head_repo/%s", body.HeadBranch)
+		cmd = exec.Command("git", "rev-list", headBranch, fmt.Sprintf("^%s", baseBranch))
+	} else {
+		cmd = exec.Command("git", "rev-list", body.HeadCommitSha, fmt.Sprintf("^%s", body.BaseCommitSha))
+	}
+
 	cmd.Dir = quarantineRepoPath
 	out, err := cmd.Output()
 	if err != nil {
