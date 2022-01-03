@@ -586,6 +586,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
 		if body.Path != "" {
 			treeEntry, err := tree.FindEntry(body.Path)
 			if err != nil {
@@ -593,8 +596,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if treeEntry.Mode.IsFile() {
-				w.Header().Set("Content-Type", "application/json")
-				w.Header().Set("Access-Control-Allow-Origin", "*")
 				var fileContent []*utils.Content
 				blob, err := object.GetBlob(repo.Storer, treeEntry.Hash)
 				if err != nil {
@@ -622,9 +623,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 
 		var treeContents []*utils.Content
 		pageRes, err := utils.PaginateTreeContentResponse(tree, body.Pagination, 100, body.Path, func(treeContent utils.Content) error {
