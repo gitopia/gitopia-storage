@@ -218,6 +218,8 @@ github.com/gin-contrib/sse v0.1.0/go.mod h1:RHrZQHXnP2xjPF+u1gW/2HnVO7nvIa9PG3Gm
 github.com/gin-gonic/gin v1.5.0/go.mod h1:Nd6IXA8m5kNZdNEHMBd93KT+mdY3+bewLgRvmCsR2Do=
 github.com/gitopia/gitopia v0.10.0 h1:MQV90FrbLJ5Ti9we4cUzHUQs0tBU+jC5k5ooBHRmIGM=
 github.com/gitopia/gitopia v0.10.0/go.mod h1:dNVXmTrslR7J20yRTu6DwfoVhgyG8zW1Oo9C5zTuLcI=
+github.com/gitopia/go-git/v5 v5.4.3-0.20211224112515-b2efd9bec92c h1:xqrIU2JrAXwioLz+mKxn3j36C/akB1+SuAqXNtyddRU=
+github.com/gitopia/go-git/v5 v5.4.3-0.20211224112515-b2efd9bec92c/go.mod h1:+4EawsfpYlHKlmdvSoEYTrRZowCNR8ZhdRU8noDeemI=
 github.com/gitopia/goar v0.0.0-20210912164232-a48c38a69bc2 h1:j8wY0gyxrl0fkY0eXI9UwJDntosPD2EHUhOOtR+Mu30=
 github.com/gitopia/goar v0.0.0-20210912164232-a48c38a69bc2/go.mod h1:HstGs3h4mFqmP5tvLCTkZsPAjSPaj7drI5ff5qfNxKA=
 github.com/gliderlabs/ssh v0.2.2 h1:6zsha5zo/TWhRhwqCD3+EarCAgZ2yN28ipRnGPnwkI0=
@@ -229,8 +231,6 @@ github.com/go-git/go-billy/v5 v5.3.1 h1:CPiOUAzKtMRvolEKw+bG1PLRpT7D3LIs3/3ey4Ai
 github.com/go-git/go-billy/v5 v5.3.1/go.mod h1:pmpqyWchKfYfrkb/UVH4otLvyi/5gJlGI4Hb3ZqZ3W0=
 github.com/go-git/go-git-fixtures/v4 v4.2.1 h1:n9gGL1Ct/yIw+nfsfr8s4+sbhT+Ncu2SubfXjIWgci8=
 github.com/go-git/go-git-fixtures/v4 v4.2.1/go.mod h1:K8zd3kDUAykwTdDCr+I0per6Y6vMiRR/nnVTBtavnB0=
-github.com/go-git/go-git/v5 v5.4.2 h1:BXyZu9t0VkbiHtqrsvdq39UDhGJTl1h55VW6CSC4aY4=
-github.com/go-git/go-git/v5 v5.4.2/go.mod h1:gQ1kArt6d+n+BGd+/B/I74HwRTLhth2+zti4ihgckDc=
 github.com/go-gl/glfw v0.0.0-20190409004039-e6da0acd62b1/go.mod h1:vR7hzQXu2zJy9AVAgeJqvqgH9Q5CA+iKCZ2gyEVpxRU=
 github.com/go-gl/glfw/v3.3/glfw v0.0.0-20191125211704-12ad95a8df72/go.mod h1:tQ2UAYgL5IevRw8kRxooKSPJfGvJ9fJQFa0TUsXzTg8=
 github.com/go-gl/glfw/v3.3/glfw v0.0.0-20200222043503-6f7a984d4dc4/go.mod h1:tQ2UAYgL5IevRw8kRxooKSPJfGvJ9fJQFa0TUsXzTg8=
