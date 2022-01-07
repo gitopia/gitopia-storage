@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 
-	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/gitopia/go-git/v5/plumbing/object"
 )
 
 type ContentType int
