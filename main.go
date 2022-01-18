@@ -542,7 +542,80 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Repositpry Content
+	// Repository Commits
+	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/commits") {
+		defer r.Body.Close()
+
+		decoder := json.NewDecoder(r.Body)
+		var body utils.CommitsRequestBody
+		err := decoder.Decode(&body)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+
+		blocks := strings.Split(r.URL.Path, "/")
+
+		if len(blocks) != 2 {
+			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+			return
+		}
+
+		if body.InitCommitId == "" {
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+
+		RepoPath := path.Join(s.config.Dir, fmt.Sprintf("%d.git", body.RepositoryID))
+		repo, err := git.PlainOpen(RepoPath)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+			return
+		}
+		/*
+			commitIter, err := repo.CommitObjects()
+			if err != nil {
+				logError("commit-iter", fmt.Errorf("can't get commit iterator"))
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+		*/
+		commitHash := plumbing.NewHash(body.InitCommitId)
+		commit, err := object.GetCommit(repo.Storer, commitHash)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		commitIter := object.NewCommitIterCTime(commit, nil, nil)
+
+		if body.Path != "" {
+			commitIter = object.NewCommitPathIterFromIter(func(path string) bool {
+				return path == body.Path
+			}, commitIter, false)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		var commits []*utils.Commit
+		pageRes, err := utils.PaginateTreeCommitsResponse(commitIter, body.Pagination, 100, body.Path, func(commit utils.Commit) error {
+			commits = append(commits, &commit)
+			return nil
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+
+		commitsResponse := utils.CommitsResponse{
+			Commits:    commits,
+			Pagination: pageRes,
+		}
+		commitsResponseJson, err := json.Marshal(commitsResponse)
+		w.Write(commitsResponseJson)
+		return
+	}
+
+	// Repository Content
 	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/content") {
 		defer r.Body.Close()
 
