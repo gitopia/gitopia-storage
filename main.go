@@ -572,38 +572,48 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 			return
 		}
-		/*
-			commitIter, err := repo.CommitObjects()
-			if err != nil {
-				logError("commit-iter", fmt.Errorf("can't get commit iterator"))
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-		*/
+
 		commitHash := plumbing.NewHash(body.InitCommitId)
 		commit, err := object.GetCommit(repo.Storer, commitHash)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
-		commitIter := object.NewCommitIterCTime(commit, nil, nil)
 
-		if body.Path != "" {
-			commitIter = object.NewCommitPathIterFromIter(func(path string) bool {
-				return path == body.Path
-			}, commitIter, false)
-		}
+		commitIter := object.NewCommitIterCTime(commit, nil, nil)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 
 		var commits []*utils.Commit
-		pageRes, err := utils.PaginateTreeCommitsResponse(commitIter, body.Pagination, 100, body.Path, func(commit utils.Commit) error {
-			commits = append(commits, &commit)
-			return nil
-		})
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+		var pageRes *utils.PageResponse
+
+		if body.Path != "" {
+			commitTree, err := commit.Tree()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			}
+			_, err = commitTree.FindEntry(body.Path)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			}
+			pageRes, err = utils.PaginatePathTreeCommitsResponse(commitIter, body.Pagination, 100, body.Path, func(commit utils.Commit) error {
+				commits = append(commits, &commit)
+				return nil
+			})
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+			}
+		} else {
+			pageRes, err = utils.PaginateTreeCommitsResponse(commitIter, body.Pagination, 100, func(commit utils.Commit) error {
+				commits = append(commits, &commit)
+				return nil
+			})
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+			}
 		}
 
 		commitsResponse := utils.CommitsResponse{
