@@ -556,6 +556,29 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		blocks := strings.Split(r.URL.Path, "/")
 
+		if len(blocks) == 3 {
+			RepoPath := path.Join(s.config.Dir, fmt.Sprintf("%d.git", body.RepositoryID))
+			repo, err := git.PlainOpen(RepoPath)
+			if err != nil {
+				http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+				return
+			}
+
+			commitHash := plumbing.NewHash(blocks[2])
+			commitObject, err := object.GetCommit(repo.Storer, commitHash)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			}
+
+			commit, err := utils.GrabCommit(*commitObject)
+			commitResponseJson, err := json.Marshal(commit)
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Write(commitResponseJson)
+			return
+		}
+
 		if len(blocks) != 2 {
 			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
 			return
