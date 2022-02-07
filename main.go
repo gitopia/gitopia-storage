@@ -714,6 +714,25 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 				fileContent = append(fileContent, fc)
 
+				if body.IncludeLastCommit {
+					pathCommitId, err := utils.LastCommitForPath(RepoPath, body.RefId, fileContent[0].Path)
+					if err != nil {
+						http.Error(w, err.Error(), http.StatusBadRequest)
+						return
+					}
+					pathCommitHash := plumbing.NewHash(pathCommitId)
+					pathCommitObject, err := object.GetCommit(repo.Storer, pathCommitHash)
+					if err != nil {
+						http.Error(w, err.Error(), http.StatusNotFound)
+						return
+					}
+					fileContent[0].LastCommit, err = utils.GrabCommit(*pathCommitObject)
+					if err != nil {
+						http.Error(w, err.Error(), http.StatusBadRequest)
+						return
+					}
+				}
+
 				contentResponse := utils.ContentResponse{
 					Content: fileContent,
 				}
@@ -738,10 +757,43 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
 		}
 
+		if body.IncludeLastCommit {
+			for i := range treeContents {
+				pathCommitId, err := utils.LastCommitForPath(RepoPath, body.RefId, treeContents[i].Path)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				pathCommitHash := plumbing.NewHash(pathCommitId)
+				pathCommitObject, err := object.GetCommit(repo.Storer, pathCommitHash)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusNotFound)
+					return
+				}
+				treeContents[i].LastCommit, err = utils.GrabCommit(*pathCommitObject)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+			}
+		}
+
+		var sortedTREEContents []*utils.Content
+		var sortedBLOBContents []*utils.Content
+		for _, tc := range treeContents {
+			if tc.Type == "TREE" {
+				sortedTREEContents = append(sortedTREEContents, tc)
+			} else {
+				sortedBLOBContents = append(sortedBLOBContents, tc)
+			}
+		}
+		sortedTreeContents := append(sortedTREEContents, sortedBLOBContents...)
+
 		contentResponse := utils.ContentResponse{
-			Content:    treeContents,
+			Content:    sortedTreeContents,
 			Pagination: pageRes,
 		}
 		contentResponseJson, err := json.Marshal(contentResponse)
