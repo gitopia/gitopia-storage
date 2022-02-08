@@ -596,15 +596,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		commitHash := plumbing.NewHash(body.InitCommitId)
-		commit, err := object.GetCommit(repo.Storer, commitHash)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-
-		commitIter := object.NewCommitIterCTime(commit, nil, nil)
-
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 
@@ -612,6 +603,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var pageRes *utils.PageResponse
 
 		if body.Path != "" {
+			commitHash := plumbing.NewHash(body.InitCommitId)
+			commit, err := object.GetCommit(repo.Storer, commitHash)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			}
 			commitTree, err := commit.Tree()
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusNotFound)
@@ -622,21 +619,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, err.Error(), http.StatusNotFound)
 				return
 			}
-			pageRes, err = utils.PaginatePathTreeCommitsResponse(commitIter, body.Pagination, 100, body.Path, func(commit utils.Commit) error {
-				commits = append(commits, &commit)
-				return nil
-			})
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-			}
-		} else {
-			pageRes, err = utils.PaginateTreeCommitsResponse(commitIter, body.Pagination, 100, func(commit utils.Commit) error {
-				commits = append(commits, &commit)
-				return nil
-			})
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-			}
+		}
+
+		pageRes, err = utils.PaginateCommitHistoryResponse(RepoPath, repo, body.Pagination, 100, &body, func(commit utils.Commit) error {
+			commits = append(commits, &commit)
+			return nil
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 		}
 
 		commitsResponse := utils.CommitsResponse{

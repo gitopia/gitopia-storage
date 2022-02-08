@@ -2,10 +2,12 @@ package utils
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
+	git "github.com/gitopia/go-git/v5"
+	"github.com/gitopia/go-git/v5/plumbing"
 	"github.com/gitopia/go-git/v5/plumbing/object"
-	"github.com/gitopia/go-git/v5/plumbing/storer"
 )
 
 type CommitsRequestBody struct {
@@ -79,10 +81,12 @@ func GrabCommit(commitObj object.Commit) (res *Commit, err error) {
 	return &commit, nil
 }
 
-func PaginateTreeCommitsResponse(
-	commitIter object.CommitIter,
+func PaginateCommitHistoryResponse(
+	repoPath string,
+	repo *git.Repository,
 	pageRequest *PageRequest,
 	defaultLimit uint64,
+	body *CommitsRequestBody,
 	onResult func(commit Commit) error,
 ) (*PageResponse, error) {
 
@@ -104,329 +108,86 @@ func PaginateTreeCommitsResponse(
 		limit = defaultLimit
 	}
 
-	if len(key) != 0 {
+	totalCommits, err := CountCommits(repoPath, body.InitCommitId, body.Path)
+	if err != nil {
+		return nil, err
+	}
+	count, err := strconv.ParseUint(string(totalCommits), 10, 64)
+	if err != nil {
+		return nil, err
+	}
 
-		var count uint64
+	if len(key) != 0 {
 		var nextKey []byte
 
 		start := BytesToUInt64(key)
-		end := start + limit - 1
+		end := limit
+		shown := start + end
 
-		commitIter.ForEach(func(commitObj *object.Commit) error {
-			count++
-
-			if count < start {
-				return nil
-			}
-
-			if count <= end {
-				commit, err := GrabCommit(*commitObj)
-				if err != nil {
-					return err
-				}
-				err = onResult(*commit)
-				if err != nil {
-					return err
-				}
-			} else if count == end+1 {
-				nextKey = UInt64ToBytes(uint64(count))
-
-				if !countTotal {
-					return storer.ErrStop
-				}
-			}
-			return nil
-		})
-
-		res := &PageResponse{NextKey: nextKey}
-		if countTotal {
-			res.Total = count
+		commitHashes, err := CommitHistory(repoPath, body.InitCommitId, body.Path, int(start), int(end))
+		if err != nil {
+			return nil, err
 		}
 
-		return res, nil
-	}
-
-	end := offset + limit
-
-	var nextKey []byte
-	var count uint64
-
-	commitIter.ForEach(func(commitObj *object.Commit) error {
-		count++
-
-		if count <= offset {
-			return nil
-		}
-
-		if count <= end {
+		for _, commitHash := range commitHashes {
+			commitHash := plumbing.NewHash(commitHash)
+			commitObj, err := object.GetCommit(repo.Storer, commitHash)
+			if err != nil {
+				return nil, err
+			}
 			commit, err := GrabCommit(*commitObj)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			err = onResult(*commit)
 			if err != nil {
-				return err
-			}
-		} else if count == end+1 {
-			nextKey = UInt64ToBytes(uint64(count))
-
-			if !countTotal {
-				return storer.ErrStop
+				return nil, err
 			}
 		}
-		return nil
-	})
 
-	res := &PageResponse{NextKey: nextKey}
-	if countTotal {
-		res.Total = count
-	}
-
-	return res, nil
-}
-
-func PaginatePathTreeCommitsResponse(
-	commitIter object.CommitIter,
-	pageRequest *PageRequest,
-	defaultLimit uint64,
-	path string,
-	onResult func(commit Commit) error,
-) (*PageResponse, error) {
-
-	// if the PageRequest is nil, use default PageRequest
-	if pageRequest == nil {
-		pageRequest = &PageRequest{}
-	}
-
-	offset := pageRequest.Offset
-	key := pageRequest.Key
-	limit := pageRequest.Limit
-	countTotal := pageRequest.CountTotal
-
-	if offset > 0 && key != nil {
-		return nil, fmt.Errorf("invalid request, either offset or key is expected, got both")
-	}
-
-	if limit == 0 {
-		limit = defaultLimit
-	}
-
-	if len(key) != 0 {
-
-		var count uint64
-		var nextKey []byte
-
-		start := BytesToUInt64(key)
-		end := start + limit - 1
-
-		commitIter.ForEach(func(commitObj *object.Commit) error {
-
-			if commitObj.NumParents() > 1 {
-				return nil
-			}
-
-			commitTree, err := commitObj.Tree()
-			if err != nil {
-				return err
-			}
-
-			parentCommit, err := commitObj.Parent(0)
-			if err != nil {
-				_, err := commitTree.FindEntry(path)
-				if err != nil {
-					return nil
-				}
-
-				count++
-				if count < start {
-					return nil
-				}
-
-				if count <= end {
-					commit, err := GrabCommit(*commitObj)
-					if err != nil {
-						return err
-					}
-					err = onResult(*commit)
-					if err != nil {
-						return err
-					}
-				} else if count == end+1 {
-					nextKey = UInt64ToBytes(uint64(count))
-				}
-				return storer.ErrStop
-			}
-
-			parentCommitTree, err := parentCommit.Tree()
-			if err != nil {
-				return err
-			}
-
-			currentCommitTreeEntry, currentCommitTreeEntryErr := commitTree.FindEntry(path)
-			if currentCommitTreeEntryErr != nil {
-				return storer.ErrStop
-			}
-			parentCommitTreeEntry, parentCommitTreeEntryErr := parentCommitTree.FindEntry(path)
-			if parentCommitTreeEntryErr != nil {
-				count++
-				if count < start {
-					return nil
-				}
-
-				if count <= end {
-					commit, err := GrabCommit(*commitObj)
-					if err != nil {
-						return err
-					}
-					err = onResult(*commit)
-					if err != nil {
-						return err
-					}
-				} else if count == end+1 {
-					nextKey = UInt64ToBytes(uint64(count))
-				}
-				return storer.ErrStop
-			}
-
-			if currentCommitTreeEntry.Hash != parentCommitTreeEntry.Hash {
-				count++
-				if count < start {
-					return nil
-				}
-
-				if count <= end {
-					commit, err := GrabCommit(*commitObj)
-					if err != nil {
-						return err
-					}
-					err = onResult(*commit)
-					if err != nil {
-						return err
-					}
-				} else if count == end+1 {
-					nextKey = UInt64ToBytes(uint64(count))
-
-					if !countTotal {
-						return storer.ErrStop
-					}
-				}
-			}
-
-			return nil
-		})
-
+		if count > shown {
+			nextKey = UInt64ToBytes(uint64(end))
+		}
 		res := &PageResponse{NextKey: nextKey}
 		if countTotal {
-			res.Total = count
+			res.Total = uint64(count)
 		}
 
 		return res, nil
 	}
 
-	end := offset + limit
+	end := limit
+	shown := offset + end
 
 	var nextKey []byte
-	var count uint64
 
-	commitIter.ForEach(func(commitObj *object.Commit) error {
+	commitHashes, err := CommitHistory(repoPath, body.InitCommitId, body.Path, int(offset), int(end))
+	if err != nil {
+		return nil, err
+	}
 
-		if commitObj.NumParents() > 1 {
-			return nil
-		}
-
-		commitTree, err := commitObj.Tree()
+	for _, commitHash := range commitHashes {
+		commitHash := plumbing.NewHash(commitHash)
+		commitObj, err := object.GetCommit(repo.Storer, commitHash)
 		if err != nil {
-			return err
+			return nil, err
 		}
-
-		parentCommit, err := commitObj.Parent(0)
+		commit, err := GrabCommit(*commitObj)
 		if err != nil {
-			_, err := commitTree.FindEntry(path)
-			if err != nil {
-				return nil
-			}
-
-			count++
-			if count <= offset {
-				return nil
-			}
-
-			if count <= end {
-				commit, err := GrabCommit(*commitObj)
-				if err != nil {
-					return err
-				}
-				err = onResult(*commit)
-				if err != nil {
-					return err
-				}
-			} else if count == end+1 {
-				nextKey = UInt64ToBytes(uint64(count))
-			}
-			return storer.ErrStop
+			return nil, err
 		}
-
-		parentCommitTree, err := parentCommit.Tree()
+		err = onResult(*commit)
 		if err != nil {
-			return err
+			return nil, err
 		}
+	}
 
-		currentCommitTreeEntry, currentCommitTreeEntryErr := commitTree.FindEntry(path)
-		if currentCommitTreeEntryErr != nil {
-			return storer.ErrStop
-		}
-		parentCommitTreeEntry, parentCommitTreeEntryErr := parentCommitTree.FindEntry(path)
-		if parentCommitTreeEntryErr != nil {
-			count++
-			if count <= offset {
-				return nil
-			}
-
-			if count <= end {
-				commit, err := GrabCommit(*commitObj)
-				if err != nil {
-					return err
-				}
-				err = onResult(*commit)
-				if err != nil {
-					return err
-				}
-			} else if count == end+1 {
-				nextKey = UInt64ToBytes(uint64(count))
-			}
-			return storer.ErrStop
-		}
-
-		if currentCommitTreeEntry.Hash != parentCommitTreeEntry.Hash {
-			count++
-			if count <= offset {
-				return nil
-			}
-
-			if count <= end {
-				commit, err := GrabCommit(*commitObj)
-				if err != nil {
-					return err
-				}
-				err = onResult(*commit)
-				if err != nil {
-					return err
-				}
-			} else if count == end+1 {
-				nextKey = UInt64ToBytes(uint64(count))
-
-				if !countTotal {
-					return storer.ErrStop
-				}
-			}
-		}
-
-		return nil
-	})
-
+	if count > shown {
+		nextKey = UInt64ToBytes(uint64(end))
+	}
 	res := &PageResponse{NextKey: nextKey}
 	if countTotal {
-		res.Total = count
+		res.Total = uint64(count)
 	}
 
 	return res, nil
