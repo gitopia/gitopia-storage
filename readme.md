@@ -5,8 +5,7 @@ gitopia services for [gitopia](https://gitopia.org/)
 ## Build
 
 ```
-docker build . --build-arg USER=<USER> \
-  --build-arg PERSONAL_ACCESS_TOKEN=<PERSONAL_ACCESS_TOKEN> \
+docker build . --build-arg ACCESS_TOKEN=<USERNAME>:<PERSONAL_ACCESS_TOKEN> \
   --build-arg ENV=<ENV> \
   -t git-server
 ```
