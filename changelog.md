@@ -1,5 +1,12 @@
 # Changelog
 
+## [v0.5.0] - 2022-02-15
+
+### Features
+
+- Add option to include lastCommit in `/content` API
+- API to get repository commits
+
 ## [v0.4.0] - 2022-02-03
 
 ### Fixes

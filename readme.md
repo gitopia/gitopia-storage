@@ -41,3 +41,21 @@ The server will be listening at port `5000`
 - `POST` /pull/commits
 - `POST` /pull/check
 - `POST` /pull/merge
+- `POST` /content
+  ```go
+  type ContentRequestBody struct {
+    RepositoryID uint64       `json:"repository_id"`
+    RefId        string       `json:"ref_id"`
+    Path         string       `json:"path"`
+    Pagination   *PageRequest `json:"pagination"`
+  }
+  ```
+- `POST` /commits
+  ```go
+  type CommitsRequestBody struct {
+    RepositoryID uint64       `json:"repository_id"`
+    InitCommitId string       `json:"init_commit_id"`
+    Path         string       `json:"path"`
+    Pagination   *PageRequest `json:"pagination"`
+  }
+  ```

@@ -542,7 +542,103 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Repositpry Content
+	// Repository Commits
+	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/commits") {
+		defer r.Body.Close()
+
+		decoder := json.NewDecoder(r.Body)
+		var body utils.CommitsRequestBody
+		err := decoder.Decode(&body)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+
+		blocks := strings.Split(r.URL.Path, "/")
+
+		if len(blocks) == 3 {
+			RepoPath := path.Join(s.config.Dir, fmt.Sprintf("%d.git", body.RepositoryID))
+			repo, err := git.PlainOpen(RepoPath)
+			if err != nil {
+				http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+				return
+			}
+
+			commitHash := plumbing.NewHash(blocks[2])
+			commitObject, err := object.GetCommit(repo.Storer, commitHash)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			}
+
+			commit, err := utils.GrabCommit(*commitObject)
+			commitResponseJson, err := json.Marshal(commit)
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Write(commitResponseJson)
+			return
+		}
+
+		if len(blocks) != 2 {
+			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+			return
+		}
+
+		if body.InitCommitId == "" {
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+
+		RepoPath := path.Join(s.config.Dir, fmt.Sprintf("%d.git", body.RepositoryID))
+		repo, err := git.PlainOpen(RepoPath)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		var commits []*utils.Commit
+		var pageRes *utils.PageResponse
+
+		if body.Path != "" {
+			commitHash := plumbing.NewHash(body.InitCommitId)
+			commit, err := object.GetCommit(repo.Storer, commitHash)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			}
+			commitTree, err := commit.Tree()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			}
+			_, err = commitTree.FindEntry(body.Path)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			}
+		}
+
+		pageRes, err = utils.PaginateCommitHistoryResponse(RepoPath, repo, body.Pagination, 100, &body, func(commit utils.Commit) error {
+			commits = append(commits, &commit)
+			return nil
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+
+		commitsResponse := utils.CommitsResponse{
+			Commits:    commits,
+			Pagination: pageRes,
+		}
+		commitsResponseJson, err := json.Marshal(commitsResponse)
+		w.Write(commitsResponseJson)
+		return
+	}
+
+	// Repository Content
 	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/content") {
 		defer r.Body.Close()
 
@@ -608,6 +704,25 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 				fileContent = append(fileContent, fc)
 
+				if body.IncludeLastCommit {
+					pathCommitId, err := utils.LastCommitForPath(RepoPath, body.RefId, fileContent[0].Path)
+					if err != nil {
+						http.Error(w, err.Error(), http.StatusBadRequest)
+						return
+					}
+					pathCommitHash := plumbing.NewHash(pathCommitId)
+					pathCommitObject, err := object.GetCommit(repo.Storer, pathCommitHash)
+					if err != nil {
+						http.Error(w, err.Error(), http.StatusNotFound)
+						return
+					}
+					fileContent[0].LastCommit, err = utils.GrabCommit(*pathCommitObject)
+					if err != nil {
+						http.Error(w, err.Error(), http.StatusBadRequest)
+						return
+					}
+				}
+
 				contentResponse := utils.ContentResponse{
 					Content: fileContent,
 				}
@@ -632,10 +747,43 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
 		}
 
+		if body.IncludeLastCommit {
+			for i := range treeContents {
+				pathCommitId, err := utils.LastCommitForPath(RepoPath, body.RefId, treeContents[i].Path)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				pathCommitHash := plumbing.NewHash(pathCommitId)
+				pathCommitObject, err := object.GetCommit(repo.Storer, pathCommitHash)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusNotFound)
+					return
+				}
+				treeContents[i].LastCommit, err = utils.GrabCommit(*pathCommitObject)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+			}
+		}
+
+		var sortedTREEContents []*utils.Content
+		var sortedBLOBContents []*utils.Content
+		for _, tc := range treeContents {
+			if tc.Type == "TREE" {
+				sortedTREEContents = append(sortedTREEContents, tc)
+			} else {
+				sortedBLOBContents = append(sortedBLOBContents, tc)
+			}
+		}
+		sortedTreeContents := append(sortedTREEContents, sortedBLOBContents...)
+
 		contentResponse := utils.ContentResponse{
-			Content:    treeContents,
+			Content:    sortedTreeContents,
 			Pagination: pageRes,
 		}
 		contentResponseJson, err := json.Marshal(contentResponse)

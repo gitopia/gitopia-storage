@@ -20,10 +20,11 @@ func (c ContentType) String() string {
 }
 
 type ContentRequestBody struct {
-	RepositoryID uint64       `json:"repository_id"`
-	RefId        string       `json:"ref_id"`
-	Path         string       `json:"path"`
-	Pagination   *PageRequest `json:"pagination"`
+	RepositoryID      uint64       `json:"repository_id"`
+	RefId             string       `json:"ref_id"`
+	Path              string       `json:"path"`
+	IncludeLastCommit bool         `json:"include_last_commit"`
+	Pagination        *PageRequest `json:"pagination"`
 }
 
 type ContentResponse struct {
@@ -32,14 +33,14 @@ type ContentResponse struct {
 }
 
 type Content struct {
-	Name       string `json:"name"`
-	Path       string `json:"path"`
-	Sha        string `json:"sha"`
-	Type       string `json:"type"`
-	Size       int64  `json:"size,omitempty"`
-	Content    string `json:"content,omitempty"`
-	Encoding   string `json:"encoding,omitempty"`
-	LastCommit string `json:"last_commit,omitempty"`
+	Name       string  `json:"name"`
+	Path       string  `json:"path"`
+	Sha        string  `json:"sha"`
+	Type       string  `json:"type"`
+	Size       int64   `json:"size,omitempty"`
+	Content    string  `json:"content,omitempty"`
+	Encoding   string  `json:"encoding,omitempty"`
+	LastCommit *Commit `json:"last_commit,omitempty"`
 }
 
 func GrabFileContent(blob object.Blob, treeEntry object.TreeEntry, pathPrefix string) (res *Content, err error) {
