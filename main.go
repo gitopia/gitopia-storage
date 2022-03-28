@@ -5,13 +5,6 @@ import (
 	"context"
 	contextB "context"
 	"encoding/json"
-	"errors"
-	"strconv"
-
-	"github.com/gitopia/git-server/utils"
-
-	// "compress/gzip"
-
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -22,9 +15,12 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 
+	"github.com/gitopia/git-server/utils"
+	gitopiaTypes "github.com/gitopia/gitopia/x/gitopia/types"
 	git "github.com/gitopia/go-git/v5"
 	"github.com/gitopia/go-git/v5/plumbing"
 	"github.com/gitopia/go-git/v5/plumbing/cache"
@@ -33,19 +29,16 @@ import (
 	"github.com/gitopia/go-git/v5/plumbing/object"
 	"github.com/gitopia/go-git/v5/plumbing/protocol/packp"
 	"github.com/gitopia/go-git/v5/plumbing/revlist"
+	"github.com/gitopia/go-git/v5/plumbing/transport"
 	"github.com/gitopia/go-git/v5/plumbing/transport/server"
+	"github.com/gitopia/go-git/v5/storage/filesystem"
 	"github.com/gitopia/goar"
 	"github.com/gitopia/goar/types"
 	"github.com/go-git/go-billy/v5/osfs"
+	"github.com/pkg/errors"
 	"github.com/rs/cors"
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
-
-	// "github.com/gitopia/go-git/v5/storage/memory"
-	"github.com/gitopia/go-git/v5/plumbing/transport"
-	"github.com/gitopia/go-git/v5/storage/filesystem"
-
-	gitopiaTypes "github.com/gitopia/gitopia/x/gitopia/types"
 )
 
 const (
@@ -1050,13 +1043,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/fork") {
-		defer r.Body.Close()
-
-		s.forkRepositoryHandler(w, r)
-		return
-	}
-
 	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/pull/commits") {
 		defer r.Body.Close()
 
@@ -1068,13 +1054,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 
 		s.pullRequestCheckHandler(w, r)
-		return
-	}
-
-	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/pull/merge") {
-		defer r.Body.Close()
-
-		s.pullRequestMergeHandler(w, r)
 		return
 	}
 

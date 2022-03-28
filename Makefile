@@ -4,6 +4,7 @@ all: install
 
 build:
 		@go build -o build/ .
+		@go build -o build/ ./cmd/git-server-events
 
 install: go.sum
 		@echo "--> Installing gitopia services"
