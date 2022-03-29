@@ -146,7 +146,7 @@ func (h *InvokeForkRepositoryEventHandler) Handle(ctx context.Context, eventBuf 
 }
 
 func (h *InvokeForkRepositoryEventHandler) Process(ctx context.Context, event InvokeForkRepositoryEvent) error {
-	logger.FromContext(ctx).Info("process event")
+	logger.FromContext(ctx).Info("process fork repository event")
 
 	res, err := h.gc.Task(ctx, event.TaskId)
 	if err != nil {
@@ -158,19 +158,14 @@ func (h *InvokeForkRepositoryEventHandler) Process(ctx context.Context, event In
 
 	haveAuthorization, err := h.gc.CheckGitServerAuthorization(ctx, event.Creator)
 	if err != nil {
-		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
-		if err2 != nil {
-			return errors.WithMessage(err2, "update task error")
-		}
 		return err
 	}
 	if !haveAuthorization {
-		err = errors.WithMessage(err, "authorization error")
-		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
-		if err2 != nil {
-			return errors.WithMessage(err2, "update task error")
-		}
-		return err
+		logger.FromContext(ctx).
+			WithField("creator", event.Creator).
+			WithField("parent-repo-id", event.RepoId).
+			Info("skipping fork repository, not authorized")
+		return nil
 	}
 
 	err = h.gc.ForkRepository(ctx, event.Creator, event.RepoId, event.OwnerId, event.OwnerType, event.TaskId)
@@ -227,6 +222,7 @@ func (h *InvokeForkRepositoryEventHandler) Process(ctx context.Context, event In
 	}
 
 	logger.FromContext(ctx).
+		WithField("creator", event.Creator).
 		WithField("parent-repo-id", event.RepoId).
 		WithField("forked-repo-id", forkedRepoId).
 		Info("forked repository")

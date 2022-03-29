@@ -136,7 +136,7 @@ func (h *InvokeSetPullRequestStateEventHandler) Handle(ctx context.Context, even
 }
 
 func (h *InvokeSetPullRequestStateEventHandler) Process(ctx context.Context, event InvokeSetPullRequestStateEvent) error {
-	logger.FromContext(ctx).Info("process event")
+	logger.FromContext(ctx).Info("process merge pull request event")
 
 	res, err := h.gc.Task(ctx, event.TaskId)
 	if err != nil {
@@ -148,20 +148,14 @@ func (h *InvokeSetPullRequestStateEventHandler) Process(ctx context.Context, eve
 
 	haveAuthorization, err := h.gc.CheckGitServerAuthorization(ctx, event.Creator)
 	if err != nil {
-		err = errors.WithMessage(err, "query error")
-		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
-		if err2 != nil {
-			return errors.WithMessage(err2, "update task error")
-		}
 		return err
 	}
 	if !haveAuthorization {
-		err = errors.WithMessage(err, "authorization error")
-		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
-		if err2 != nil {
-			return errors.WithMessage(err2, "update task error")
-		}
-		return err
+		logger.FromContext(ctx).
+			WithField("creator", event.Creator).
+			WithField("pull-request-id", event.PullRequestId).
+			Info("skipping merge pull request, not authorized")
+		return nil
 	}
 
 	resp, err := h.gc.PullRequest(ctx, event.PullRequestId)
