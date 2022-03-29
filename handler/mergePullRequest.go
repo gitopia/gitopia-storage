@@ -138,6 +138,14 @@ func (h *InvokeSetPullRequestStateEventHandler) Handle(ctx context.Context, even
 func (h *InvokeSetPullRequestStateEventHandler) Process(ctx context.Context, event InvokeSetPullRequestStateEvent) error {
 	logger.FromContext(ctx).Info("process event")
 
+	res, err := h.gc.Task(ctx, event.TaskId)
+	if err != nil {
+		return err
+	}
+	if res.State != types.StatePending { // Task is already processed
+		return nil
+	}
+
 	haveAuthorization, err := h.gc.CheckGitServerAuthorization(ctx, event.Creator)
 	if err != nil {
 		err = errors.WithMessage(err, "query error")

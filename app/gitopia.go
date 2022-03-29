@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
@@ -96,7 +95,7 @@ func (g GitopiaClient) ForkRepository(ctx context.Context, creator string, repos
 	}
 
 	execMsg := authz.NewMsgExec(accAddr, []sdk.Msg{msg})
-	err = g.exec(ctx, &execMsg)
+	err = g.broadcastTx(ctx, &execMsg)
 	if err != nil {
 		return errors.WithMessage(err, "broadcast error")
 	}
@@ -121,7 +120,7 @@ func (g GitopiaClient) ForkRepositorySuccess(ctx context.Context, creator string
 	}
 
 	execMsg := authz.NewMsgExec(accAddr, []sdk.Msg{msg})
-	err = g.exec(ctx, &execMsg)
+	err = g.broadcastTx(ctx, &execMsg)
 	if err != nil {
 		return errors.WithMessage(err, "broadcast error")
 	}
@@ -147,7 +146,7 @@ func (g GitopiaClient) UpdateTask(ctx context.Context, creator string, id uint64
 	}
 
 	execMsg := authz.NewMsgExec(accAddr, []sdk.Msg{msg})
-	err = g.exec(ctx, &execMsg)
+	err = g.broadcastTx(ctx, &execMsg)
 	if err != nil {
 		return errors.WithMessage(err, "broadcast error")
 	}
@@ -173,7 +172,7 @@ func (g GitopiaClient) SetPullRequestState(ctx context.Context, creator string, 
 	}
 
 	execMsg := authz.NewMsgExec(accAddr, []sdk.Msg{msg})
-	err = g.exec(ctx, &execMsg)
+	err = g.broadcastTx(ctx, &execMsg)
 	if err != nil {
 		return errors.WithMessage(err, "broadcast error")
 	}
@@ -231,12 +230,13 @@ func (g GitopiaClient) PullRequest(ctx context.Context, id uint64) (types.PullRe
 	return *resp.PullRequest, nil
 }
 
-func (g GitopiaClient) exec(ctx context.Context, msg *authz.MsgExec) error {
-	res, err := g.ac.Exec(ctx, msg)
+func (g GitopiaClient) Task(ctx context.Context, id uint64) (types.Task, error) {
+	res, err := g.qc.Task(ctx, &types.QueryGetTaskRequest{
+		Id: id,
+	})
 	if err != nil {
-		return errors.Wrap(err, "error executing msg")
+		return types.Task{}, errors.Wrap(err, "query error")
 	}
 
-	fmt.Println(res.Results)
-	return nil
+	return res.Task, nil
 }

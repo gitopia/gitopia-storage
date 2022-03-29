@@ -148,9 +148,16 @@ func (h *InvokeForkRepositoryEventHandler) Handle(ctx context.Context, eventBuf 
 func (h *InvokeForkRepositoryEventHandler) Process(ctx context.Context, event InvokeForkRepositoryEvent) error {
 	logger.FromContext(ctx).Info("process event")
 
+	res, err := h.gc.Task(ctx, event.TaskId)
+	if err != nil {
+		return err
+	}
+	if res.State != types.StatePending { // Task is already processed
+		return nil
+	}
+
 	haveAuthorization, err := h.gc.CheckGitServerAuthorization(ctx, event.Creator)
 	if err != nil {
-		err = errors.WithMessage(err, "query error")
 		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
 		if err2 != nil {
 			return errors.WithMessage(err2, "update task error")
