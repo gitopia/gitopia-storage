@@ -31,7 +31,6 @@ type GitopiaClient struct {
 	accountName string
 	cc          cosmosclient.Client
 	qc          types.QueryClient
-	ac          authz.MsgClient
 }
 
 func NewGitopiaClient(ctx context.Context, account string) (GitopiaClient, error) {
@@ -47,13 +46,10 @@ func NewGitopiaClient(ctx context.Context, account string) (GitopiaClient, error
 
 	queryClient := types.NewQueryClient(client.Context)
 
-	authzClient := authz.NewMsgClient(client.Context)
-
 	return GitopiaClient{
 		accountName: account,
 		cc:          client,
 		qc:          queryClient,
-		ac:          authzClient,
 	}, nil
 }
 

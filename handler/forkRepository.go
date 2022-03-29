@@ -216,7 +216,7 @@ func (h *InvokeForkRepositoryEventHandler) Process(ctx context.Context, event In
 		return err
 	}
 
-	err = h.gc.ForkRepositorySuccess(ctx, event.Creator, event.RepoId, event.TaskId)
+	err = h.gc.ForkRepositorySuccess(ctx, event.Creator, forkedRepoId, event.TaskId)
 	if err != nil {
 		err = errors.WithMessage(err, "fork repository success error")
 		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
