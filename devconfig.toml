@@ -1,6 +1,0 @@
-gitopia_grpc_url = "localhost:9090"
-arweave_gateway_url = "localhost:1984"
-git_dir = "/var/repos"
-attachment_dir = "/var/attachments"
-tm_addr = "http://localhost:26657"
-key_name = "git-server"

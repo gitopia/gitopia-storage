@@ -20,6 +20,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 type InvokeForkRepositoryEvent struct {
@@ -272,7 +273,7 @@ func (h *InvokeForkRepositoryEventHandler) BackfillMissedEvents(ctx context.Cont
 		}()
 
 		grpcConn, err := grpc.Dial(viper.GetString("gitopia_grpc_url"),
-			grpc.WithInsecure(),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
 		)
 		if err != nil {
 			errChan <- errors.Wrap(err, "dial err")

@@ -14,9 +14,11 @@ import (
 func main() {
 	viper.AddConfigPath(".")
 	if os.Getenv("ENV") == "PRODUCTION" {
-		viper.SetConfigName("config")
+		viper.SetConfigName("config_prod")
+	} else if os.Getenv("ENV") == "DEVELOPMENT" {
+		viper.SetConfigName("config_dev")
 	} else {
-		viper.SetConfigName("devconfig")
+		viper.SetConfigName("config_local")
 	}
 	err := viper.ReadInConfig()
 	if err != nil {

@@ -19,6 +19,7 @@ import (
 	"github.com/gitopia/gitopia/x/gitopia/types"
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 type uploadAttachmentResponse struct {
@@ -128,7 +129,7 @@ func getAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 
 	grpcUrl := viper.GetString("gitopia_grpc_url")
 	grpcConn, err := grpc.Dial(grpcUrl,
-		grpc.WithInsecure(),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

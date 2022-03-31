@@ -32,7 +32,6 @@ The server will be listening at port `5000`
 ### Available APIs
 
 - `GET` /objects/<repository_id>/<object_hash> : get loose git object
-- `POST` /save : save newly pushed objects to Arweave
 - `POST` /upload : upload release/issue/pull_request/comment attachments
 - `GET` /releases/<address>/<repositoryName>/<tagName>/<fileName> : get attachment
 - `GET` /info/refs

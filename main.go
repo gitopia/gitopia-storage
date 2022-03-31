@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bytes"
-	"context"
 	contextB "context"
 	"encoding/json"
 	"fmt"
@@ -15,12 +13,10 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"syscall"
 
 	"github.com/gitopia/git-server/utils"
-	gitopiaTypes "github.com/gitopia/gitopia/x/gitopia/types"
 	git "github.com/gitopia/go-git/v5"
 	"github.com/gitopia/go-git/v5/plumbing"
 	"github.com/gitopia/go-git/v5/plumbing/cache"
@@ -28,17 +24,12 @@ import (
 	"github.com/gitopia/go-git/v5/plumbing/format/pktline"
 	"github.com/gitopia/go-git/v5/plumbing/object"
 	"github.com/gitopia/go-git/v5/plumbing/protocol/packp"
-	"github.com/gitopia/go-git/v5/plumbing/revlist"
 	"github.com/gitopia/go-git/v5/plumbing/transport"
 	"github.com/gitopia/go-git/v5/plumbing/transport/server"
 	"github.com/gitopia/go-git/v5/storage/filesystem"
-	"github.com/gitopia/goar"
-	"github.com/gitopia/goar/types"
 	"github.com/go-git/go-billy/v5/osfs"
-	"github.com/pkg/errors"
 	"github.com/rs/cors"
 	"github.com/spf13/viper"
-	"google.golang.org/grpc"
 )
 
 const (
@@ -356,180 +347,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
-		}
-
-		return
-	}
-
-	// Save objects to Arweave
-	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/save") {
-		defer r.Body.Close()
-
-		decoder := json.NewDecoder(r.Body)
-		var body SaveToArweavePostBody
-		err := decoder.Decode(&body)
-		if err != nil {
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-
-		RepoPath := path.Join(s.config.Dir, fmt.Sprintf("%v.git", body.RepositoryID))
-		repo, err := git.PlainOpen(RepoPath)
-		if err != nil {
-			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
-			return
-		}
-
-		prevHash := plumbing.NewHash(body.PrevRemoteRefSha)
-
-		grpcUrl := viper.GetString("gitopia_grpc_url")
-		grpcConn, err := grpc.Dial(grpcUrl,
-			grpc.WithInsecure(),
-		)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		defer grpcConn.Close()
-
-		queryClient := gitopiaTypes.NewQueryClient(grpcConn)
-
-		var ignore []plumbing.Hash
-
-		branchAllRes, err := queryClient.BranchAll(context.Background(), &gitopiaTypes.QueryGetAllBranchRequest{
-			RepositoryId: body.RepositoryID,
-		})
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		for _, branch := range branchAllRes.Branches {
-			var hashes []plumbing.Hash
-
-			if body.RemoteRefName != branchPrefix+branch.Name {
-				hashes, err = revlist.Objects(repo.Storer, []plumbing.Hash{plumbing.NewHash(branch.Sha)}, nil)
-			} else {
-				if body.NewRemoteRefSha != branch.Sha {
-					http.Error(w, errors.New("fatal: mismatch in remote ref sha").Error(), http.StatusBadRequest)
-					return
-				}
-				if !prevHash.IsZero() { // new branch
-					hashes, err = revlist.Objects(repo.Storer, []plumbing.Hash{prevHash}, nil)
-				}
-			}
-
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			ignore = append(ignore, hashes...)
-		}
-
-		tagAllRes, err := queryClient.TagAll(context.Background(), &gitopiaTypes.QueryGetAllTagRequest{
-			RepositoryId: body.RepositoryID,
-		})
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		for _, tag := range tagAllRes.Tags {
-			var hashes []plumbing.Hash
-
-			if body.RemoteRefName != tagPrefix+tag.Name {
-				hashes, err = revlist.Objects(repo.Storer, []plumbing.Hash{plumbing.NewHash(tag.Sha)}, nil)
-			} else {
-				if body.NewRemoteRefSha != tag.Sha {
-					http.Error(w, errors.New("fatal: mismatch in remote ref sha").Error(), http.StatusBadRequest)
-					return
-				}
-				if !prevHash.IsZero() { // new tag
-					hashes, err = revlist.Objects(repo.Storer, []plumbing.Hash{prevHash}, nil)
-				}
-			}
-
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			ignore = append(ignore, hashes...)
-		}
-
-		hashes, err := revlist.Objects(repo.Storer, []plumbing.Hash{plumbing.NewHash(body.NewRemoteRefSha)}, ignore)
-
-		// Initialize arweave client
-		arweaveGatewayUrl := viper.GetString("arweave_gateway_url")
-		wallet, err := goar.NewWalletFromPath("./test-keyfile.json", arweaveGatewayUrl)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		for _, hash := range hashes {
-			obj, err := repo.Storer.EncodedObject(plumbing.AnyObject, hash)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-
-			readCloser, err := obj.Reader()
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			defer readCloser.Close()
-
-			var buf bytes.Buffer
-			objWriter := objfile.NewWriter(&buf)
-			defer objWriter.Close()
-
-			err = objWriter.WriteHeader(obj.Type(), obj.Size())
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			_, err = io.Copy(objWriter, readCloser)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-
-			repositoryId := strconv.FormatUint(body.RepositoryID, 10)
-
-			// Upload object to Arweave
-			_, err = wallet.SendData(
-				buf.Bytes(),
-				[]types.Tag{
-					{
-						Name:  "App-Name",
-						Value: "gitopia",
-					},
-					{
-						Name:  "App-Version",
-						Value: "0.1.0",
-					},
-					{
-						Name:  "Repository-Id",
-						Value: repositoryId,
-					},
-					{
-						Name:  "Object-Hash",
-						Value: hash.String(),
-					},
-				},
-			)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-		}
-
-		// Mine Arweave block in testnet
-		err = mineArweaveTestnetBlock()
-		if err != nil {
-			logError("error mining arweave testnet block", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 
 		return
@@ -1341,9 +1158,11 @@ func main() {
 
 	viper.AddConfigPath(".")
 	if os.Getenv("ENV") == "PRODUCTION" {
-		viper.SetConfigName("config")
+		viper.SetConfigName("config_prod")
+	} else if os.Getenv("ENV") == "DEVELOPMENT" {
+		viper.SetConfigName("config_dev")
 	} else {
-		viper.SetConfigName("devconfig")
+		viper.SetConfigName("config_local")
 	}
 	err := viper.ReadInConfig()
 	if err != nil {
