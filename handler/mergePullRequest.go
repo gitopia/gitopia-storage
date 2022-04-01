@@ -27,7 +27,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-type InvokeSetPullRequestStateEvent struct {
+type InvokeMergePullRequestEvent struct {
 	Creator       string
 	PullRequestId uint64
 	TaskId        uint64
@@ -35,7 +35,7 @@ type InvokeSetPullRequestStateEvent struct {
 }
 
 // tm event codec
-func (e *InvokeSetPullRequestStateEvent) UnMarshal(eventBuf []byte) error {
+func (e *InvokeMergePullRequestEvent) UnMarshal(eventBuf []byte) error {
 	creator, err := jsonparser.GetString(eventBuf, "events", "message.Creator", "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing creator")
@@ -76,7 +76,7 @@ func (e *InvokeSetPullRequestStateEvent) UnMarshal(eventBuf []byte) error {
 	return nil
 }
 
-type InvokeSetPullRequestStateEventHandler struct {
+type InvokeMergePullRequestEventHandler struct {
 	tmc *tm.Client
 	gc  app.GitopiaClient
 
@@ -90,11 +90,11 @@ type InvokeSetPullRequestStateEventHandler struct {
 	offsetChan     chan uint64
 }
 
-func NewInvokeSetPullRequestStateEventHandler(
+func NewInvokeMergePullRequestEventHandler(
 	g app.GitopiaClient,
 	t *tm.Client,
-	c consumer.Client) InvokeSetPullRequestStateEventHandler {
-	return InvokeSetPullRequestStateEventHandler{
+	c consumer.Client) InvokeMergePullRequestEventHandler {
+	return InvokeMergePullRequestEventHandler{
 		tmc:          t,
 		gc:           g,
 		cc:           c,
@@ -103,8 +103,8 @@ func NewInvokeSetPullRequestStateEventHandler(
 	}
 }
 
-func (h *InvokeSetPullRequestStateEventHandler) Handle(ctx context.Context, eventBuf []byte) error {
-	event := &InvokeSetPullRequestStateEvent{}
+func (h *InvokeMergePullRequestEventHandler) Handle(ctx context.Context, eventBuf []byte) error {
+	event := &InvokeMergePullRequestEvent{}
 	err := event.UnMarshal(eventBuf)
 	if err != nil {
 		return errors.WithMessage(err, "event parse error")
@@ -136,7 +136,7 @@ func (h *InvokeSetPullRequestStateEventHandler) Handle(ctx context.Context, even
 	return nil
 }
 
-func (h *InvokeSetPullRequestStateEventHandler) Process(ctx context.Context, event InvokeSetPullRequestStateEvent) error {
+func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event InvokeMergePullRequestEvent) error {
 	logger.FromContext(ctx).Info("process merge pull request event")
 
 	res, err := h.gc.Task(ctx, event.TaskId)
@@ -441,7 +441,7 @@ func (h *InvokeSetPullRequestStateEventHandler) Process(ctx context.Context, eve
 // fetch missed txs
 // fetch repository information for missed txs
 // process setRepositoryEvent
-func (h *InvokeSetPullRequestStateEventHandler) BackfillMissedEvents(ctx context.Context) (<-chan struct{}, chan error) {
+func (h *InvokeMergePullRequestEventHandler) BackfillMissedEvents(ctx context.Context) (<-chan struct{}, chan error) {
 	errChan := make(chan error)
 	ctx, cancel := context.WithCancel(ctx)
 	go func() {
@@ -491,7 +491,7 @@ func (h *InvokeSetPullRequestStateEventHandler) BackfillMissedEvents(ctx context
 		for offset, remainingPages := uint64(0), uint64(0); offset == 0 || remainingPages > 0; offset,
 			remainingPages = offset+query.DefaultLimit, remainingPages-1 {
 			res, err := serviceClient.GetTxsEvent(ctx, &tx.GetTxsEventRequest{
-				Events: []string{"message.action='InvokeSetPullRequestState'",
+				Events: []string{"message.action='InvokeMergePullRequest'",
 					// NOTE: > and < operators are not supported
 					fmt.Sprintf("tx.height>=%d", startHeight+1),
 					fmt.Sprintf("tx.height<=%d", endHeight-1),
@@ -511,7 +511,7 @@ func (h *InvokeSetPullRequestStateEventHandler) BackfillMissedEvents(ctx context
 			for _, r := range res.GetTxResponses() {
 				for _, e := range r.Events {
 					switch e.GetType() {
-					case "InvokeSetPullRequestState":
+					case "InvokeMergePullRequest":
 						attributeMap := make(map[string]string)
 						for i := 0; i < len(e.Attributes); i++ {
 							attributeMap[string(e.Attributes[i].Key)] = string(e.Attributes[i].Value)
@@ -529,7 +529,7 @@ func (h *InvokeSetPullRequestStateEventHandler) BackfillMissedEvents(ctx context
 							return
 						}
 
-						event := InvokeSetPullRequestStateEvent{
+						event := InvokeMergePullRequestEvent{
 							Creator:       attributeMap["Creator"],
 							PullRequestId: prId,
 							TaskId:        taskId,

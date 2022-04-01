@@ -49,22 +49,22 @@ func run(cmd *cobra.Command, args []string) error {
 		return errors.WithMessage(err, "error creating consumer client")
 	}
 
-	mcc, err := consumer.NewClient("invokeSetPullRequestStateEvent")
+	mcc, err := consumer.NewClient("invokeMergePullRequestEvent")
 	if err != nil {
 		return errors.WithMessage(err, "error creating consumer client")
 	}
 
 	forkHandler := handler.NewInvokeForkRepositoryEventHandler(gc, ftmc, fcc)
-	mergeHandler := handler.NewInvokeSetPullRequestStateEventHandler(gc, mtmc, mcc)
+	mergeHandler := handler.NewInvokeMergePullRequestEventHandler(gc, mtmc, mcc)
 
 	_, forkBackfillErr := forkHandler.BackfillMissedEvents(ctx)
 	_, mergeBackfillErr := mergeHandler.BackfillMissedEvents(ctx)
 
 	invokeForkRepositoryQuery := "tm.event='Tx' AND message.action='InvokeForkRepository'"
-	InvokeSetPullRequestStateQuery := "tm.event='Tx' AND message.action='InvokeSetPullRequestState'"
+	InvokeMergePullRequestQuery := "tm.event='Tx' AND message.action='InvokeMergePullRequest'"
 
 	forkDone, forkSubscribeErr := ftmc.Subscribe(ctx, invokeForkRepositoryQuery, forkHandler.Handle)
-	mergeDone, mergeSubscribeErr := mtmc.Subscribe(ctx, InvokeSetPullRequestStateQuery, mergeHandler.Handle)
+	mergeDone, mergeSubscribeErr := mtmc.Subscribe(ctx, InvokeMergePullRequestQuery, mergeHandler.Handle)
 
 	// wait for error from all the concurrent event processors
 	select {
