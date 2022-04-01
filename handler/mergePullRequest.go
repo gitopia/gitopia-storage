@@ -420,7 +420,7 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 		return err
 	}
 
-	err = h.gc.SetPullRequestState(ctx, event.Creator, event.PullRequestId, "MERGED", mergeCommitSha)
+	err = h.gc.SetPullRequestState(ctx, event.Creator, event.PullRequestId, "MERGED", mergeCommitSha, event.TaskId)
 	if err != nil {
 		err = errors.WithMessage(err, "set pull request state error")
 		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())

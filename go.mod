@@ -12,7 +12,6 @@ require (
 	github.com/libgit2/git2go/v33 v33.0.4
 	github.com/pkg/errors v0.9.1
 	github.com/rs/cors v1.8.2
-	github.com/sirupsen/logrus v1.8.1
 	github.com/spf13/cobra v1.4.0
 	github.com/spf13/viper v1.10.1
 	github.com/tendermint/starport v0.19.3

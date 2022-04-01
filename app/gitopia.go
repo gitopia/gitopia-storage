@@ -149,12 +149,13 @@ func (g GitopiaClient) UpdateTask(ctx context.Context, creator string, id uint64
 	return nil
 }
 
-func (g GitopiaClient) SetPullRequestState(ctx context.Context, creator string, id uint64, state string, mergeCommitSha string) error {
+func (g GitopiaClient) SetPullRequestState(ctx context.Context, creator string, id uint64, state string, mergeCommitSha string, taskId uint64) error {
 	msg := &types.MsgSetPullRequestState{
 		Creator:        creator,
 		Id:             id,
 		State:          state,
 		MergeCommitSha: mergeCommitSha,
+		TaskId:         taskId,
 	}
 
 	address, err := g.Address()
