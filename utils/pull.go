@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gitopia/gitopia/x/gitopia/types"
 	git "github.com/libgit2/git2go/v33"
 	"github.com/spf13/viper"
 )
@@ -167,15 +168,14 @@ func CreateQuarantineRepo(baseRepositoryID uint64, headRepositoryID uint64, base
 	return tmpBasePath, nil
 }
 
-func CommitAndSignNoAuthor(pr *PullRequestMergePostBody, message, signArg, quarantineRepoPath string, env []string) error {
+func CommitAndSignNoAuthor(pr types.PullRequest, message, signArg, quarantineRepoPath string, env []string) error {
 	if signArg == "" {
 		cmd := exec.Command("git", "commit", "-m", message)
 		cmd.Env = env
 		cmd.Dir = quarantineRepoPath
 		out, err := cmd.Output()
 		if err != nil {
-			err = fmt.Errorf("git commit [%v:%s -> %v:%s]: %v\n%s", pr.HeadRepositoryID, pr.HeadBranch, pr.BaseRepositoryID, pr.BaseBranch, err, string(out))
-			log.Println(err.Error())
+			err = fmt.Errorf("git commit [%v:%s -> %v:%s]: %v\n%s", pr.Head.RepositoryId, pr.Head.Branch, pr.Base.RepositoryId, pr.Base.Branch, err, string(out))
 			return err
 		}
 	} else {
@@ -184,31 +184,27 @@ func CommitAndSignNoAuthor(pr *PullRequestMergePostBody, message, signArg, quara
 		cmd.Dir = quarantineRepoPath
 		out, err := cmd.Output()
 		if err != nil {
-			err = fmt.Errorf("git commit [%v:%s -> %v:%s]: %v\n%s", pr.HeadRepositoryID, pr.HeadBranch, pr.BaseRepositoryID, pr.BaseBranch, err, string(out))
-			log.Println(err.Error())
+			err = fmt.Errorf("git commit [%v:%s -> %v:%s]: %v\n%s", pr.Head.RepositoryId, pr.Head.Branch, pr.Base.RepositoryId, pr.Base.Branch, err, string(out))
 			return err
 		}
 	}
 	return nil
 }
 
-func RunMergeCommand(pr *PullRequestMergePostBody, cmd *exec.Cmd, quarantineRepoPath string) error {
+func RunMergeCommand(prHead types.PullRequestHead, prBase types.PullRequestBase, cmd *exec.Cmd, quarantineRepoPath string) error {
 	cmd.Dir = quarantineRepoPath
 	out, err := cmd.Output()
 	if err != nil {
 		// Merge will leave a MERGE_HEAD file in the .git folder if there is a conflict
 		if _, statErr := os.Stat(filepath.Join(quarantineRepoPath, ".git", "MERGE_HEAD")); statErr == nil {
 			// We have a merge conflict error
-			err = fmt.Errorf("MergeConflict [%v:%s -> %v:%s]: %v\n%s", pr.HeadRepositoryID, pr.HeadBranch, pr.BaseRepositoryID, pr.BaseBranch, err, string(out))
-			log.Println(err)
+			err = fmt.Errorf("MergeConflict [%v:%s -> %v:%s]: %v\n%s", prHead.RepositoryId, prHead.Branch, prBase.RepositoryId, prBase.Branch, err, string(out))
 			return err
 		} else if strings.Contains(string(out), "refusing to merge unrelated histories") {
-			err = fmt.Errorf("MergeUnrelatedHistories [%v:%s -> %v:%s]: %v\n%s", pr.HeadRepositoryID, pr.HeadBranch, pr.BaseRepositoryID, pr.BaseBranch, err, string(out))
-			log.Println(err)
+			err = fmt.Errorf("MergeUnrelatedHistories [%v:%s -> %v:%s]: %v\n%s", prHead.RepositoryId, prHead.Branch, prBase.RepositoryId, prBase.Branch, err, string(out))
 			return err
 		}
-		err = fmt.Errorf("git merge [%v:%s -> %v:%s]: %v\n%s", pr.HeadRepositoryID, pr.HeadBranch, pr.BaseRepositoryID, pr.BaseBranch, err, string(out))
-		log.Println(string(out))
+		err = fmt.Errorf("git merge [%v:%s -> %v:%s]: %v\n%s", prHead.RepositoryId, prHead.Branch, prBase.RepositoryId, prBase.Branch, err, string(out))
 		return err
 	}
 

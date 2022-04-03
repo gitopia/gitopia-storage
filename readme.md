@@ -2,7 +2,9 @@
 
 gitopia services for [gitopia](https://gitopia.org/)
 
-## Build
+## Web server
+
+### Build
 
 ```
 docker build . --build-arg USER=<USER> \
@@ -11,7 +13,7 @@ docker build . --build-arg USER=<USER> \
   -t git-server
 ```
 
-## Usage
+### Usage
 
 Make necessary changes in `config.toml` for production and also set the following environment variable. Create `git_dir` and `attachments_dir` and verify the permissions.
 
@@ -27,20 +29,17 @@ docker run -it \
 
 The server will be listening at port `5000`
 
-## Available APIs
+### Available APIs
 
 - `GET` /objects/<repository_id>/<object_hash> : get loose git object
-- `POST` /save : save newly pushed objects to Arweave
 - `POST` /upload : upload release/issue/pull_request/comment attachments
 - `GET` /releases/<address>/<repositoryName>/<tagName>/<fileName> : get attachment
 - `GET` /info/refs
 - `POST` /git-upload-pack
 - `POST` /git-receive-pack
-- `POST` /fork
 - `POST` /pull/diff
 - `POST` /pull/commits
 - `POST` /pull/check
-- `POST` /pull/merge
 - `POST` /content
   ```go
   type ContentRequestBody struct {
@@ -59,3 +58,35 @@ The server will be listening at port `5000`
     Pagination   *PageRequest `json:"pagination"`
   }
   ```
+
+## Event processing service
+
+### Build
+
+```
+make build
+```
+
+### Usage
+
+Make necessary changes in `config.toml` for production and also set the following environment variable. Create `git_dir` and verify the permissions.
+
+Create a key for git-server-events and send some tokens to it's address
+
+```sh
+./build/git-server-events keys add git-server --keyring-backend test
+```
+
+Get address
+
+```sh
+./build/git-server-events keys show git-server -a --keyring-backend test
+```
+
+To start the service, execute the following command
+
+```sh
+./build/git-server-events run
+```
+
+Logs will be available at `gitopia-ipfs-bridge.log`
