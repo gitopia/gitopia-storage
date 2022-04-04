@@ -121,10 +121,9 @@ func PaginateCommitHistoryResponse(
 		var nextKey []byte
 
 		start := BytesToUInt64(key)
-		end := limit
-		shown := start + end
+		shown := start + limit
 
-		commitHashes, err := CommitHistory(repoPath, body.InitCommitId, body.Path, int(start), int(end))
+		commitHashes, err := CommitHistory(repoPath, body.InitCommitId, body.Path, int(start), int(limit))
 		if err != nil {
 			return nil, err
 		}
@@ -146,7 +145,7 @@ func PaginateCommitHistoryResponse(
 		}
 
 		if count > shown {
-			nextKey = UInt64ToBytes(uint64(end))
+			nextKey = UInt64ToBytes(uint64(shown))
 		}
 		res := &PageResponse{NextKey: nextKey}
 		if countTotal {
@@ -156,12 +155,11 @@ func PaginateCommitHistoryResponse(
 		return res, nil
 	}
 
-	end := limit
-	shown := offset + end
+	shown := offset + limit
 
 	var nextKey []byte
 
-	commitHashes, err := CommitHistory(repoPath, body.InitCommitId, body.Path, int(offset), int(end))
+	commitHashes, err := CommitHistory(repoPath, body.InitCommitId, body.Path, int(offset), int(limit))
 	if err != nil {
 		return nil, err
 	}
@@ -183,7 +181,7 @@ func PaginateCommitHistoryResponse(
 	}
 
 	if count > shown {
-		nextKey = UInt64ToBytes(uint64(end))
+		nextKey = UInt64ToBytes(uint64(shown))
 	}
 	res := &PageResponse{NextKey: nextKey}
 	if countTotal {
