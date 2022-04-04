@@ -1,5 +1,15 @@
 # Changelog
 
+## [v0.6.0] - 2022-04-04
+
+### Features
+
+- New service which processes fork repo and merge pr events
+
+### Fixes
+
+- Fix next_key in commits api response
+
 ## [v0.5.0] - 2022-02-15
 
 ### Features
