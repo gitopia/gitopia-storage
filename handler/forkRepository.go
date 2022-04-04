@@ -189,7 +189,7 @@ func (h *InvokeForkRepositoryEventHandler) Process(ctx context.Context, event In
 		return err
 	}
 
-	forkedRepoId, err := h.gc.ForkedRepositoryId(ctx, event.Creator, repositoryName)
+	forkedRepoId, err := h.gc.ForkedRepositoryId(ctx, event.OwnerId, repositoryName)
 	if err != nil {
 		err = errors.WithMessage(err, "query error")
 		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
