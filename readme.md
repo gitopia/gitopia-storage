@@ -89,4 +89,4 @@ To start the service, execute the following command
 ./build/git-server-events run
 ```
 
-Logs will be available at `gitopia-ipfs-bridge.log`
+Logs will be available at `gitopia-git-server-events.log`

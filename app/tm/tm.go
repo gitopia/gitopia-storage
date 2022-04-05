@@ -3,7 +3,7 @@ package tm
 import (
 	"context"
 
-	"github.com/gitopia/gitopia-ipfs-bridge/logger"
+	"github.com/gitopia/git-server/logger"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 	"github.com/tendermint/tendermint/rpc/jsonrpc/client"

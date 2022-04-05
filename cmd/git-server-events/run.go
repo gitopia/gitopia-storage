@@ -8,10 +8,10 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/gitopia/git-server/app"
+	"github.com/gitopia/git-server/app/consumer"
 	"github.com/gitopia/git-server/app/tm"
 	"github.com/gitopia/git-server/handler"
-	"github.com/gitopia/gitopia-ipfs-bridge/app/consumer"
-	"github.com/gitopia/gitopia-ipfs-bridge/logger"
+	"github.com/gitopia/git-server/logger"
 )
 
 func NewRunCmd() *cobra.Command {
