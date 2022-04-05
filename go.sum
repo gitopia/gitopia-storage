@@ -633,8 +633,6 @@ github.com/gin-contrib/sse v0.1.0/go.mod h1:RHrZQHXnP2xjPF+u1gW/2HnVO7nvIa9PG3Gm
 github.com/gin-gonic/gin v1.5.0/go.mod h1:Nd6IXA8m5kNZdNEHMBd93KT+mdY3+bewLgRvmCsR2Do=
 github.com/gin-gonic/gin v1.6.3/go.mod h1:75u5sXoLsGZoRN5Sgbi1eraJ4GU3++wFwWzhwvtwp4M=
 github.com/gitopia/gitopia v0.10.1/go.mod h1:dNVXmTrslR7J20yRTu6DwfoVhgyG8zW1Oo9C5zTuLcI=
-github.com/gitopia/gitopia v0.12.1-0.20220328102124-d628aacd2340 h1:GhnVfDyQgwWJ0TAWF6ykcPgTrc4MAX3EEEzWEsEAodY=
-github.com/gitopia/gitopia v0.12.1-0.20220328102124-d628aacd2340/go.mod h1:Phw2slL5tqgVIpGNsvJA4+2QLOhb9OLY8/scjUDR+ac=
 github.com/gitopia/gitopia v0.13.0 h1:KKAYbawguYp2mhqmqfmo5r6hq+Sllx1m9XaMv8BkyfE=
 github.com/gitopia/gitopia v0.13.0/go.mod h1:Q9GChdBKWO6KFyLw005soOM4mliU6IE0N+8FWyFeQ/M=
 github.com/gitopia/gitopia-ipfs-bridge v0.0.0-20220324075926-93f790f71054 h1:U5g565slV6XJbRapnELHJTqBKBiZXHresFDzVcimToI=

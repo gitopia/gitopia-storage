@@ -15,6 +15,7 @@ require (
 	github.com/spf13/cobra v1.4.0
 	github.com/spf13/viper v1.10.1
 	github.com/tendermint/starport v0.19.3
+	github.com/tendermint/tendermint v0.34.15
 	google.golang.org/grpc v1.45.0
 )
 
