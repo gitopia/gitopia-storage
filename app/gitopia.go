@@ -6,7 +6,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 
-	"github.com/gitopia/gitopia-ipfs-bridge/logger"
+	"github.com/gitopia/git-server/logger"
 	"github.com/gitopia/gitopia/x/gitopia/types"
 	"github.com/tendermint/starport/starport/pkg/cosmosaccount"
 	"github.com/tendermint/starport/starport/pkg/cosmosclient"

@@ -7,7 +7,7 @@ import (
 
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/gitopia/git-server/app"
-	"github.com/gitopia/gitopia-ipfs-bridge/logger"
+	"github.com/gitopia/git-server/logger"
 	"github.com/spf13/viper"
 )
 

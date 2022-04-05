@@ -1187,7 +1187,7 @@ func main() {
 	handler := cors.Default().Handler(mux)
 
 	// Start HTTP server
-	if err := http.ListenAndServe(":5000", handler); err != nil {
+	if err := http.ListenAndServe(fmt.Sprintf(":%v", viper.GetString("web_server_port")), handler); err != nil {
 		log.Fatal(err)
 	}
 }
