@@ -22,23 +22,11 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+const MAX_UPLOAD_SIZE = 2 * 1024 * 1024 * 1024 // 2GB
+
 type uploadAttachmentResponse struct {
 	Sha  string `json:"sha"`
 	Size int64  `json:"size"`
-}
-
-type forkRepositoryPostBody struct {
-	SourceRepositoryID uint64 `json:"source_repository_id"`
-	TargetRepositoryID uint64 `json:"target_repository_id"`
-}
-
-type forkRepositoryResponseData struct {
-	Forked bool `json:"forked"`
-}
-
-type forkRepositoryResponse struct {
-	Data  forkRepositoryResponseData `json:"data"`
-	Error string                     `json:"error"`
 }
 
 type pullRequestCheckResponseData struct {
@@ -50,17 +38,12 @@ type pullRequestCheckResponse struct {
 	Error string                       `json:"error"`
 }
 
-type pullRequestMergeResponseData struct {
-	Merged         bool   `json:"merged"`
-	MergeCommitSha string `json:"merge_commit_sha"`
-}
-
-type pullRequestMergeResponse struct {
-	Data  pullRequestMergeResponseData `json:"data"`
-	Error string                       `json:"error"`
-}
-
 func uploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, MAX_UPLOAD_SIZE)
+	if err := r.ParseMultipartForm(MAX_UPLOAD_SIZE); err != nil {
+		http.Error(w, "The uploaded file is too big. Please choose an file that's less than 2GB in size", http.StatusBadRequest)
+		return
+	}
 
 	err := r.ParseMultipartForm(32 << 20)
 	if err != nil {
@@ -85,11 +68,19 @@ func uploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 
 	sha := sha256.New()
 	_, err = io.Copy(io.MultiWriter(sha, tmpFile), file)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	attachmentDir := viper.GetString("attachment_dir")
 	shaString := hex.EncodeToString(sha.Sum(nil))
 	filePath := fmt.Sprintf("%s/%s", attachmentDir, shaString)
 	localFile, err := os.Create(filePath)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	defer localFile.Close()
 
 	tmpFile.Seek(0, io.SeekStart)
@@ -108,8 +99,6 @@ func uploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(resp)
-
-	return
 }
 
 func getAttachmentHandler(w http.ResponseWriter, r *http.Request) {
@@ -170,8 +159,6 @@ func getAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
-
-	return
 }
 
 func (s *Server) pullRequestCommitsHandler(w http.ResponseWriter, r *http.Request) {
