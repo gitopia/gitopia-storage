@@ -3,16 +3,14 @@ package app
 import (
 	"context"
 
-	"github.com/pkg/errors"
-	"github.com/spf13/viper"
-
-	"github.com/gitopia/git-server/logger"
-	"github.com/gitopia/gitopia/x/gitopia/types"
-	"github.com/tendermint/starport/starport/pkg/cosmosaccount"
-	"github.com/tendermint/starport/starport/pkg/cosmosclient"
-
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/x/authz"
+	"github.com/gitopia/git-server/logger"
+	"github.com/gitopia/gitopia/x/gitopia/types"
+	"github.com/pkg/errors"
+	"github.com/spf13/viper"
+	"github.com/tendermint/starport/starport/pkg/cosmosaccount"
+	"github.com/tendermint/starport/starport/pkg/cosmosclient"
 )
 
 const (
@@ -37,7 +35,8 @@ func NewGitopiaClient(ctx context.Context, account string) (GitopiaClient, error
 	client, err := cosmosclient.New(ctx,
 		cosmosclient.WithNodeAddress(viper.GetString("tm_addr")),
 		//cosmosclient.WithKeyringServiceName("cosmos"), // not suported on macos
-		cosmosclient.WithKeyringBackend(cosmosaccount.KeyringOS),
+		cosmosclient.WithKeyringBackend(cosmosaccount.KeyringTest),
+		cosmosclient.WithHome(viper.GetString("keyring_dir")),
 		cosmosclient.WithAddressPrefix(GITOPIA_ACC_ADDRESS_PREFIX),
 	)
 	if err != nil {

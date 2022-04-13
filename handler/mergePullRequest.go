@@ -169,7 +169,17 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 		return err
 	}
 
-	message := fmt.Sprintf("Merge pull request #%v from %s/%s", resp.Iid, event.Creator, resp.Head.Branch)
+	headRepositoryName, err := h.gc.RepositoryName(ctx, resp.Head.RepositoryId)
+	if err != nil {
+		err = errors.WithMessage(err, "query error")
+		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
+		if err2 != nil {
+			return errors.WithMessage(err2, "update task error")
+		}
+		return err
+	}
+
+	message := fmt.Sprintf("Merge pull request #%v from %s/%s", resp.Iid, headRepositoryName, resp.Head.Branch)
 
 	quarantineRepoPath, err := utils.CreateQuarantineRepo(resp.Base.RepositoryId, resp.Head.RepositoryId, resp.Base.Branch, resp.Head.Branch)
 	if err != nil {
