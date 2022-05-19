@@ -698,7 +698,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				if err != nil {
 					http.Error(w, err.Error(), http.StatusNotFound)
 				}
-				fc, err := utils.GrabFileContent(*blob, *treeEntry, body.Path)
+				fc, err := utils.GrabFileContent(*blob, *treeEntry, body.Path, body.NoRestriction)
 				if err != nil {
 					http.Error(w, err.Error(), http.StatusNotFound)
 				}
