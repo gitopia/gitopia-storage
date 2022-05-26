@@ -25,6 +25,7 @@ type ContentRequestBody struct {
 	Path              string       `json:"path"`
 	IncludeLastCommit bool         `json:"include_last_commit"`
 	Pagination        *PageRequest `json:"pagination"`
+	NoRestriction     bool         `json:"no_restriction"`
 }
 
 type ContentResponse struct {
@@ -43,14 +44,18 @@ type Content struct {
 	LastCommit *Commit `json:"last_commit,omitempty"`
 }
 
-func GrabFileContent(blob object.Blob, treeEntry object.TreeEntry, pathPrefix string) (res *Content, err error) {
-	blobReader, err := blob.Reader()
-	if err != nil {
-		return nil, err
+func GrabFileContent(blob object.Blob, treeEntry object.TreeEntry, pathPrefix string, noRestriction bool) (res *Content, err error) {
+	var encodedData, encoding string
+	if blob.Size < 1000000 || noRestriction {
+		blobReader, err := blob.Reader()
+		if err != nil {
+			return nil, err
+		}
+		blobReader.Close()
+		data, err := ioutil.ReadAll(blobReader)
+		encodedData = base64.StdEncoding.EncodeToString(data)
+		encoding = "base64"
 	}
-	blobReader.Close()
-	data, err := ioutil.ReadAll(blobReader)
-	encodedData := base64.StdEncoding.EncodeToString(data)
 
 	fileContent := Content{
 		Name: treeEntry.Name,
@@ -61,17 +66,11 @@ func GrabFileContent(blob object.Blob, treeEntry object.TreeEntry, pathPrefix st
 				return pathPrefix
 			}
 		}(),
-		Sha: treeEntry.Hash.String(),
-		Type: func() string {
-			if treeEntry.Mode.IsFile() {
-				return BLOB.String()
-			} else {
-				return TREE.String()
-			}
-		}(),
+		Sha:      treeEntry.Hash.String(),
+		Type:     BLOB.String(),
 		Size:     blob.Size,
 		Content:  encodedData,
-		Encoding: "base64",
+		Encoding: encoding,
 	}
 	return &fileContent, nil
 }
