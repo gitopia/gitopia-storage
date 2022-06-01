@@ -6,6 +6,7 @@ gitopia services for [gitopia](https://gitopia.org/)
 
 ### Build
 
+By default, git-server is built with local configurations. If you want to build with `PRODUCTION` or `DEVELOPMENT` configurations, pass a build arg `ENV` with respective value.
 ```
 docker build . --build-arg USER=<USER> \
   --build-arg PERSONAL_ACCESS_TOKEN=<PERSONAL_ACCESS_TOKEN> \
