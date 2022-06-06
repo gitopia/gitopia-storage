@@ -23,10 +23,13 @@ To start the server, execute the following command
 ```sh
 docker run -it \
   --name git-server \
-  --mount type=bind,source="$(pwd)/../tmp",target=/var/attachments \
-  --mount type=bind,source="$(pwd)/../tmp",target=/var/repos -p 5000:5000 \
+  --mount type=bind,source=/var/attachments,target=/var/attachments \
+  --mount type=bind,source=/var/repos,target=/var/repos -p 5000:5000 \
   git-server
 ```
+
+> **Important**  
+> Make sure that `source`, `target` in the docker run command and the `git_dir` in the configuration file have the same path. This is required because forked repositories link to parent repositories via the git alternates mechanism wherein the absolute path of the parent repository is stored in the forked repository's alternates file.
 
 The server will be listening at port `5000`
 
