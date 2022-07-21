@@ -13,6 +13,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"syscall"
 
@@ -503,7 +504,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if treeEntry.Mode.IsFile() {
-				var fileContent []*utils.Content
+				var fileContent []utils.Content
 				blob, err := object.GetBlob(repo.Storer, treeEntry.Hash)
 				if err != nil {
 					http.Error(w, err.Error(), http.StatusNotFound)
@@ -512,7 +513,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				if err != nil {
 					http.Error(w, err.Error(), http.StatusNotFound)
 				}
-				fileContent = append(fileContent, fc)
+				fileContent = append(fileContent, *fc)
 
 				if body.IncludeLastCommit {
 					pathCommitId, err := utils.LastCommitForPath(RepoPath, body.RefId, fileContent[0].Path)
@@ -550,9 +551,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		var treeContents []*utils.Content
+		var treeContents []utils.Content
 		pageRes, err := utils.PaginateTreeContentResponse(tree, body.Pagination, 100, body.Path, func(treeContent utils.Content) error {
-			treeContents = append(treeContents, &treeContent)
+			treeContents = append(treeContents, treeContent)
 			return nil
 		})
 		if err != nil {
@@ -560,40 +561,57 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		var resContents []utils.Content
+
 		if body.IncludeLastCommit {
-			for i := range treeContents {
-				pathCommitId, err := utils.LastCommitForPath(RepoPath, body.RefId, treeContents[i].Path)
-				if err != nil {
-					http.Error(w, err.Error(), http.StatusBadRequest)
-					return
-				}
-				pathCommitHash := plumbing.NewHash(pathCommitId)
-				pathCommitObject, err := object.GetCommit(repo.Storer, pathCommitHash)
-				if err != nil {
-					http.Error(w, err.Error(), http.StatusNotFound)
-					return
-				}
-				treeContents[i].LastCommit, err = utils.GrabCommit(*pathCommitObject)
-				if err != nil {
-					http.Error(w, err.Error(), http.StatusBadRequest)
-					return
-				}
+			errc := make(chan error, len(treeContents))
+			done := make(chan struct{})
+			defer close(errc)
+			defer close(done)
+
+			inputCh := utils.PrepareTreeContentPipeline(treeContents, done)
+
+			mergeInput := make([]<-chan utils.Content, len(treeContents))
+
+			for i := 0; i < len(treeContents); i++ {
+				mergeInput[i] = utils.GetLastCommit(inputCh, RepoPath, repo.Storer, body.RefId, errc, done)
 			}
+
+			final := utils.MergeContentChannel(done, mergeInput...)
+
+			go func() {
+				for tc := range final {
+					select {
+					case <-done:
+						return
+					default:
+						resContents = append(resContents, tc)
+					}
+				}
+				errc <- nil
+			}()
+
+			if err := <-errc; err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+		} else {
+			resContents = treeContents
 		}
 
-		var sortedTREEContents []*utils.Content
-		var sortedBLOBContents []*utils.Content
-		for _, tc := range treeContents {
-			if tc.Type == "TREE" {
-				sortedTREEContents = append(sortedTREEContents, tc)
-			} else {
-				sortedBLOBContents = append(sortedBLOBContents, tc)
+		/* Sort the contents */
+		sort.Slice(resContents[:], func(i, j int) bool {
+			switch strings.Compare(resContents[i].Type, resContents[j].Type) {
+			case -1:
+				return false
+			case 1:
+				return true
 			}
-		}
-		sortedTreeContents := append(sortedTREEContents, sortedBLOBContents...)
+			return resContents[i].Name < resContents[j].Name
+		})
 
 		contentResponse := utils.ContentResponse{
-			Content:    sortedTreeContents,
+			Content:    resContents,
 			Pagination: pageRes,
 		}
 		contentResponseJson, err := json.Marshal(contentResponse)
