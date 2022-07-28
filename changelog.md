@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.6.1] - 2022-07-28
+
+### Fixes
+
+- Wrap path in double quotes
+
 ## [v0.6.0] - 2022-04-04
 
 ### Features
