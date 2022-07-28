@@ -22,7 +22,10 @@ func GetFullCommitSha(repoPath, shortID string) (string, error) {
 
 // LastCommitForPath returns the last commit which modified path for given revision.
 func LastCommitForPath(repoPath, revision string, path string) (string, error) {
-	cmd := exec.Command("bash", "-c", "git log --pretty=%H --max-count=1 "+revision+" -- \""+strings.ReplaceAll(path, "\"", "\\\"")+"\"")
+	if path != "" {
+		path = "\"" + strings.ReplaceAll(path, "\"", "\\\"") + "\""
+	}
+	cmd := exec.Command("bash", "-c", "git log --pretty=%H --max-count=1 "+revision+" -- "+path)
 	cmd.Dir = repoPath
 	out, err := cmd.Output()
 	if err != nil {
@@ -34,7 +37,10 @@ func LastCommitForPath(repoPath, revision string, path string) (string, error) {
 
 // CommitHistory returns the commit history for given revision or path.
 func CommitHistory(repoPath, revision string, path string, offset int, limit int) ([]string, error) {
-	cmd := exec.Command("bash", "-c", "git log --pretty=%H --max-count="+strconv.Itoa(limit)+" --skip="+strconv.Itoa(offset)+" "+revision+" -- \""+strings.ReplaceAll(path, "\"", "\\\"")+"\"")
+	if path != "" {
+		path = "\"" + strings.ReplaceAll(path, "\"", "\\\"") + "\""
+	}
+	cmd := exec.Command("bash", "-c", "git log --pretty=%H --max-count="+strconv.Itoa(limit)+" --skip="+strconv.Itoa(offset)+" "+revision+" -- "+path)
 	cmd.Dir = repoPath
 	out, err := cmd.Output()
 	if err != nil {
@@ -50,7 +56,10 @@ func CommitHistory(repoPath, revision string, path string, offset int, limit int
 
 // CountCommits returns total count of commits.
 func CountCommits(repoPath, revision string, path string) (string, error) {
-	cmd := exec.Command("bash", "-c", "git rev-list --count "+revision+" -- \""+strings.ReplaceAll(path, "\"", "\\\"")+"\"")
+	if path != "" {
+		path = "\"" + strings.ReplaceAll(path, "\"", "\\\"") + "\""
+	}
+	cmd := exec.Command("bash", "-c", "git rev-list --count "+revision+" -- "+path)
 	cmd.Dir = repoPath
 	out, err := cmd.Output()
 	if err != nil {
