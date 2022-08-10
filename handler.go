@@ -129,7 +129,7 @@ func getAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 	queryClient := types.NewQueryClient(grpcConn)
 
 	res, err := queryClient.RepositoryRelease(context.Background(), &types.QueryGetRepositoryReleaseRequest{
-		UserId:         address,
+		Id:             address,
 		RepositoryName: repositoryName,
 		TagName:        tagName,
 	})
