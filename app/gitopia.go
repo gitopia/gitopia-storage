@@ -204,7 +204,7 @@ func (g GitopiaClient) CheckGitServerAuthorization(ctx context.Context, userAddr
 }
 
 func (g GitopiaClient) ForkedRepositoryId(ctx context.Context, address string, repoName string) (uint64, error) {
-	resp, err := g.qc.AddressRepository(ctx, &types.QueryGetAddressRepositoryRequest{
+	resp, err := g.qc.AnyRepository(ctx, &types.QueryGetAnyRepositoryRequest{
 		Id:             address,
 		RepositoryName: repoName,
 	})
