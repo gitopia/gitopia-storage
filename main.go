@@ -17,6 +17,7 @@ import (
 	"syscall"
 
 	"github.com/cosmos/cosmos-sdk/simapp"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/gitopia/git-server/utils"
 	offchaintypes "github.com/gitopia/gitopia/x/offchain/types"
 	git "github.com/gitopia/go-git/v5"
@@ -36,8 +37,10 @@ import (
 )
 
 const (
-	branchPrefix = "refs/heads/"
-	tagPrefix    = "refs/tags/"
+	branchPrefix         = "refs/heads/"
+	tagPrefix            = "refs/tags/"
+	AccountAddressPrefix = "gitopia"
+	AccountPubKeyPrefix  = AccountAddressPrefix + sdk.PrefixPublic
 )
 
 type SaveToArweavePostBody struct {
@@ -80,6 +83,11 @@ func getCredential(req *http.Request) (gogittransporthttp.TokenAuth, error) {
 }
 
 func AuthFunc(cred gogittransporthttp.TokenAuth, req *Request) (bool, error) {
+	repoId, err := ParseRepositoryIdfromURI(req.URL.Path)
+	if err != nil {
+		return false, err
+	}
+
 	encConf := simapp.MakeTestEncodingConfig()
 	offchaintypes.RegisterInterfaces(encConf.InterfaceRegistry)
 	offchaintypes.RegisterLegacyAminoCodec(encConf.Amino)
@@ -92,6 +100,23 @@ func AuthFunc(cred gogittransporthttp.TokenAuth, req *Request) (bool, error) {
 		return false, fmt.Errorf("error decoding")
 	}
 
+	// Verify push permission
+	msgs := tx.GetMsgs()
+	if len(msgs) != 1 || len(msgs[0].GetSigners()) != 1 {
+		return false, fmt.Errorf("invalid signature")
+	}
+
+	address := msgs[0].GetSigners()[0].String()
+	havePushPermission, err := HavePushPermission(repoId, address)
+	if err != nil {
+		return false, fmt.Errorf("error checking push permission")
+	}
+
+	if !havePushPermission {
+		return false, fmt.Errorf("user does not have push permission")
+	}
+
+	// Verify signature
 	err = verifier.Verify(tx)
 	if err != nil {
 		return false, err
@@ -1187,6 +1212,12 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	conf := sdk.GetConfig()
+	conf.SetBech32PrefixForAccount(AccountAddressPrefix, AccountPubKeyPrefix)
+	// cannot seal the config
+	// cosmos client sets address prefix for each broadcasttx API call. probably a bug
+	// conf.Seal()
 
 	// Configure git service
 	service := New(Config{
