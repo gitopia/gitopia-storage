@@ -17,6 +17,8 @@ import (
 	"syscall"
 
 	"github.com/gitopia/git-server/utils"
+	gitopiaapp "github.com/gitopia/gitopia/app"
+	offchaintypes "github.com/gitopia/gitopia/x/offchain/types"
 	git "github.com/gitopia/go-git/v5"
 	"github.com/gitopia/go-git/v5/plumbing"
 	"github.com/gitopia/go-git/v5/plumbing/cache"
@@ -25,6 +27,7 @@ import (
 	"github.com/gitopia/go-git/v5/plumbing/object"
 	"github.com/gitopia/go-git/v5/plumbing/protocol/packp"
 	"github.com/gitopia/go-git/v5/plumbing/transport"
+	gogittransporthttp "github.com/gitopia/go-git/v5/plumbing/transport/http"
 	"github.com/gitopia/go-git/v5/plumbing/transport/server"
 	"github.com/gitopia/go-git/v5/storage/filesystem"
 	"github.com/go-git/go-billy/v5/osfs"
@@ -63,23 +66,36 @@ func (w writeFlusher) Write(p []byte) (int, error) {
 	return w.wf.Write(p)
 }
 
-type Credential struct {
-	Username string
-	Password string
-}
+func getCredential(req *http.Request) (gogittransporthttp.TokenAuth, error) {
+	cred := gogittransporthttp.TokenAuth{}
 
-func getCredential(req *http.Request) (Credential, error) {
-	cred := Credential{}
-
-	user, pass, ok := req.BasicAuth()
-	if !ok {
+	reqToken := req.Header.Get("Authorization")
+	splitToken := strings.Split(reqToken, "Bearer ")
+	if len(splitToken) != 2 {
 		return cred, fmt.Errorf("authentication failed")
 	}
 
-	cred.Username = user
-	cred.Password = pass
+	reqToken = splitToken[1]
 
 	return cred, nil
+}
+
+func AuthFunc(cred gogittransporthttp.TokenAuth, req *Request) (bool, error) {
+	config := gitopiaapp.MakeEncodingConfig()
+	verifier := offchaintypes.NewVerifier(config.TxConfig.SignModeHandler())
+	txDecoder := config.TxConfig.TxJSONDecoder()
+
+	tx, err := txDecoder([]byte(cred.Token))
+	if err != nil {
+		return false, fmt.Errorf("error decoding")
+	}
+
+	err = verifier.Verify(tx)
+	if err != nil {
+		return false, err
+	}
+
+	return true, err
 }
 
 var reSlashDedup = regexp.MustCompile(`\/{2,}`)
@@ -256,7 +272,7 @@ type service struct {
 type Server struct {
 	config   Config
 	services []service
-	AuthFunc func(Credential, *Request) (bool, error)
+	AuthFunc func(gogittransporthttp.TokenAuth, *Request) (bool, error)
 }
 
 type Request struct {
@@ -277,6 +293,8 @@ func New(cfg Config) *Server {
 	if s.config.GitPath == "" {
 		s.config.GitPath = "git"
 	}
+
+	s.AuthFunc = AuthFunc
 
 	return &s
 }
@@ -895,7 +913,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		RepoPath: path.Join(s.config.Dir, repoNamespace, repoName),
 	}
 
-	if s.config.Auth {
+	if s.config.Auth && r.Method == "POST" && strings.HasSuffix(r.RequestURI, "git-receive-pack") { // auth only for git push
 		if s.AuthFunc == nil {
 			logError("auth", fmt.Errorf("no auth backend provided"))
 			w.WriteHeader(http.StatusUnauthorized)
@@ -922,7 +940,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				logError("auth", err)
 			}
 
-			logError("auth", fmt.Errorf("rejected user %s", cred.Username))
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
@@ -1173,6 +1190,7 @@ func main() {
 	service := New(Config{
 		Dir:        viper.GetString("git_dir"),
 		AutoCreate: true,
+		Auth:       true,
 	})
 
 	// Configure git server. Will create git repos path if it does not exist.
