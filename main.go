@@ -16,8 +16,8 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/cosmos/cosmos-sdk/simapp"
 	"github.com/gitopia/git-server/utils"
-	gitopiaapp "github.com/gitopia/gitopia/app"
 	offchaintypes "github.com/gitopia/gitopia/x/offchain/types"
 	git "github.com/gitopia/go-git/v5"
 	"github.com/gitopia/go-git/v5/plumbing"
@@ -74,16 +74,18 @@ func getCredential(req *http.Request) (gogittransporthttp.TokenAuth, error) {
 	if len(splitToken) != 2 {
 		return cred, fmt.Errorf("authentication failed")
 	}
-
-	reqToken = splitToken[1]
+	cred.Token = splitToken[1]
 
 	return cred, nil
 }
 
 func AuthFunc(cred gogittransporthttp.TokenAuth, req *Request) (bool, error) {
-	config := gitopiaapp.MakeEncodingConfig()
-	verifier := offchaintypes.NewVerifier(config.TxConfig.SignModeHandler())
-	txDecoder := config.TxConfig.TxJSONDecoder()
+	encConf := simapp.MakeTestEncodingConfig()
+	offchaintypes.RegisterInterfaces(encConf.InterfaceRegistry)
+	offchaintypes.RegisterLegacyAminoCodec(encConf.Amino)
+
+	verifier := offchaintypes.NewVerifier(encConf.TxConfig.SignModeHandler())
+	txDecoder := encConf.TxConfig.TxJSONDecoder()
 
 	tx, err := txDecoder([]byte(cred.Token))
 	if err != nil {
