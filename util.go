@@ -8,7 +8,6 @@ import (
 
 	"github.com/gitopia/gitopia/x/gitopia/types"
 	"github.com/gitopia/gitopia/x/gitopia/utils"
-	gitopiautils "github.com/gitopia/gitopia/x/gitopia/utils"
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -43,8 +42,7 @@ func ParseRepositoryIdfromURI(uri string) (uint64, error) {
 	return id, nil
 }
 
-func HavePushPermission(repoId uint64, address string) (bool, error) {
-	var org types.Organization
+func HavePushPermission(repoId uint64, address string) (havePermission bool, err error) {
 	grpcUrl := viper.GetString("gitopia_grpc_url")
 	grpcConn, err := grpc.Dial(grpcUrl,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -65,16 +63,30 @@ func HavePushPermission(repoId uint64, address string) (bool, error) {
 
 	repo := repoResp.Repository
 
-	if repo.Owner.Type == types.RepositoryOwner_ORGANIZATION {
-		orgResp, err := queryClient.Organization(context.Background(), &types.QueryGetOrganizationRequest{
-			Id: repo.Owner.Id,
+	if repo.Owner.Type == types.OwnerType_USER {
+		if address == repo.Owner.Id {
+			havePermission = true
+		}
+	} else if repo.Owner.Type == types.OwnerType_DAO {
+		member, err := queryClient.DaoMember(context.Background(), &types.QueryGetDaoMemberRequest{
+			DaoId:  repo.Owner.Id,
+			UserId: address,
 		})
 		if err != nil {
-			return false, err
+			return havePermission, err
 		}
-
-		org = *orgResp.Organization
+		if member.Member.Role == types.MemberRole_OWNER {
+			havePermission = true
+		}
 	}
 
-	return gitopiautils.HavePermission(*repo, address, utils.PushBranchPermission, org), nil
+	if !havePermission {
+		if i, exists := utils.RepositoryCollaboratorExists(repo.Collaborators, address); exists {
+			if repo.Collaborators[i].Permission >= types.PushBranchPermission {
+				havePermission = true
+			}
+		}
+	}
+
+	return havePermission, nil
 }

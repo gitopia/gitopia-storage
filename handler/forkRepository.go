@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"os/exec"
@@ -24,12 +25,11 @@ import (
 )
 
 type InvokeForkRepositoryEvent struct {
-	Creator   string
-	RepoId    uint64
-	OwnerId   string
-	OwnerType string
-	TaskId    uint64
-	TxHeight  uint64
+	Creator      string
+	RepositoryId types.RepositoryId
+	OwnerId      string
+	TaskId       uint64
+	TxHeight     uint64
 }
 
 // tm event codec
@@ -39,23 +39,18 @@ func (e *InvokeForkRepositoryEvent) UnMarshal(eventBuf []byte) error {
 		return errors.Wrap(err, "error parsing creator")
 	}
 
-	repoId, err := jsonparser.GetString(eventBuf, "events", "message.RepositoryId", "[0]")
+	Id, err := jsonparser.GetString(eventBuf, "events", "message.RepositoryId", "[0]", "Id")
 	if err != nil {
-		errors.Wrap(err, "error parsing repo Id")
+		errors.Wrap(err, "error parsing RepositoryId.Id")
 	}
-	id, err := strconv.ParseUint(repoId, 10, 64)
+	Name, err := jsonparser.GetString(eventBuf, "events", "message.RepositoryId", "[0]", "Name")
 	if err != nil {
-		return errors.Wrap(err, "error parsing repo id")
+		errors.Wrap(err, "error parsing RepositoryId.Name")
 	}
 
 	ownerId, err := jsonparser.GetString(eventBuf, "events", "message.OwnerId", "[0]")
 	if err != nil {
 		errors.Wrap(err, "error parsing owner id")
-	}
-
-	ownerType, err := jsonparser.GetString(eventBuf, "events", "message.OwnerType", "[0]")
-	if err != nil {
-		errors.Wrap(err, "error parsing owner type")
 	}
 
 	taskIdStr, err := jsonparser.GetString(eventBuf, "events", "message.TaskId", "[0]")
@@ -77,9 +72,11 @@ func (e *InvokeForkRepositoryEvent) UnMarshal(eventBuf []byte) error {
 	}
 
 	e.Creator = creator
-	e.RepoId = id
+	e.RepositoryId = types.RepositoryId{
+		Id:   Id,
+		Name: Name,
+	}
 	e.OwnerId = ownerId
-	e.OwnerType = ownerType
 	e.TaskId = taskId
 	e.TxHeight = height
 
@@ -164,12 +161,12 @@ func (h *InvokeForkRepositoryEventHandler) Process(ctx context.Context, event In
 	if !haveAuthorization {
 		logger.FromContext(ctx).
 			WithField("creator", event.Creator).
-			WithField("parent-repo-id", event.RepoId).
+			WithField("parent-repo-id", event.RepositoryId).
 			Info("skipping fork repository, not authorized")
 		return nil
 	}
 
-	err = h.gc.ForkRepository(ctx, event.Creator, event.RepoId, event.OwnerId, event.OwnerType, event.TaskId)
+	err = h.gc.ForkRepository(ctx, event.Creator, event.RepositoryId, event.OwnerId, event.TaskId)
 	if err != nil {
 		err = errors.WithMessage(err, "gitopia fork repository error")
 		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
@@ -179,7 +176,7 @@ func (h *InvokeForkRepositoryEventHandler) Process(ctx context.Context, event In
 		return err
 	}
 
-	repositoryName, err := h.gc.RepositoryName(ctx, event.RepoId)
+	parentRepoId, err := h.gc.RepositoryId(ctx, event.RepositoryId.Id, event.RepositoryId.Name)
 	if err != nil {
 		err = errors.WithMessage(err, "query error")
 		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
@@ -189,7 +186,7 @@ func (h *InvokeForkRepositoryEventHandler) Process(ctx context.Context, event In
 		return err
 	}
 
-	forkedRepoId, err := h.gc.ForkedRepositoryId(ctx, event.OwnerId, repositoryName)
+	forkedRepoId, err := h.gc.RepositoryId(ctx, event.OwnerId, event.RepositoryId.Name)
 	if err != nil {
 		err = errors.WithMessage(err, "query error")
 		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
@@ -199,7 +196,7 @@ func (h *InvokeForkRepositoryEventHandler) Process(ctx context.Context, event In
 		return err
 	}
 
-	sourceRepoPath := path.Join(viper.GetString("git_dir"), fmt.Sprintf("%v.git", event.RepoId))
+	sourceRepoPath := path.Join(viper.GetString("git_dir"), fmt.Sprintf("%v.git", parentRepoId))
 	targetRepoPath := path.Join(viper.GetString("git_dir"), fmt.Sprintf("%v.git", forkedRepoId))
 	cmd := exec.Command("git", "clone", "--shared", "--bare", sourceRepoPath, targetRepoPath)
 	out, err := cmd.Output()
@@ -212,7 +209,10 @@ func (h *InvokeForkRepositoryEventHandler) Process(ctx context.Context, event In
 		return err
 	}
 
-	err = h.gc.ForkRepositorySuccess(ctx, event.Creator, forkedRepoId, event.TaskId)
+	err = h.gc.ForkRepositorySuccess(ctx, event.Creator, types.RepositoryId{
+		Id:   event.OwnerId,
+		Name: event.RepositoryId.Name,
+	}, event.TaskId)
 	if err != nil {
 		err = errors.WithMessage(err, "fork repository success error")
 		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
@@ -224,8 +224,11 @@ func (h *InvokeForkRepositoryEventHandler) Process(ctx context.Context, event In
 
 	logger.FromContext(ctx).
 		WithField("creator", event.Creator).
-		WithField("parent-repo-id", event.RepoId).
-		WithField("forked-repo-id", forkedRepoId).
+		WithField("parent-repo-id", event.RepositoryId).
+		WithField("forked-repo-id", types.RepositoryId{
+			Id:   event.OwnerId,
+			Name: event.RepositoryId.Name,
+		}).
 		Info("forked repository")
 	return nil
 }
@@ -311,9 +314,10 @@ func (h *InvokeForkRepositoryEventHandler) BackfillMissedEvents(ctx context.Cont
 							attributeMap[string(e.Attributes[i].Key)] = string(e.Attributes[i].Value)
 						}
 
-						repoId, err := strconv.ParseUint(attributeMap["RepositoryId"], 10, 64)
+						var repositoryId types.RepositoryId
+						err := json.Unmarshal([]byte(attributeMap["RepositoryId"]), &repositoryId)
 						if err != nil {
-							errChan <- errors.WithMessage(err, "error parsing repo id")
+							errChan <- errors.WithMessage(err, "error unmarshalling RepositoryId")
 							return
 						}
 
@@ -324,12 +328,11 @@ func (h *InvokeForkRepositoryEventHandler) BackfillMissedEvents(ctx context.Cont
 						}
 
 						event := InvokeForkRepositoryEvent{
-							Creator:   attributeMap["Creator"],
-							RepoId:    repoId,
-							OwnerId:   attributeMap["OwnerId"],
-							OwnerType: attributeMap["OwnerType"],
-							TaskId:    taskId,
-							TxHeight:  uint64(r.Height),
+							Creator:      attributeMap["Creator"],
+							RepositoryId: repositoryId,
+							OwnerId:      attributeMap["OwnerId"],
+							TaskId:       taskId,
+							TxHeight:     uint64(r.Height),
 						}
 
 						// backup head commit to IPFS
