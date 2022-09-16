@@ -39,18 +39,20 @@ func (e *InvokeForkRepositoryEvent) UnMarshal(eventBuf []byte) error {
 		return errors.Wrap(err, "error parsing creator")
 	}
 
-	Id, err := jsonparser.GetString(eventBuf, "events", "message.RepositoryId", "[0]", "Id")
+	repositoryIdStr, err := jsonparser.GetString(eventBuf, "events", "message.RepositoryId", "[0]")
 	if err != nil {
-		errors.Wrap(err, "error parsing RepositoryId.Id")
+		return errors.Wrap(err, "error parsing RepositoryId")
 	}
-	Name, err := jsonparser.GetString(eventBuf, "events", "message.RepositoryId", "[0]", "Name")
+
+	var repositoryId types.RepositoryId
+	err = json.Unmarshal([]byte(repositoryIdStr), &repositoryId)
 	if err != nil {
-		errors.Wrap(err, "error parsing RepositoryId.Name")
+		return errors.Wrap(err, "error decoding RepositoryId")
 	}
 
 	ownerId, err := jsonparser.GetString(eventBuf, "events", "message.OwnerId", "[0]")
 	if err != nil {
-		errors.Wrap(err, "error parsing owner id")
+		return errors.Wrap(err, "error parsing owner id")
 	}
 
 	taskIdStr, err := jsonparser.GetString(eventBuf, "events", "message.TaskId", "[0]")
@@ -73,8 +75,8 @@ func (e *InvokeForkRepositoryEvent) UnMarshal(eventBuf []byte) error {
 
 	e.Creator = creator
 	e.RepositoryId = types.RepositoryId{
-		Id:   Id,
-		Name: Name,
+		Id:   repositoryId.Id,
+		Name: repositoryId.Name,
 	}
 	e.OwnerId = ownerId
 	e.TaskId = taskId
