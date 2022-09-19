@@ -39,13 +39,13 @@ func (e *InvokeForkRepositoryEvent) UnMarshal(eventBuf []byte) error {
 		return errors.Wrap(err, "error parsing creator")
 	}
 
-	repositoryIdStr, err := jsonparser.GetString(eventBuf, "events", "message.RepositoryId", "[0]")
+	baseRepoKeyStr, err := jsonparser.GetString(eventBuf, "events", "message.BaseRepositoryKey", "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing RepositoryId")
 	}
 
 	var repositoryId types.RepositoryId
-	err = json.Unmarshal([]byte(repositoryIdStr), &repositoryId)
+	err = json.Unmarshal([]byte(baseRepoKeyStr), &repositoryId)
 	if err != nil {
 		return errors.Wrap(err, "error decoding RepositoryId")
 	}
