@@ -16,7 +16,10 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/cosmos/cosmos-sdk/simapp"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/gitopia/git-server/utils"
+	offchaintypes "github.com/gitopia/gitopia/x/offchain/types"
 	git "github.com/gitopia/go-git/v5"
 	"github.com/gitopia/go-git/v5/plumbing"
 	"github.com/gitopia/go-git/v5/plumbing/cache"
@@ -25,6 +28,7 @@ import (
 	"github.com/gitopia/go-git/v5/plumbing/object"
 	"github.com/gitopia/go-git/v5/plumbing/protocol/packp"
 	"github.com/gitopia/go-git/v5/plumbing/transport"
+	gogittransporthttp "github.com/gitopia/go-git/v5/plumbing/transport/http"
 	"github.com/gitopia/go-git/v5/plumbing/transport/server"
 	"github.com/gitopia/go-git/v5/storage/filesystem"
 	"github.com/go-git/go-billy/v5/osfs"
@@ -33,8 +37,10 @@ import (
 )
 
 const (
-	branchPrefix = "refs/heads/"
-	tagPrefix    = "refs/tags/"
+	branchPrefix         = "refs/heads/"
+	tagPrefix            = "refs/tags/"
+	AccountAddressPrefix = "gitopia"
+	AccountPubKeyPrefix  = AccountAddressPrefix + sdk.PrefixPublic
 )
 
 type SaveToArweavePostBody struct {
@@ -63,23 +69,60 @@ func (w writeFlusher) Write(p []byte) (int, error) {
 	return w.wf.Write(p)
 }
 
-type Credential struct {
-	Username string
-	Password string
-}
+func getCredential(req *http.Request) (gogittransporthttp.TokenAuth, error) {
+	cred := gogittransporthttp.TokenAuth{}
 
-func getCredential(req *http.Request) (Credential, error) {
-	cred := Credential{}
-
-	user, pass, ok := req.BasicAuth()
-	if !ok {
+	reqToken := req.Header.Get("Authorization")
+	splitToken := strings.Split(reqToken, "Bearer ")
+	if len(splitToken) != 2 {
 		return cred, fmt.Errorf("authentication failed")
 	}
-
-	cred.Username = user
-	cred.Password = pass
+	cred.Token = splitToken[1]
 
 	return cred, nil
+}
+
+func AuthFunc(cred gogittransporthttp.TokenAuth, req *Request) (bool, error) {
+	repoId, err := ParseRepositoryIdfromURI(req.URL.Path)
+	if err != nil {
+		return false, err
+	}
+
+	encConf := simapp.MakeTestEncodingConfig()
+	offchaintypes.RegisterInterfaces(encConf.InterfaceRegistry)
+	offchaintypes.RegisterLegacyAminoCodec(encConf.Amino)
+
+	verifier := offchaintypes.NewVerifier(encConf.TxConfig.SignModeHandler())
+	txDecoder := encConf.TxConfig.TxJSONDecoder()
+
+	tx, err := txDecoder([]byte(cred.Token))
+	if err != nil {
+		return false, fmt.Errorf("error decoding")
+	}
+
+	// Verify push permission
+	msgs := tx.GetMsgs()
+	if len(msgs) != 1 || len(msgs[0].GetSigners()) != 1 {
+		return false, fmt.Errorf("invalid signature")
+	}
+
+	address := msgs[0].GetSigners()[0].String()
+	havePushPermission, err := HavePushPermission(repoId, address)
+	if err != nil {
+		return false, fmt.Errorf("error checking push permission")
+	}
+
+	if !havePushPermission {
+		return false, fmt.Errorf("user does not have push permission")
+	}
+
+	// Verify signature
+	err = verifier.Verify(tx)
+	if err != nil {
+		return false, err
+	}
+
+	return true, err
 }
 
 var reSlashDedup = regexp.MustCompile(`\/{2,}`)
@@ -256,7 +299,7 @@ type service struct {
 type Server struct {
 	config   Config
 	services []service
-	AuthFunc func(Credential, *Request) (bool, error)
+	AuthFunc func(gogittransporthttp.TokenAuth, *Request) (bool, error)
 }
 
 type Request struct {
@@ -277,6 +320,8 @@ func New(cfg Config) *Server {
 	if s.config.GitPath == "" {
 		s.config.GitPath = "git"
 	}
+
+	s.AuthFunc = AuthFunc
 
 	return &s
 }
@@ -895,7 +940,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		RepoPath: path.Join(s.config.Dir, repoNamespace, repoName),
 	}
 
-	if s.config.Auth {
+	if s.config.Auth && r.Method == "POST" && strings.HasSuffix(r.RequestURI, "git-receive-pack") { // auth only for git push
 		if s.AuthFunc == nil {
 			logError("auth", fmt.Errorf("no auth backend provided"))
 			w.WriteHeader(http.StatusUnauthorized)
@@ -922,7 +967,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				logError("auth", err)
 			}
 
-			logError("auth", fmt.Errorf("rejected user %s", cred.Username))
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
@@ -1169,10 +1213,17 @@ func main() {
 		log.Fatal(err)
 	}
 
+	conf := sdk.GetConfig()
+	conf.SetBech32PrefixForAccount(AccountAddressPrefix, AccountPubKeyPrefix)
+	// cannot seal the config
+	// cosmos client sets address prefix for each broadcasttx API call. probably a bug
+	// conf.Seal()
+
 	// Configure git service
 	service := New(Config{
 		Dir:        viper.GetString("git_dir"),
 		AutoCreate: true,
+		Auth:       true,
 	})
 
 	// Configure git server. Will create git repos path if it does not exist.

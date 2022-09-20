@@ -70,12 +70,11 @@ func (g GitopiaClient) broadcastTx(ctx context.Context, msg sdk.Msg) error {
 	return nil
 }
 
-func (g GitopiaClient) ForkRepository(ctx context.Context, creator string, repositoryId uint64, ownerId string, ownerType string, taskId uint64) error {
+func (g GitopiaClient) ForkRepository(ctx context.Context, creator string, repositoryId types.RepositoryId, owner string, taskId uint64) error {
 	msg := &types.MsgForkRepository{
 		Creator:      creator,
 		RepositoryId: repositoryId,
-		OwnerId:      ownerId,
-		OwnerType:    ownerType,
+		Owner:        owner,
 		TaskId:       taskId,
 	}
 
@@ -97,7 +96,7 @@ func (g GitopiaClient) ForkRepository(ctx context.Context, creator string, repos
 	return nil
 }
 
-func (g GitopiaClient) ForkRepositorySuccess(ctx context.Context, creator string, repositoryId uint64, taskId uint64) error {
+func (g GitopiaClient) ForkRepositorySuccess(ctx context.Context, creator string, repositoryId types.RepositoryId, taskId uint64) error {
 	msg := &types.MsgForkRepositorySuccess{
 		Creator:      creator,
 		RepositoryId: repositoryId,
@@ -203,7 +202,7 @@ func (g GitopiaClient) CheckGitServerAuthorization(ctx context.Context, userAddr
 	return resp.HaveAuthorization, nil
 }
 
-func (g GitopiaClient) ForkedRepositoryId(ctx context.Context, address string, repoName string) (uint64, error) {
+func (g GitopiaClient) RepositoryId(ctx context.Context, address string, repoName string) (uint64, error) {
 	resp, err := g.qc.AnyRepository(ctx, &types.QueryGetAnyRepositoryRequest{
 		Id:             address,
 		RepositoryName: repoName,
