@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
 	"os/exec"
@@ -25,11 +24,13 @@ import (
 )
 
 type InvokeForkRepositoryEvent struct {
-	Creator      string
-	RepositoryId types.RepositoryId
-	OwnerId      string
-	TaskId       uint64
-	TxHeight     uint64
+	Creator         string
+	RepoId          uint64
+	RepoName        string
+	RepoOwnerId     string
+	ForkRepoOwnerId string
+	TaskId          uint64
+	TxHeight        uint64
 }
 
 // tm event codec
@@ -39,20 +40,28 @@ func (e *InvokeForkRepositoryEvent) UnMarshal(eventBuf []byte) error {
 		return errors.Wrap(err, "error parsing creator")
 	}
 
-	baseRepoKeyStr, err := jsonparser.GetString(eventBuf, "events", "message.BaseRepositoryKey", "[0]")
+	repoIdStr, err := jsonparser.GetString(eventBuf, "events", "message.RepositoryId", "[0]")
 	if err != nil {
-		return errors.Wrap(err, "error parsing RepositoryId")
+		return errors.Wrap(err, "error parsing repository id")
+	}
+	repoId, err := strconv.ParseUint(repoIdStr, 10, 64)
+	if err != nil {
+		return errors.Wrap(err, "error parsing repository id")
 	}
 
-	var repositoryId types.RepositoryId
-	err = json.Unmarshal([]byte(baseRepoKeyStr), &repositoryId)
+	repoName, err := jsonparser.GetString(eventBuf, "events", "message.RepositoryName", "[0]")
 	if err != nil {
-		return errors.Wrap(err, "error decoding RepositoryId")
+		return errors.Wrap(err, "error parsing repository name")
 	}
 
-	ownerId, err := jsonparser.GetString(eventBuf, "events", "message.OwnerId", "[0]")
+	repoOwnerId, err := jsonparser.GetString(eventBuf, "events", "message.RepositoryOwnerId", "[0]")
 	if err != nil {
-		return errors.Wrap(err, "error parsing owner id")
+		return errors.Wrap(err, "error parsing repository owner id")
+	}
+
+	forkRepoOwnerId, err := jsonparser.GetString(eventBuf, "events", "message.ForkRepositoryOwnerId", "[0]")
+	if err != nil {
+		return errors.Wrap(err, "error parsing fork repository owner id")
 	}
 
 	taskIdStr, err := jsonparser.GetString(eventBuf, "events", "message.TaskId", "[0]")
@@ -74,11 +83,10 @@ func (e *InvokeForkRepositoryEvent) UnMarshal(eventBuf []byte) error {
 	}
 
 	e.Creator = creator
-	e.RepositoryId = types.RepositoryId{
-		Id:   repositoryId.Id,
-		Name: repositoryId.Name,
-	}
-	e.OwnerId = ownerId
+	e.RepoId = repoId
+	e.RepoName = repoName
+	e.RepoOwnerId = repoOwnerId
+	e.ForkRepoOwnerId = forkRepoOwnerId
 	e.TaskId = taskId
 	e.TxHeight = height
 
@@ -163,12 +171,20 @@ func (h *InvokeForkRepositoryEventHandler) Process(ctx context.Context, event In
 	if !haveAuthorization {
 		logger.FromContext(ctx).
 			WithField("creator", event.Creator).
-			WithField("parent-repo-id", event.RepositoryId).
+			WithField("parent-repo-id", event.RepoId).
 			Info("skipping fork repository, not authorized")
 		return nil
 	}
 
-	err = h.gc.ForkRepository(ctx, event.Creator, event.RepositoryId, event.OwnerId, event.TaskId)
+	err = h.gc.ForkRepository(
+		ctx,
+		event.Creator,
+		types.RepositoryId{
+			Id:   event.RepoOwnerId,
+			Name: event.RepoName,
+		},
+		event.ForkRepoOwnerId,
+		event.TaskId)
 	if err != nil {
 		err = errors.WithMessage(err, "gitopia fork repository error")
 		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
@@ -178,7 +194,7 @@ func (h *InvokeForkRepositoryEventHandler) Process(ctx context.Context, event In
 		return err
 	}
 
-	parentRepoId, err := h.gc.RepositoryId(ctx, event.RepositoryId.Id, event.RepositoryId.Name)
+	forkedRepoId, err := h.gc.RepositoryId(ctx, event.ForkRepoOwnerId, event.RepoName)
 	if err != nil {
 		err = errors.WithMessage(err, "query error")
 		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
@@ -188,17 +204,7 @@ func (h *InvokeForkRepositoryEventHandler) Process(ctx context.Context, event In
 		return err
 	}
 
-	forkedRepoId, err := h.gc.RepositoryId(ctx, event.OwnerId, event.RepositoryId.Name)
-	if err != nil {
-		err = errors.WithMessage(err, "query error")
-		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
-		if err2 != nil {
-			return errors.WithMessage(err2, "update task error")
-		}
-		return err
-	}
-
-	sourceRepoPath := path.Join(viper.GetString("git_dir"), fmt.Sprintf("%v.git", parentRepoId))
+	sourceRepoPath := path.Join(viper.GetString("git_dir"), fmt.Sprintf("%v.git", event.RepoId))
 	targetRepoPath := path.Join(viper.GetString("git_dir"), fmt.Sprintf("%v.git", forkedRepoId))
 	cmd := exec.Command("git", "clone", "--shared", "--bare", sourceRepoPath, targetRepoPath)
 	out, err := cmd.Output()
@@ -211,10 +217,14 @@ func (h *InvokeForkRepositoryEventHandler) Process(ctx context.Context, event In
 		return err
 	}
 
-	err = h.gc.ForkRepositorySuccess(ctx, event.Creator, types.RepositoryId{
-		Id:   event.OwnerId,
-		Name: event.RepositoryId.Name,
-	}, event.TaskId)
+	err = h.gc.ForkRepositorySuccess(
+		ctx,
+		event.Creator,
+		types.RepositoryId{
+			Id:   event.ForkRepoOwnerId,
+			Name: event.RepoName,
+		},
+		event.TaskId)
 	if err != nil {
 		err = errors.WithMessage(err, "fork repository success error")
 		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
@@ -226,11 +236,8 @@ func (h *InvokeForkRepositoryEventHandler) Process(ctx context.Context, event In
 
 	logger.FromContext(ctx).
 		WithField("creator", event.Creator).
-		WithField("parent-repo-id", event.RepositoryId).
-		WithField("forked-repo-id", types.RepositoryId{
-			Id:   event.OwnerId,
-			Name: event.RepositoryId.Name,
-		}).
+		WithField("parent-repo-id", event.RepoId).
+		WithField("forked-repo-id", forkedRepoId).
 		Info("forked repository")
 	return nil
 }
@@ -316,10 +323,9 @@ func (h *InvokeForkRepositoryEventHandler) BackfillMissedEvents(ctx context.Cont
 							attributeMap[string(e.Attributes[i].Key)] = string(e.Attributes[i].Value)
 						}
 
-						var repositoryId types.RepositoryId
-						err := json.Unmarshal([]byte(attributeMap["RepositoryId"]), &repositoryId)
+						repoId, err := strconv.ParseUint(attributeMap["RepositoryId"], 10, 64)
 						if err != nil {
-							errChan <- errors.WithMessage(err, "error unmarshalling RepositoryId")
+							errChan <- errors.WithMessage(err, "error parsing repo id")
 							return
 						}
 
@@ -330,11 +336,13 @@ func (h *InvokeForkRepositoryEventHandler) BackfillMissedEvents(ctx context.Cont
 						}
 
 						event := InvokeForkRepositoryEvent{
-							Creator:      attributeMap["Creator"],
-							RepositoryId: repositoryId,
-							OwnerId:      attributeMap["OwnerId"],
-							TaskId:       taskId,
-							TxHeight:     uint64(r.Height),
+							Creator:         attributeMap["Creator"],
+							RepoId:          repoId,
+							RepoName:        attributeMap["RepositoryName"],
+							RepoOwnerId:     attributeMap["RepositoryOwnerId"],
+							ForkRepoOwnerId: attributeMap["ForkRepositoryOwnerId"],
+							TaskId:          taskId,
+							TxHeight:        uint64(r.Height),
 						}
 
 						// backup head commit to IPFS
