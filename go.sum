@@ -587,8 +587,8 @@ github.com/ghodss/yaml v1.0.0/go.mod h1:4dBDuWmgqj2HViK6kFavaiC9ZROes6MMH2rRYeME
 github.com/gin-contrib/sse v0.1.0/go.mod h1:RHrZQHXnP2xjPF+u1gW/2HnVO7nvIa9PG3Gm+fLHvGI=
 github.com/gin-gonic/gin v1.5.0/go.mod h1:Nd6IXA8m5kNZdNEHMBd93KT+mdY3+bewLgRvmCsR2Do=
 github.com/gin-gonic/gin v1.6.3/go.mod h1:75u5sXoLsGZoRN5Sgbi1eraJ4GU3++wFwWzhwvtwp4M=
-github.com/gitopia/gitopia v0.13.1-0.20220926063421-75fa23b70a61 h1:AWyej2hQOeXhAmi3afI6sYBbSlNzVqOF0H7pWuLN14Y=
-github.com/gitopia/gitopia v0.13.1-0.20220926063421-75fa23b70a61/go.mod h1:X/W6jh1fvFsDNSagmQ5vR5BtN4IGJkmu9km7foKDVwY=
+github.com/gitopia/gitopia v1.0.0-rc h1:xmm9iQI3K3Yo+E/v5QRG+Ggacd5HCH7bZics5efwk8o=
+github.com/gitopia/gitopia v1.0.0-rc/go.mod h1:X/W6jh1fvFsDNSagmQ5vR5BtN4IGJkmu9km7foKDVwY=
 github.com/gitopia/go-git/v5 v5.4.3-0.20211224112515-b2efd9bec92c h1:xqrIU2JrAXwioLz+mKxn3j36C/akB1+SuAqXNtyddRU=
 github.com/gitopia/go-git/v5 v5.4.3-0.20211224112515-b2efd9bec92c/go.mod h1:+4EawsfpYlHKlmdvSoEYTrRZowCNR8ZhdRU8noDeemI=
 github.com/gitopia/starport v0.19.5-d h1:gjsdZFSKK2IdzRAboRxrHrhWzpWMy6mhgoB5SAVOo4A=
