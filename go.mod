@@ -5,7 +5,7 @@ go 1.16
 require (
 	github.com/buger/jsonparser v1.1.1
 	github.com/cosmos/cosmos-sdk v0.45.1
-	github.com/gitopia/gitopia v0.13.1-0.20220919111347-0e0c74cab955
+	github.com/gitopia/gitopia v0.13.1-0.20220926063421-75fa23b70a61
 	github.com/gitopia/go-git/v5 v5.4.3-0.20211224112515-b2efd9bec92c
 	github.com/go-git/go-billy/v5 v5.3.1
 	github.com/kr/pretty v0.3.0 // indirect

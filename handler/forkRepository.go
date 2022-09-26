@@ -164,7 +164,7 @@ func (h *InvokeForkRepositoryEventHandler) Process(ctx context.Context, event In
 		return nil
 	}
 
-	haveAuthorization, err := h.gc.CheckGitServerAuthorization(ctx, event.Creator)
+	haveAuthorization, err := h.gc.CheckGitServerAuthorization(ctx, event.ForkRepoOwnerId)
 	if err != nil {
 		return err
 	}
