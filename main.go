@@ -109,7 +109,7 @@ func AuthFunc(cred gogittransporthttp.TokenAuth, req *Request) (bool, error) {
 	address := msgs[0].GetSigners()[0].String()
 	havePushPermission, err := HavePushPermission(repoId, address)
 	if err != nil {
-		return false, fmt.Errorf("error checking push permission")
+		return false, fmt.Errorf("error checking push permission: %s", err.Error())
 	}
 
 	if !havePushPermission {
