@@ -7,10 +7,10 @@ import (
 	"github.com/cosmos/cosmos-sdk/x/authz"
 	"github.com/gitopia/git-server/logger"
 	"github.com/gitopia/gitopia/x/gitopia/types"
+	"github.com/ignite/cli/ignite/pkg/cosmosaccount"
+	"github.com/ignite/cli/ignite/pkg/cosmosclient"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
-	"github.com/tendermint/starport/starport/pkg/cosmosaccount"
-	"github.com/tendermint/starport/starport/pkg/cosmosclient"
 )
 
 const (
@@ -43,7 +43,7 @@ func NewGitopiaClient(ctx context.Context, account string) (GitopiaClient, error
 		return GitopiaClient{}, errors.Wrap(err, "error creating cosmos client")
 	}
 
-	queryClient := types.NewQueryClient(client.Context)
+	queryClient := types.NewQueryClient(client.Context().GRPCClient)
 
 	return GitopiaClient{
 		accountName: account,
@@ -54,12 +54,16 @@ func NewGitopiaClient(ctx context.Context, account string) (GitopiaClient, error
 
 func (g GitopiaClient) Address() (string, error) {
 	addr, err := g.cc.Address(g.accountName)
-	return addr.String(), errors.Wrap(err, "error resolving address")
+	return addr, errors.Wrap(err, "error resolving address")
 }
 
 func (g GitopiaClient) broadcastTx(ctx context.Context, msg sdk.Msg) error {
-	txResp, err := g.cc.BroadcastTx(g.accountName, msg)
+	account, err := g.cc.Account(g.accountName)
+	if err != nil {
+		return errors.Wrap(err, "error retrieving the account")
+	}
 
+	txResp, err := g.cc.BroadcastTx(account, msg)
 	if err != nil {
 		return errors.Wrap(err, "error broadcasting tx")
 	}
