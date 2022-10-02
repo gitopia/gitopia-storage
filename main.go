@@ -1213,6 +1213,9 @@ func main() {
 		log.Fatal(err)
 	}
 
+	logInfo("ENV", os.Getenv("ENV"))
+	fmt.Println(viper.AllSettings())
+
 	conf := sdk.GetConfig()
 	conf.SetBech32PrefixForAccount(AccountAddressPrefix, AccountPubKeyPrefix)
 	// cannot seal the config
