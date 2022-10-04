@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 
@@ -24,6 +25,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	log.Printf("ENV: %s\n", os.Getenv("ENV"))
+	fmt.Println(viper.AllSettings())
 
 	ctx := logger.InitLogger(context.Background())
 	app.InitGitopiaClientConfig()
