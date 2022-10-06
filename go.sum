@@ -924,6 +924,8 @@ github.com/gitopia/gitopia v1.0.0-rc.2 h1:6Nnix267uq935TL/ewCC7x71gctrzsh207Tdg9
 github.com/gitopia/gitopia v1.0.0-rc.2/go.mod h1:j3lAdoRoKZCFA3V4c5v8lPAab4pDgXQcKHbPJkjeMHA=
 github.com/gitopia/go-git/v5 v5.4.3-0.20211224112515-b2efd9bec92c h1:xqrIU2JrAXwioLz+mKxn3j36C/akB1+SuAqXNtyddRU=
 github.com/gitopia/go-git/v5 v5.4.3-0.20211224112515-b2efd9bec92c/go.mod h1:+4EawsfpYlHKlmdvSoEYTrRZowCNR8ZhdRU8noDeemI=
+github.com/gitopia/go-git/v5 v5.4.3-0.20221005131752-a112ac2d1101 h1:OTY2An/KwpoEn4qq8xHmM62MkwqGYh54Q7R7EiusdHo=
+github.com/gitopia/go-git/v5 v5.4.3-0.20221005131752-a112ac2d1101/go.mod h1:URjy4gSDwC2xvvUyqYJdH0GWmvrmyzvIBwqlMiodPsU=
 github.com/gliderlabs/ssh v0.1.1/go.mod h1:U7qILu1NlMHj9FlMhZLlkCdDnU1DBEAqr0aevW3Awn0=
 github.com/gliderlabs/ssh v0.2.2 h1:6zsha5zo/TWhRhwqCD3+EarCAgZ2yN28ipRnGPnwkI0=
 github.com/gliderlabs/ssh v0.2.2/go.mod h1:U7qILu1NlMHj9FlMhZLlkCdDnU1DBEAqr0aevW3Awn0=
@@ -2518,6 +2520,8 @@ github.com/xanzy/go-gitlab v0.32.0/go.mod h1:sPLojNBn68fMUWSxIJtdVVIP8uSBYqesTfD
 github.com/xanzy/ssh-agent v0.2.1/go.mod h1:mLlQY/MoOhWBj+gOGMQkOeiEvkx+8pJSI+0Bx9h2kr4=
 github.com/xanzy/ssh-agent v0.3.0 h1:wUMzuKtKilRgBAD1sUb8gOwwRr2FGoBVumcjoOACClI=
 github.com/xanzy/ssh-agent v0.3.0/go.mod h1:3s9xbODqPuuhK9JV1R321M/FlMZSBvE5aY6eAcqrDh0=
+github.com/xanzy/ssh-agent v0.3.1 h1:AmzO1SSWxw73zxFZPRwaMN1MohDw8UyHnmuxyceTEGo=
+github.com/xanzy/ssh-agent v0.3.1/go.mod h1:QIE4lCeL7nkC25x+yA3LBIYfwCc1TFziCtG7cBAac6w=
 github.com/xeipuuv/gojsonpointer v0.0.0-20180127040702-4e3ac2762d5f/go.mod h1:N2zxlSyiKSe5eX1tZViRH5QA0qijqEDrYZiPEAiq3wU=
 github.com/xeipuuv/gojsonpointer v0.0.0-20190905194746-02993c407bfb/go.mod h1:N2zxlSyiKSe5eX1tZViRH5QA0qijqEDrYZiPEAiq3wU=
 github.com/xeipuuv/gojsonreference v0.0.0-20180127040603-bd5ef7bd5415/go.mod h1:GwrjFmJcFw6At/Gs6z4yjiIwzuJ1/+UwLxMQDVQXShQ=
