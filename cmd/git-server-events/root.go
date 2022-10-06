@@ -18,10 +18,10 @@ const (
 
 func NewRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
-		Use:               "git-server-events",
+		Use:               AppName,
 		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
-			version.Name = "git-server-events"
+			version.Name = AppName
 			registry := codectypes.NewInterfaceRegistry()
 			cryptocodec.RegisterInterfaces(registry)
 			marshaler := codec.NewProtoCodec(registry)
