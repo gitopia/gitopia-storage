@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cosmos/cosmos-sdk/codec"
 	"github.com/gitopia/gitopia/x/gitopia/types"
 	"github.com/gitopia/gitopia/x/gitopia/utils"
 	"github.com/spf13/viper"
@@ -46,6 +47,7 @@ func HavePushPermission(repoId uint64, address string) (havePermission bool, err
 	grpcUrl := viper.GetString("gitopia_grpc_url")
 	grpcConn, err := grpc.Dial(grpcUrl,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.ForceCodec(codec.NewProtoCodec(nil).GRPCCodec())),
 	)
 	if err != nil {
 		return false, err

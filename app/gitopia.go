@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 
+	"github.com/cosmos/cosmos-sdk/codec"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/x/authz"
 	"github.com/gitopia/git-server/logger"
@@ -11,6 +12,8 @@ import (
 	"github.com/ignite/cli/ignite/pkg/cosmosclient"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 const (
@@ -43,7 +46,15 @@ func NewGitopiaClient(ctx context.Context, account string) (GitopiaClient, error
 		return GitopiaClient{}, errors.Wrap(err, "error creating cosmos client")
 	}
 
-	queryClient := types.NewQueryClient(client.Context().GRPCClient)
+	grpcConn, err := grpc.Dial(viper.GetString("gitopia_grpc_url"),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.ForceCodec(codec.NewProtoCodec(nil).GRPCCodec())),
+	)
+	if err != nil {
+		return GitopiaClient{}, errors.Wrap(err, "error creating grpc client")
+	}
+
+	queryClient := types.NewQueryClient(grpcConn)
 
 	return GitopiaClient{
 		accountName: account,

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cosmos/cosmos-sdk/codec"
 	"github.com/gitopia/git-server/utils"
 	"github.com/gitopia/gitopia/x/gitopia/types"
 	"github.com/spf13/viper"
@@ -119,6 +120,7 @@ func getAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 	grpcUrl := viper.GetString("gitopia_grpc_url")
 	grpcConn, err := grpc.Dial(grpcUrl,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.ForceCodec(codec.NewProtoCodec(nil).GRPCCodec())),
 	)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
