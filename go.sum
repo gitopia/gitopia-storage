@@ -922,10 +922,16 @@ github.com/gin-gonic/gin v1.6.3/go.mod h1:75u5sXoLsGZoRN5Sgbi1eraJ4GU3++wFwWzhwv
 github.com/gin-gonic/gin v1.7.0/go.mod h1:jD2toBW3GZUr5UMcdrwQA10I7RuaFOl/SGeDjXkfUtY=
 github.com/gitopia/gitopia v1.0.0-rc.2 h1:6Nnix267uq935TL/ewCC7x71gctrzsh207Tdg92bKYU=
 github.com/gitopia/gitopia v1.0.0-rc.2/go.mod h1:j3lAdoRoKZCFA3V4c5v8lPAab4pDgXQcKHbPJkjeMHA=
-github.com/gitopia/go-git/v5 v5.4.3-0.20211224112515-b2efd9bec92c h1:xqrIU2JrAXwioLz+mKxn3j36C/akB1+SuAqXNtyddRU=
-github.com/gitopia/go-git/v5 v5.4.3-0.20211224112515-b2efd9bec92c/go.mod h1:+4EawsfpYlHKlmdvSoEYTrRZowCNR8ZhdRU8noDeemI=
+github.com/gitopia/go-diff v0.0.0-20221011073329-132b1aebc86c h1:rALNQejs3vSoEGgtT+jyB5svZ7JOUbaP2HpzHmVWhmU=
+github.com/gitopia/go-diff v0.0.0-20221011073329-132b1aebc86c/go.mod h1:/1GKA+kU8l5Wx8iXv16a7JLB1ddvhuqcxlDodtKCQF8=
 github.com/gitopia/go-git/v5 v5.4.3-0.20221005131752-a112ac2d1101 h1:OTY2An/KwpoEn4qq8xHmM62MkwqGYh54Q7R7EiusdHo=
 github.com/gitopia/go-git/v5 v5.4.3-0.20221005131752-a112ac2d1101/go.mod h1:URjy4gSDwC2xvvUyqYJdH0GWmvrmyzvIBwqlMiodPsU=
+github.com/gitopia/go-git/v5 v5.4.3-0.20221010201106-13b133c3d91d h1:fbsvkqCBXwwib6yElOvkRVyGUIzEkdpsC/mVYUy2j74=
+github.com/gitopia/go-git/v5 v5.4.3-0.20221010201106-13b133c3d91d/go.mod h1:4gUdb/9wScr5BOKW2jrzmIjOuVvPDMrWp5awlOk0G9c=
+github.com/gitopia/go-git/v5 v5.4.3-0.20221011072017-e74fb8ac0688 h1:8X6mv3HjjYqV09o+YnFUmMkOvImEt1HhhntWo//5BsI=
+github.com/gitopia/go-git/v5 v5.4.3-0.20221011072017-e74fb8ac0688/go.mod h1:pIgJwDg6UibiZ6psA9M8OvWQeugFcyonqKWs5CVJKfc=
+github.com/gitopia/go-git/v5 v5.4.3-0.20221011074003-f70479dc646c h1:CqqdMQIequFDI6w9JKccH7D8RhXuIVesCcqtCIUlzZA=
+github.com/gitopia/go-git/v5 v5.4.3-0.20221011074003-f70479dc646c/go.mod h1:kweS1yWmDeC1MkqqY/c82hVb6hJH1BNjJ06IIIwyWNQ=
 github.com/gliderlabs/ssh v0.1.1/go.mod h1:U7qILu1NlMHj9FlMhZLlkCdDnU1DBEAqr0aevW3Awn0=
 github.com/gliderlabs/ssh v0.2.2 h1:6zsha5zo/TWhRhwqCD3+EarCAgZ2yN28ipRnGPnwkI0=
 github.com/gliderlabs/ssh v0.2.2/go.mod h1:U7qILu1NlMHj9FlMhZLlkCdDnU1DBEAqr0aevW3Awn0=
@@ -1344,6 +1350,8 @@ github.com/gtank/ristretto255 v0.1.2/go.mod h1:Ph5OpO6c7xKUGROZfWVLiJf9icMDwUeIv
 github.com/hanwen/go-fuse v1.0.0/go.mod h1:unqXarDXqzAk0rt98O2tVndEPIpUgLD9+rwFisZH3Ok=
 github.com/hanwen/go-fuse/v2 v2.0.3/go.mod h1:0EQM6aH2ctVpvZ6a+onrQ/vaykxh2GH7hy3e13vzTUY=
 github.com/hanwen/go-fuse/v2 v2.1.1-0.20220112183258-f57e95bda82d/go.mod h1:B1nGE/6RBFyBRC1RRnf23UpwCdyJ31eukw34oAKukAc=
+github.com/harry-hov/go-diff v1.2.1-0.20221011071855-bbc760507cde h1:s2HgqwMFBd1rnJdojRhr5eAEpyepApYplfFabggwak0=
+github.com/harry-hov/go-diff v1.2.1-0.20221011071855-bbc760507cde/go.mod h1:5A3E+Bp5DuJf0/89n9Jtl/gu5dU29b1NnCP68P0nuPM=
 github.com/hashicorp/consul/api v1.1.0/go.mod h1:VmuI/Lkw1nC05EYQWNKwWGbkg+FbDBtguAZLlVdkD9Q=
 github.com/hashicorp/consul/api v1.3.0/go.mod h1:MmDNSzIMUjNpY/mQ398R4bk2FnqQLoPndWW5VkKPlCE=
 github.com/hashicorp/consul/api v1.10.1/go.mod h1:XjsvQN+RJGWI2TWy1/kqaE16HrR2J/FWgkYjdZQsX9M=
@@ -2518,8 +2526,6 @@ github.com/wsddn/go-ecdh v0.0.0-20161211032359-48726bab9208/go.mod h1:IotVbo4F+m
 github.com/xanzy/go-gitlab v0.31.0/go.mod h1:sPLojNBn68fMUWSxIJtdVVIP8uSBYqesTfDUseX11Ug=
 github.com/xanzy/go-gitlab v0.32.0/go.mod h1:sPLojNBn68fMUWSxIJtdVVIP8uSBYqesTfDUseX11Ug=
 github.com/xanzy/ssh-agent v0.2.1/go.mod h1:mLlQY/MoOhWBj+gOGMQkOeiEvkx+8pJSI+0Bx9h2kr4=
-github.com/xanzy/ssh-agent v0.3.0 h1:wUMzuKtKilRgBAD1sUb8gOwwRr2FGoBVumcjoOACClI=
-github.com/xanzy/ssh-agent v0.3.0/go.mod h1:3s9xbODqPuuhK9JV1R321M/FlMZSBvE5aY6eAcqrDh0=
 github.com/xanzy/ssh-agent v0.3.1 h1:AmzO1SSWxw73zxFZPRwaMN1MohDw8UyHnmuxyceTEGo=
 github.com/xanzy/ssh-agent v0.3.1/go.mod h1:QIE4lCeL7nkC25x+yA3LBIYfwCc1TFziCtG7cBAac6w=
 github.com/xeipuuv/gojsonpointer v0.0.0-20180127040702-4e3ac2762d5f/go.mod h1:N2zxlSyiKSe5eX1tZViRH5QA0qijqEDrYZiPEAiq3wU=
@@ -3049,7 +3055,6 @@ golang.org/x/sys v0.0.0-20210420205809-ac73e9fd8988/go.mod h1:h1NjWce9XRLGQEsW7w
 golang.org/x/sys v0.0.0-20210423082822-04245dca01da/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
 golang.org/x/sys v0.0.0-20210423185535-09eb48e85fd7/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
 golang.org/x/sys v0.0.0-20210426230700-d19ff857e887/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
-golang.org/x/sys v0.0.0-20210502180810-71e4cd670f79/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
 golang.org/x/sys v0.0.0-20210510120138-977fb7262007/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
 golang.org/x/sys v0.0.0-20210514084401-e8d321eab015/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
 golang.org/x/sys v0.0.0-20210603081109-ebe580a85c40/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
