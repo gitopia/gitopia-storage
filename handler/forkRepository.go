@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/buger/jsonparser"
+	"github.com/cosmos/cosmos-sdk/codec"
 	"github.com/cosmos/cosmos-sdk/types/query"
 	"github.com/cosmos/cosmos-sdk/types/tx"
 	"github.com/gitopia/git-server/app"
@@ -286,6 +287,7 @@ func (h *InvokeForkRepositoryEventHandler) BackfillMissedEvents(ctx context.Cont
 
 		grpcConn, err := grpc.Dial(viper.GetString("gitopia_grpc_url"),
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithDefaultCallOptions(grpc.ForceCodec(codec.NewProtoCodec(nil).GRPCCodec())),
 		)
 		if err != nil {
 			errChan <- errors.Wrap(err, "dial err")

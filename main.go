@@ -43,6 +43,8 @@ const (
 	AccountPubKeyPrefix  = AccountAddressPrefix + sdk.PrefixPublic
 )
 
+const LARGE_OBJECT_THRESHOLD int64 = 1024 * 1024
+
 type SaveToArweavePostBody struct {
 	RepositoryID     uint64 `json:"repository_id"`
 	RemoteRefName    string `json:"remote_ref_name"`
@@ -1009,7 +1011,7 @@ func (s *Server) getInfoRefs(_ string, w http.ResponseWriter, r *Request) {
 			return
 		}
 	}
-	storage := filesystem.NewStorageWithOptions(fs, cache.NewObjectLRUDefault(), filesystem.Options{KeepDescriptors: true})
+	storage := filesystem.NewStorageWithOptions(fs, cache.NewObjectLRUDefault(), filesystem.Options{KeepDescriptors: true, LargeObjectThreshold: LARGE_OBJECT_THRESHOLD})
 	ep, _ := transport.NewEndpoint(r.RepoPath)
 	loader := server.MapLoader{}
 	loader[ep.String()] = storage
@@ -1104,7 +1106,7 @@ func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
 			return
 		}
 	}
-	storage := filesystem.NewStorageWithOptions(fs, cache.NewObjectLRUDefault(), filesystem.Options{KeepDescriptors: true})
+	storage := filesystem.NewStorageWithOptions(fs, cache.NewObjectLRUDefault(), filesystem.Options{KeepDescriptors: true, LargeObjectThreshold: LARGE_OBJECT_THRESHOLD})
 	ep, _ := transport.NewEndpoint(r.RepoPath)
 	loader := server.MapLoader{}
 	loader[ep.String()] = storage

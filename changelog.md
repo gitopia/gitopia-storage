@@ -1,5 +1,13 @@
 # Changelog
 
+## [v1.0.0] - 2022-10-20
+
+- Bump gitopia version to v1.0.0
+- Add authentication in push api
+- Don't cache git objects larger than 1Mb in go-git
+- Fix certain diffs
+- Pass codec during grpc client initialization
+
 ## [v0.6.1] - 2022-07-28
 
 ### Fixes
