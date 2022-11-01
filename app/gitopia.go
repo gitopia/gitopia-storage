@@ -42,6 +42,7 @@ func NewGitopiaClient(ctx context.Context, account string) (GitopiaClient, error
 		cosmosclient.WithHome(viper.GetString("keyring_dir")),
 		cosmosclient.WithAddressPrefix(GITOPIA_ACC_ADDRESS_PREFIX),
 		cosmosclient.WithGasPrices(viper.GetString("gas_prices")),
+		cosmosclient.WithGas("auto"),
 	)
 	if err != nil {
 		return GitopiaClient{}, errors.Wrap(err, "error creating cosmos client")
