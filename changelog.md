@@ -1,6 +1,10 @@
 # Changelog
 
-## [v1.1.1] - 2022-11-1
+## [v1.2.0] - 2022-11-02
+
+- Bump gitopia version to v1.1.2
+
+## [v1.1.1] - 2022-11-01
 
 - Set gas calculation to auto
 
