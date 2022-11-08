@@ -62,6 +62,7 @@ The server will be listening at port `5000`
     Pagination   *PageRequest `json:"pagination"`
   }
   ```
+- `GET` /raw/<id>/<repoName>/<branchName>/<filePath> : get raw file
 
 ## Event processing service
 
