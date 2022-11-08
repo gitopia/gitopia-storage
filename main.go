@@ -554,10 +554,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				blob, err := object.GetBlob(repo.Storer, treeEntry.Hash)
 				if err != nil {
 					http.Error(w, err.Error(), http.StatusNotFound)
+					return
 				}
 				fc, err := utils.GrabFileContent(*blob, *treeEntry, body.Path, body.NoRestriction)
 				if err != nil {
 					http.Error(w, err.Error(), http.StatusNotFound)
+					return
 				}
 				fileContent = append(fileContent, fc)
 
@@ -918,6 +920,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 
 		s.pullRequestCheckHandler(w, r)
+		return
+	}
+
+	if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/raw") {
+		defer r.Body.Close()
+
+		s.getRawFileHandler(w, r)
 		return
 	}
 
