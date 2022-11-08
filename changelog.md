@@ -1,5 +1,9 @@
 # Changelog
 
+## [v1.4.0] - 2022-11-08
+
+- new /raw api to get raw files
+
 ## [v1.3.0] - 2022-11-07
 
 - Bump gitopia version to v1.2.0
