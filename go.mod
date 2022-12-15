@@ -8,7 +8,6 @@ require (
 	github.com/gitopia/gitopia v1.2.0
 	github.com/gitopia/go-git/v5 v5.4.3-0.20221011074003-f70479dc646c
 	github.com/go-git/go-billy/v5 v5.3.1
-	github.com/ignite/cli v0.24.0
 	github.com/libgit2/git2go/v33 v33.0.4
 	github.com/pkg/errors v0.9.1
 	github.com/rs/cors v1.8.2
@@ -38,9 +37,7 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bgentry/go-netrc v0.0.0-20140422174119-9fd32a8b3d3d // indirect
 	github.com/bgentry/speakeasy v0.1.0 // indirect
-	github.com/blang/semver v3.5.1+incompatible // indirect
 	github.com/btcsuite/btcd v0.22.1 // indirect
-	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/cespare/xxhash v1.1.0 // indirect
 	github.com/cespare/xxhash/v2 v2.1.2 // indirect
 	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e // indirect
@@ -51,7 +48,6 @@ require (
 	github.com/cosmos/go-bip39 v1.0.0 // indirect
 	github.com/cosmos/gorocksdb v1.2.0 // indirect
 	github.com/cosmos/iavl v0.19.4 // indirect
-	github.com/cosmos/ibc-go/v5 v5.0.0-rc1 // indirect
 	github.com/cosmos/ledger-cosmos-go v0.11.1 // indirect
 	github.com/cosmos/ledger-go v0.9.3 // indirect
 	github.com/danieljoos/wincred v1.1.2 // indirect
@@ -64,7 +60,6 @@ require (
 	github.com/emirpasic/gods v1.12.0 // indirect
 	github.com/felixge/httpsnoop v1.0.1 // indirect
 	github.com/fsnotify/fsnotify v1.5.4 // indirect
-	github.com/ghodss/yaml v1.0.0 // indirect
 	github.com/gitopia/go-diff v0.0.0-20221011073329-132b1aebc86c // indirect
 	github.com/go-git/gcfg v1.5.0 // indirect
 	github.com/go-kit/kit v0.12.0 // indirect
@@ -135,6 +130,7 @@ require (
 	github.com/prometheus/procfs v0.7.3 // indirect
 	github.com/rakyll/statik v0.1.7 // indirect
 	github.com/rcrowley/go-metrics v0.0.0-20201227073835-cf1acfcdf475 // indirect
+	github.com/rogpeppe/go-internal v1.8.1 // indirect
 	github.com/sasha-s/go-deadlock v0.3.1 // indirect
 	github.com/spf13/afero v1.8.2 // indirect
 	github.com/spf13/cast v1.5.0 // indirect
@@ -155,10 +151,8 @@ require (
 	go.opencensus.io v0.23.0 // indirect
 	golang.org/x/crypto v0.0.0-20220722155217-630584e8d5aa // indirect
 	golang.org/x/exp v0.0.0-20220722155223-a9213eeb770e // indirect
-	golang.org/x/mod v0.6.0-dev.0.20220419223038-86c51ed26bb4 // indirect
 	golang.org/x/net v0.1.0 // indirect
 	golang.org/x/oauth2 v0.1.0 // indirect
-	golang.org/x/sync v0.0.0-20220929204114-8fcdb60fdcc0 // indirect
 	golang.org/x/sys v0.1.0 // indirect
 	golang.org/x/term v0.1.0 // indirect
 	golang.org/x/text v0.4.0 // indirect
