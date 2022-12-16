@@ -91,7 +91,7 @@ Get address
 To start the service, execute the following command
 
 ```sh
-./build/git-server-events run
+./build/git-server-events run --from git-server --keyring-backend test
 ```
 
 Logs will be available at `gitopia-git-server-events.log`
