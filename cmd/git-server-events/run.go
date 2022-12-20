@@ -67,8 +67,8 @@ func run(cmd *cobra.Command, args []string) error {
 	forkHandler := handler.NewInvokeForkRepositoryEventHandler(gc, ftmc, fcc)
 	mergeHandler := handler.NewInvokeMergePullRequestEventHandler(gc, mtmc, mcc)
 
-	_, forkBackfillErr := forkHandler.BackfillMissedEvents(ctx)
-	_, mergeBackfillErr := mergeHandler.BackfillMissedEvents(ctx)
+	// _, forkBackfillErr := forkHandler.BackfillMissedEvents(ctx)
+	// _, mergeBackfillErr := mergeHandler.BackfillMissedEvents(ctx)
 
 	invokeForkRepositoryQuery := "tm.event='Tx' AND message.action='InvokeForkRepository'"
 	InvokeMergePullRequestQuery := "tm.event='Tx' AND message.action='InvokeMergePullRequest'"
@@ -78,14 +78,14 @@ func run(cmd *cobra.Command, args []string) error {
 
 	// wait for error from all the concurrent event processors
 	select {
-	case err = <-forkBackfillErr:
-		return errors.WithMessage(err, "fork backfill error")
+	// case err = <-forkBackfillErr:
+	// 	return errors.WithMessage(err, "fork backfill error")
 	case err = <-forkSubscribeErr:
 		return errors.WithMessage(err, "fork tm subscribe error")
 	case <-forkDone:
 		logger.FromContext(ctx).Info("fork done")
-	case err = <-mergeBackfillErr:
-		return errors.WithMessage(err, "merge backfill error")
+	// case err = <-mergeBackfillErr:
+	// 	return errors.WithMessage(err, "merge backfill error")
 	case err = <-mergeSubscribeErr:
 		return errors.WithMessage(err, "merge tm subscribe error")
 	case <-mergeDone:
