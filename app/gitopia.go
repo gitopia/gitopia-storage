@@ -10,7 +10,6 @@ import (
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/tx"
 	"github.com/cosmos/cosmos-sdk/codec"
-	"github.com/cosmos/cosmos-sdk/crypto/keyring"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/x/authz"
 	"github.com/gitopia/git-server/logger"
@@ -46,12 +45,8 @@ type GitopiaClient struct {
 }
 
 func NewGitopiaClient(ctx context.Context, cc client.Context, txf tx.Factory) (GitopiaClient, error) {
-	kr, err := keyring.New("git-server-events", "test", viper.GetString("keyring_dir"), cc.Input, cc.Codec, cc.KeyringOptions...)
-	if err != nil {
-		return GitopiaClient{}, errors.Wrap(err, "error initializing keyring")
-	}
 	w := logger.FromContext(ctx).WriterLevel(logrus.DebugLevel)
-	cc = cc.WithKeyring(kr).WithOutput(w)
+	cc = cc.WithOutput(w)
 
 	txf = txf.WithGasPrices(viper.GetString("gas_prices"))
 
