@@ -142,7 +142,7 @@ func (g GitopiaClient) waitForBlockHeight(ctx context.Context, h int64) error {
 		}
 		select {
 		case <-ctx.Done():
-			return errors.Wrap(ctx.Err(), "timeout exceeded waiting for block")
+			return errors.Wrap(ctx.Err(), "context is cancelled")
 		case <-ticker.C:
 		}
 	}
