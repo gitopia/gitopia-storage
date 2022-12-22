@@ -11,7 +11,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/std"
 	"github.com/cosmos/cosmos-sdk/version"
 	"github.com/cosmos/cosmos-sdk/x/auth/tx"
-	"github.com/cosmos/cosmos-sdk/x/auth/types"
+	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	"github.com/gitopia/git-server/app"
 	gtypes "github.com/gitopia/gitopia/x/gitopia/types"
 	"github.com/spf13/cobra"
@@ -41,7 +41,13 @@ func commandInit(cmd *cobra.Command) error {
 	interfaceRegistry := codectypes.NewInterfaceRegistry()
 	std.RegisterInterfaces(interfaceRegistry)
 	cryptocodec.RegisterInterfaces(interfaceRegistry)
-	types.RegisterInterfaces(interfaceRegistry)
+	authtypes.RegisterInterfaces(interfaceRegistry)
+	interfaceRegistry.RegisterInterface(
+		"cosmos.auth.v1beta1.AccountI",
+		(*authtypes.AccountI)(nil),
+		&authtypes.BaseAccount{},
+		&authtypes.ModuleAccount{},
+	)
 	gtypes.RegisterInterfaces(interfaceRegistry)
 
 	marshaler := codec.NewProtoCodec(interfaceRegistry)
@@ -49,7 +55,7 @@ func commandInit(cmd *cobra.Command) error {
 	clientCtx := client.GetClientContextFromCmd(cmd).
 		WithCodec(marshaler).
 		WithInterfaceRegistry(interfaceRegistry).
-		WithAccountRetriever(types.AccountRetriever{}).
+		WithAccountRetriever(authtypes.AccountRetriever{}).
 		WithTxConfig(txCfg).
 		WithInput(os.Stdin)
 	// sets global flags for keys subcommand
