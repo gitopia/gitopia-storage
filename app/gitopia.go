@@ -26,6 +26,7 @@ import (
 
 const (
 	GITOPIA_ACC_ADDRESS_PREFIX = "gitopia"
+	GAS_ADJUSTMENT             = 1.5
 )
 
 func InitGitopiaClientConfig() {
@@ -48,7 +49,7 @@ func NewGitopiaClient(ctx context.Context, cc client.Context, txf tx.Factory) (G
 	w := logger.FromContext(ctx).WriterLevel(logrus.DebugLevel)
 	cc = cc.WithOutput(w)
 
-	txf = txf.WithGasPrices(viper.GetString("gas_prices"))
+	txf = txf.WithGasPrices(viper.GetString("gas_prices")).WithGasAdjustment(GAS_ADJUSTMENT)
 
 	grpcConn, err := grpc.Dial(viper.GetString("gitopia_grpc_url"),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
