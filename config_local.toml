@@ -1,8 +1,8 @@
-web_server_port = 5000
+web_server_port = 5001
 gitopia_grpc_url = "localhost:9090"
 git_dir = "/var/repos"
 attachment_dir = "/var/attachments"
 tm_addr = "http://localhost:26657"
-key_name = "git-server"
-keyring_dir = ""
+keyring_dir = "/Users/faza/Code/git-server"
 gas_prices = ""
+chain_id = "gitopia"

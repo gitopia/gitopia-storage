@@ -1,12 +1,11 @@
 package main
 
 import (
-	"context"
-
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
+	"github.com/cosmos/cosmos-sdk/client/tx"
 	"github.com/gitopia/git-server/app"
 	"github.com/gitopia/git-server/app/consumer"
 	"github.com/gitopia/git-server/app/tm"
@@ -23,23 +22,34 @@ func NewRunCmd() *cobra.Command {
 		RunE:          run,
 		SilenceErrors: true,
 	}
+	AddGitopiaFlags(cmdRun)
+
 	return cmdRun
 }
 
 func run(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
-	gc, err := app.NewGitopiaClient(context.Background(), viper.GetString("key_name"))
+	clientCtx, err := GetClientContext(cmd)
+	if err != nil {
+		return errors.Wrap(err, "error initializing client context")
+	}
+	txf := tx.NewFactoryCLI(clientCtx, cmd.Flags())
+
+	gc, err := app.NewGitopiaClient(ctx, clientCtx, txf)
 	if err != nil {
 		return errors.WithMessage(err, "gitopia client error")
 	}
+	defer func() {
+		gc.Close()
+	}()
 
-	ftmc, err := tm.NewTmClient()
+	ftmc, err := tm.NewClient(viper.GetString("tm_addr"))
 	if err != nil {
 		return errors.WithMessage(err, "tm error")
 	}
 
-	mtmc, err := tm.NewTmClient()
+	mtmc, err := tm.NewClient(viper.GetString("tm_addr"))
 	if err != nil {
 		return errors.WithMessage(err, "tm error")
 	}
@@ -57,8 +67,8 @@ func run(cmd *cobra.Command, args []string) error {
 	forkHandler := handler.NewInvokeForkRepositoryEventHandler(gc, ftmc, fcc)
 	mergeHandler := handler.NewInvokeMergePullRequestEventHandler(gc, mtmc, mcc)
 
-	_, forkBackfillErr := forkHandler.BackfillMissedEvents(ctx)
-	_, mergeBackfillErr := mergeHandler.BackfillMissedEvents(ctx)
+	// _, forkBackfillErr := forkHandler.BackfillMissedEvents(ctx)
+	// _, mergeBackfillErr := mergeHandler.BackfillMissedEvents(ctx)
 
 	invokeForkRepositoryQuery := "tm.event='Tx' AND message.action='InvokeForkRepository'"
 	InvokeMergePullRequestQuery := "tm.event='Tx' AND message.action='InvokeMergePullRequest'"
@@ -68,14 +78,14 @@ func run(cmd *cobra.Command, args []string) error {
 
 	// wait for error from all the concurrent event processors
 	select {
-	case err = <-forkBackfillErr:
-		return errors.WithMessage(err, "fork backfill error")
+	// case err = <-forkBackfillErr:
+	// 	return errors.WithMessage(err, "fork backfill error")
 	case err = <-forkSubscribeErr:
 		return errors.WithMessage(err, "fork tm subscribe error")
 	case <-forkDone:
 		logger.FromContext(ctx).Info("fork done")
-	case err = <-mergeBackfillErr:
-		return errors.WithMessage(err, "merge backfill error")
+	// case err = <-mergeBackfillErr:
+	// 	return errors.WithMessage(err, "merge backfill error")
 	case err = <-mergeSubscribeErr:
 		return errors.WithMessage(err, "merge tm subscribe error")
 	case <-mergeDone:

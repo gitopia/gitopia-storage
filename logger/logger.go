@@ -8,24 +8,26 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-const LOG_FILE = "./gitopia-git-server-events.log"
+const LOG_FILE_EXT = ".log"
 const LOG_FILE_PERM = 0777
 
 type logctx struct{}
 
-func InitLogger(ctx context.Context) context.Context {
+func InitLogger(ctx context.Context, appName string) context.Context {
 	logger := logrus.New()
-	/* err := os.MkdirAll(LOG_FILE, LOG_FILE_PERM)
-	if err != nil {
-		log.Fatalln("error creating log dir: ", err.Error())
-	} */
 
-	file, err := os.OpenFile(LOG_FILE, os.O_CREATE|os.O_WRONLY|os.O_APPEND, LOG_FILE_PERM)
+	file, err := os.OpenFile(appName+LOG_FILE_EXT, os.O_CREATE|os.O_WRONLY|os.O_APPEND, LOG_FILE_PERM)
 	if err != nil {
 		log.Fatalln("error opening log file: ", err.Error())
 	}
 	logger.SetOutput(file)
-	return context.WithValue(ctx, logctx{}, logger)
+	// todo: make configurable
+	logger.SetLevel(logrus.DebugLevel)
+	return ContextWithValue(ctx, logger)
+}
+
+func ContextWithValue(ctx context.Context, l *logrus.Logger) context.Context {
+	return context.WithValue(ctx, logctx{}, l)
 }
 
 func FromContext(ctx context.Context) *logrus.Logger {

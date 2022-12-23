@@ -1,5 +1,9 @@
 # Changelog
 
+## [v1.5.0] - 
+
+- use cosmos-sdk client instead of ignite client
+
 ## [v1.4.0] - 2022-11-08
 
 - new /raw api to get raw files

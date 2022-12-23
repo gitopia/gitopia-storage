@@ -2,22 +2,34 @@ package app
 
 import (
 	"context"
+	"encoding/hex"
+	"fmt"
+	"io"
+	"strings"
+	"time"
 
+	"github.com/cosmos/cosmos-sdk/client"
+	"github.com/cosmos/cosmos-sdk/client/tx"
 	"github.com/cosmos/cosmos-sdk/codec"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/x/authz"
 	"github.com/gitopia/git-server/logger"
 	"github.com/gitopia/gitopia/x/gitopia/types"
-	"github.com/ignite/cli/ignite/pkg/cosmosaccount"
-	"github.com/ignite/cli/ignite/pkg/cosmosclient"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
+	rpcclient "github.com/tendermint/tendermint/rpc/client"
+	rpchttp "github.com/tendermint/tendermint/rpc/client/http"
+	ctypes "github.com/tendermint/tendermint/rpc/core/types"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
 const (
 	GITOPIA_ACC_ADDRESS_PREFIX = "gitopia"
+	GAS_ADJUSTMENT             = 1.5
+	MAX_TRIES                  = 5
+	MAX_WAIT_BLOCKS            = 10
 )
 
 func InitGitopiaClientConfig() {
@@ -29,24 +41,18 @@ func InitGitopiaClientConfig() {
 }
 
 type GitopiaClient struct {
-	accountName string
-	cc          cosmosclient.Client
-	qc          types.QueryClient
+	cc  client.Context
+	txf tx.Factory
+	qc  types.QueryClient
+	rc  rpcclient.Client
+	w   *io.PipeWriter
 }
 
-func NewGitopiaClient(ctx context.Context, account string) (GitopiaClient, error) {
-	client, err := cosmosclient.New(ctx,
-		cosmosclient.WithNodeAddress(viper.GetString("tm_addr")),
-		//cosmosclient.WithKeyringServiceName("cosmos"), // not suported on macos
-		cosmosclient.WithKeyringBackend(cosmosaccount.KeyringTest),
-		cosmosclient.WithHome(viper.GetString("keyring_dir")),
-		cosmosclient.WithAddressPrefix(GITOPIA_ACC_ADDRESS_PREFIX),
-		cosmosclient.WithGasPrices(viper.GetString("gas_prices")),
-		cosmosclient.WithGas("auto"),
-	)
-	if err != nil {
-		return GitopiaClient{}, errors.Wrap(err, "error creating cosmos client")
-	}
+func NewGitopiaClient(ctx context.Context, cc client.Context, txf tx.Factory) (GitopiaClient, error) {
+	w := logger.FromContext(ctx).WriterLevel(logrus.DebugLevel)
+	cc = cc.WithOutput(w)
+
+	txf = txf.WithGasPrices(viper.GetString("gas_prices")).WithGasAdjustment(GAS_ADJUSTMENT)
 
 	grpcConn, err := grpc.Dial(viper.GetString("gitopia_grpc_url"),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -56,35 +62,123 @@ func NewGitopiaClient(ctx context.Context, account string) (GitopiaClient, error
 		return GitopiaClient{}, errors.Wrap(err, "error creating grpc client")
 	}
 
-	queryClient := types.NewQueryClient(grpcConn)
+	qc := types.NewQueryClient(grpcConn)
+
+	rc, err := rpchttp.New(cc.NodeURI, "/websocket")
+	if err != nil {
+		return GitopiaClient{}, errors.Wrap(err, "error creating rpc client")
+	}
 
 	return GitopiaClient{
-		accountName: account,
-		cc:          client,
-		qc:          queryClient,
+		cc:  cc,
+		txf: txf,
+		qc:  qc,
+		rc:  rc,
+		w:   w,
 	}, nil
 }
 
-func (g GitopiaClient) Address() (string, error) {
-	addr, err := g.cc.Address(g.accountName)
-	return addr, errors.Wrap(err, "error resolving address")
+// implement io.Closer
+func (g GitopiaClient) Close() error {
+	return g.w.Close()
 }
 
-func (g GitopiaClient) broadcastTx(ctx context.Context, msg sdk.Msg) error {
-	account, err := g.cc.Account(g.accountName)
+func (g GitopiaClient) authorizedBroadcastTx(ctx context.Context, msg sdk.Msg) error {
+	execMsg := authz.NewMsgExec(g.cc.FromAddress, []sdk.Msg{msg})
+	// !!HACK!! set sequence to 0 to force refresh account sequence for every txn
+	txHash, err := BroadcastTx(g.cc, g.txf.WithSequence(0), &execMsg)
 	if err != nil {
-		return errors.Wrap(err, "error retrieving the account")
+		return err
 	}
 
-	txResp, err := g.cc.BroadcastTx(account, msg)
+	_, err = g.waitForTx(ctx, txHash)
 	if err != nil {
-		return errors.Wrap(err, "error broadcasting tx")
+		return errors.Wrap(err, "error waiting for tx")
 	}
-	if txResp.TxResponse.Code != 0 {
-		logger.FromContext(ctx).Info("txResp: " + txResp.String())
-		return errors.Wrap(err, "got error from broadcast tx")
-	}
+
 	return nil
+}
+
+// status returns the node status
+func (g GitopiaClient) status(ctx context.Context) (*ctypes.ResultStatus, error) {
+	return g.rc.Status(ctx)
+}
+
+// latestBlockHeight returns the lastest block height of the app.
+func (g GitopiaClient) latestBlockHeight(ctx context.Context) (int64, error) {
+	resp, err := g.status(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return resp.SyncInfo.LatestBlockHeight, nil
+}
+
+// waitForNextBlock waits until next block is committed.
+// It reads the current block height and then waits for another block to be
+// committed, or returns an error if ctx is canceled.
+func (g GitopiaClient) waitForNextBlock(ctx context.Context) error {
+	return g.waitForNBlocks(ctx, 1)
+}
+
+// waitForNBlocks reads the current block height and then waits for anothers n
+// blocks to be committed, or returns an error if ctx is canceled.
+func (g GitopiaClient) waitForNBlocks(ctx context.Context, n int64) error {
+	start, err := g.latestBlockHeight(ctx)
+	if err != nil {
+		return err
+	}
+	return g.waitForBlockHeight(ctx, start+n)
+}
+
+// waitForBlockHeight waits until block height h is committed, or returns an
+// error if ctx is canceled.
+func (g GitopiaClient) waitForBlockHeight(ctx context.Context, h int64) error {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	for i := 0; i < MAX_TRIES; i++ {
+		latestHeight, err := g.latestBlockHeight(ctx)
+		if err != nil {
+			return err
+		}
+		if latestHeight >= h {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return errors.Wrap(ctx.Err(), "context is cancelled")
+		case <-ticker.C:
+		}
+	}
+
+	return fmt.Errorf("timeout error")
+}
+
+// waitForTx requests the tx from hash, if not found, waits for next block and
+// tries again. Returns an error if ctx is canceled.
+func (g GitopiaClient) waitForTx(ctx context.Context, hash string) (*ctypes.ResultTx, error) {
+	bz, err := hex.DecodeString(hash)
+	if err != nil {
+		return nil, errors.Wrapf(err, "unable to decode tx hash '%s'", hash)
+	}
+	for i := 0; i < MAX_WAIT_BLOCKS; i++ {
+		resp, err := g.rc.Tx(ctx, bz, false)
+		if err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				// Tx not found, wait for next block and try again
+				err := g.waitForNextBlock(ctx)
+				if err != nil {
+					return nil, errors.Wrap(err, "waiting for next block")
+				}
+				continue
+			}
+			return nil, errors.Wrapf(err, "fetching tx '%s'", hash)
+		}
+		// Tx found
+		return resp, nil
+	}
+
+	return nil, fmt.Errorf("max block wait exceeded")
 }
 
 func (g GitopiaClient) ForkRepository(ctx context.Context, creator string, repositoryId types.RepositoryId, owner string, taskId uint64) error {
@@ -95,21 +189,11 @@ func (g GitopiaClient) ForkRepository(ctx context.Context, creator string, repos
 		TaskId:       taskId,
 	}
 
-	address, err := g.Address()
+	err := g.authorizedBroadcastTx(ctx, msg)
 	if err != nil {
-		return errors.WithMessage(err, "address error")
+		return errors.WithMessage(err, "error sending authorized tx")
 	}
 
-	accAddr, err := sdk.AccAddressFromBech32(address)
-	if err != nil {
-		return errors.WithMessage(err, "address conversion error")
-	}
-
-	execMsg := authz.NewMsgExec(accAddr, []sdk.Msg{msg})
-	err = g.broadcastTx(ctx, &execMsg)
-	if err != nil {
-		return errors.WithMessage(err, "broadcast error")
-	}
 	return nil
 }
 
@@ -120,21 +204,11 @@ func (g GitopiaClient) ForkRepositorySuccess(ctx context.Context, creator string
 		TaskId:       taskId,
 	}
 
-	address, err := g.Address()
+	err := g.authorizedBroadcastTx(ctx, msg)
 	if err != nil {
-		return errors.WithMessage(err, "address error")
+		return errors.WithMessage(err, "error sending authorized tx")
 	}
 
-	accAddr, err := sdk.AccAddressFromBech32(address)
-	if err != nil {
-		return errors.WithMessage(err, "address conversion error")
-	}
-
-	execMsg := authz.NewMsgExec(accAddr, []sdk.Msg{msg})
-	err = g.broadcastTx(ctx, &execMsg)
-	if err != nil {
-		return errors.WithMessage(err, "broadcast error")
-	}
 	return nil
 }
 
@@ -146,21 +220,11 @@ func (g GitopiaClient) UpdateTask(ctx context.Context, creator string, id uint64
 		Message: message,
 	}
 
-	address, err := g.Address()
+	err := g.authorizedBroadcastTx(ctx, msg)
 	if err != nil {
-		return errors.WithMessage(err, "address error")
+		return errors.WithMessage(err, "error sending authorized tx")
 	}
 
-	accAddr, err := sdk.AccAddressFromBech32(address)
-	if err != nil {
-		return errors.WithMessage(err, "address conversion error")
-	}
-
-	execMsg := authz.NewMsgExec(accAddr, []sdk.Msg{msg})
-	err = g.broadcastTx(ctx, &execMsg)
-	if err != nil {
-		return errors.WithMessage(err, "broadcast error")
-	}
 	return nil
 }
 
@@ -173,21 +237,11 @@ func (g GitopiaClient) SetPullRequestState(ctx context.Context, creator string, 
 		TaskId:         taskId,
 	}
 
-	address, err := g.Address()
+	err := g.authorizedBroadcastTx(ctx, msg)
 	if err != nil {
-		return errors.WithMessage(err, "address error")
+		return errors.WithMessage(err, "error sending authorized tx")
 	}
 
-	accAddr, err := sdk.AccAddressFromBech32(address)
-	if err != nil {
-		return errors.WithMessage(err, "address conversion error")
-	}
-
-	execMsg := authz.NewMsgExec(accAddr, []sdk.Msg{msg})
-	err = g.broadcastTx(ctx, &execMsg)
-	if err != nil {
-		return errors.WithMessage(err, "broadcast error")
-	}
 	return nil
 }
 
@@ -203,14 +257,9 @@ func (g GitopiaClient) RepositoryName(ctx context.Context, id uint64) (string, e
 }
 
 func (g GitopiaClient) CheckGitServerAuthorization(ctx context.Context, userAddress string) (bool, error) {
-	address, err := g.Address()
-	if err != nil {
-		return false, errors.WithMessage(err, "address error")
-	}
-
 	resp, err := g.qc.CheckGitServerAuthorization(ctx, &types.QueryCheckGitServerAuthorizationRequest{
 		UserAddress:     userAddress,
-		ProviderAddress: address,
+		ProviderAddress: g.cc.FromAddress.String(),
 	})
 	if err != nil {
 		return false, errors.WithMessage(err, "query error")

@@ -2,15 +2,16 @@ package tm
 
 import (
 	"context"
+	"time"
 
 	"github.com/gitopia/git-server/logger"
 	"github.com/pkg/errors"
-	"github.com/spf13/viper"
 	"github.com/tendermint/tendermint/rpc/jsonrpc/client"
 )
 
 const (
-	TM_WS_ENDPOINT = "/websocket"
+	TM_WS_ENDPOINT    = "/websocket"
+	TM_WS_PING_PERIOD = 15 * time.Second
 )
 
 type Client struct {
@@ -19,8 +20,9 @@ type Client struct {
 
 type evenHandlerFunc func(context.Context, []byte) error
 
-func NewTmClient() (*Client, error) {
-	wsc, err := client.NewWS(viper.GetString("tm_addr"), TM_WS_ENDPOINT)
+func NewClient(addr string) (*Client, error) {
+	wsc, err := client.NewWS(addr, TM_WS_ENDPOINT,
+		client.PingPeriod(TM_WS_PING_PERIOD))
 	if err != nil {
 		return nil, errors.Wrap(err, "error creating ws client")
 	}

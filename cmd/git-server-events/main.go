@@ -7,7 +7,6 @@ import (
 	"os"
 
 	"github.com/cosmos/cosmos-sdk/client"
-	"github.com/gitopia/git-server/app"
 	"github.com/gitopia/git-server/logger"
 	"github.com/spf13/viper"
 )
@@ -29,8 +28,7 @@ func main() {
 	log.Printf("ENV: %s\n", os.Getenv("ENV"))
 	fmt.Println(viper.AllSettings())
 
-	ctx := logger.InitLogger(context.Background())
-	app.InitGitopiaClientConfig()
+	ctx := logger.InitLogger(context.Background(), AppName)
 	ctx = context.WithValue(ctx, client.ClientContextKey, &client.Context{})
 
 	rc := NewRootCmd()
