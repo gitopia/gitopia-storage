@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"strings"
 	"time"
@@ -27,6 +28,8 @@ import (
 const (
 	GITOPIA_ACC_ADDRESS_PREFIX = "gitopia"
 	GAS_ADJUSTMENT             = 1.5
+	MAX_TRIES                  = 5
+	MAX_WAIT_BLOCKS            = 10
 )
 
 func InitGitopiaClientConfig() {
@@ -133,7 +136,7 @@ func (g GitopiaClient) waitForBlockHeight(ctx context.Context, h int64) error {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
-	for {
+	for i := 0; i < MAX_TRIES; i++ {
 		latestHeight, err := g.latestBlockHeight(ctx)
 		if err != nil {
 			return err
@@ -147,6 +150,8 @@ func (g GitopiaClient) waitForBlockHeight(ctx context.Context, h int64) error {
 		case <-ticker.C:
 		}
 	}
+
+	return fmt.Errorf("timeout error")
 }
 
 // waitForTx requests the tx from hash, if not found, waits for next block and
@@ -156,7 +161,7 @@ func (g GitopiaClient) waitForTx(ctx context.Context, hash string) (*ctypes.Resu
 	if err != nil {
 		return nil, errors.Wrapf(err, "unable to decode tx hash '%s'", hash)
 	}
-	for {
+	for i := 0; i < MAX_WAIT_BLOCKS; i++ {
 		resp, err := g.rc.Tx(ctx, bz, false)
 		if err != nil {
 			if strings.Contains(err.Error(), "not found") {
@@ -172,6 +177,8 @@ func (g GitopiaClient) waitForTx(ctx context.Context, hash string) (*ctypes.Resu
 		// Tx found
 		return resp, nil
 	}
+
+	return nil, fmt.Errorf("max block wait exceeded")
 }
 
 func (g GitopiaClient) ForkRepository(ctx context.Context, creator string, repositoryId types.RepositoryId, owner string, taskId uint64) error {
