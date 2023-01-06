@@ -29,10 +29,11 @@ import (
 )
 
 type InvokeMergePullRequestEvent struct {
-	Creator       string
-	PullRequestId uint64
-	TaskId        uint64
-	TxHeight      uint64
+	Creator        string
+	RepositoryId   uint64
+	PullRequestIid uint64
+	TaskId         uint64
+	TxHeight       uint64
 }
 
 // tm event codec
@@ -42,13 +43,22 @@ func (e *InvokeMergePullRequestEvent) UnMarshal(eventBuf []byte) error {
 		return errors.Wrap(err, "error parsing creator")
 	}
 
-	pullRequestId, err := jsonparser.GetString(eventBuf, "events", "message.PullRequestId", "[0]")
+	repositoryIdStr, err := jsonparser.GetString(eventBuf, "events", "message.RepositoryId", "[0]")
 	if err != nil {
-		errors.Wrap(err, "error parsing pull request Id")
+		errors.Wrap(err, "error parsing repository id")
 	}
-	id, err := strconv.ParseUint(pullRequestId, 10, 64)
+	repositoryId, err := strconv.ParseUint(repositoryIdStr, 10, 64)
 	if err != nil {
-		return errors.Wrap(err, "error parsing pull request id")
+		return errors.Wrap(err, "error parsing repository id")
+	}
+
+	pullRequestIid, err := jsonparser.GetString(eventBuf, "events", "message.PullRequestIid", "[0]")
+	if err != nil {
+		errors.Wrap(err, "error parsing pull request iid")
+	}
+	iid, err := strconv.ParseUint(pullRequestIid, 10, 64)
+	if err != nil {
+		return errors.Wrap(err, "error parsing pull request iid")
 	}
 
 	taskIdStr, err := jsonparser.GetString(eventBuf, "events", "message.TaskId", "[0]")
@@ -70,7 +80,8 @@ func (e *InvokeMergePullRequestEvent) UnMarshal(eventBuf []byte) error {
 	}
 
 	e.Creator = creator
-	e.PullRequestId = id
+	e.RepositoryId = repositoryId
+	e.PullRequestIid = iid
 	e.TaskId = taskId
 	e.TxHeight = height
 
@@ -155,12 +166,15 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 	if !haveAuthorization {
 		logger.FromContext(ctx).
 			WithField("creator", event.Creator).
-			WithField("pull-request-id", event.PullRequestId).
+			WithField("repository-id", event.RepositoryId).
+			WithField("pull-request-iid", event.PullRequestIid).
+			WithField("task-id", event.TaskId).
+			WithField("tx-height", event.TxHeight).
 			Info("skipping merge pull request, not authorized")
 		return nil
 	}
 
-	resp, err := h.gc.PullRequest(ctx, event.PullRequestId)
+	resp, err := h.gc.PullRequest(ctx, event.RepositoryId, event.PullRequestIid)
 	if err != nil {
 		err = errors.WithMessage(err, "query error")
 		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
@@ -431,7 +445,7 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 		return err
 	}
 
-	err = h.gc.SetPullRequestState(ctx, event.Creator, event.PullRequestId, "MERGED", mergeCommitSha, event.TaskId)
+	err = h.gc.SetPullRequestState(ctx, event.Creator, event.RepositoryId, event.PullRequestIid, "MERGED", mergeCommitSha, event.TaskId)
 	if err != nil {
 		err = errors.WithMessage(err, "set pull request state error")
 		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
@@ -442,7 +456,11 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 	}
 
 	logger.FromContext(ctx).
-		WithField("pull-request-id", event.PullRequestId).
+		WithField("creator", event.Creator).
+		WithField("repository-id", event.RepositoryId).
+		WithField("pull-request-id", event.PullRequestIid).
+		WithField("task-id", event.TaskId).
+		WithField("tx-height", event.TxHeight).
 		Info("merged pull request")
 	return nil
 }
@@ -529,9 +547,15 @@ func (h *InvokeMergePullRequestEventHandler) BackfillMissedEvents(ctx context.Co
 							attributeMap[string(e.Attributes[i].Key)] = string(e.Attributes[i].Value)
 						}
 
-						prId, err := strconv.ParseUint(attributeMap["PullRequestId"], 10, 64)
+						repoId, err := strconv.ParseUint(attributeMap["RepositoryId"], 10, 64)
 						if err != nil {
 							errChan <- errors.WithMessage(err, "error parsing repo id")
+							return
+						}
+
+						prIid, err := strconv.ParseUint(attributeMap["PullRequestIid"], 10, 64)
+						if err != nil {
+							errChan <- errors.WithMessage(err, "error parsing pull request iid")
 							return
 						}
 
@@ -542,10 +566,11 @@ func (h *InvokeMergePullRequestEventHandler) BackfillMissedEvents(ctx context.Co
 						}
 
 						event := InvokeMergePullRequestEvent{
-							Creator:       attributeMap["Creator"],
-							PullRequestId: prId,
-							TaskId:        taskId,
-							TxHeight:      uint64(r.Height),
+							Creator:        attributeMap["Creator"],
+							RepositoryId:   repoId,
+							PullRequestIid: prIid,
+							TaskId:         taskId,
+							TxHeight:       uint64(r.Height),
 						}
 
 						// backup head commit to IPFS

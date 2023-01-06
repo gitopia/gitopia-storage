@@ -52,7 +52,7 @@ func NewGitopiaClient(ctx context.Context, cc client.Context, txf tx.Factory) (G
 	w := logger.FromContext(ctx).WriterLevel(logrus.DebugLevel)
 	cc = cc.WithOutput(w)
 
-	txf = txf.WithGasPrices(viper.GetString("gas_prices")).WithGasAdjustment(GAS_ADJUSTMENT)
+	txf = txf.WithFees("500utlore")
 
 	grpcConn, err := grpc.Dial(viper.GetString("gitopia_grpc_url"),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -228,10 +228,11 @@ func (g GitopiaClient) UpdateTask(ctx context.Context, creator string, id uint64
 	return nil
 }
 
-func (g GitopiaClient) SetPullRequestState(ctx context.Context, creator string, id uint64, state string, mergeCommitSha string, taskId uint64) error {
+func (g GitopiaClient) SetPullRequestState(ctx context.Context, creator string, repositoryId, iid uint64, state string, mergeCommitSha string, taskId uint64) error {
 	msg := &types.MsgSetPullRequestState{
 		Creator:        creator,
-		Id:             id,
+		RepositoryId:   repositoryId,
+		Iid:            iid,
 		State:          state,
 		MergeCommitSha: mergeCommitSha,
 		TaskId:         taskId,
@@ -280,15 +281,24 @@ func (g GitopiaClient) RepositoryId(ctx context.Context, address string, repoNam
 	return resp.Repository.Id, nil
 }
 
-func (g GitopiaClient) PullRequest(ctx context.Context, id uint64) (types.PullRequest, error) {
-	resp, err := g.qc.PullRequest(ctx, &types.QueryGetPullRequestRequest{
-		Id: id,
+func (g GitopiaClient) PullRequest(ctx context.Context, repositoryId uint64, pullRequestIid uint64) (types.PullRequest, error) {
+	repoResp, err := g.qc.Repository(ctx, &types.QueryGetRepositoryRequest{
+		Id: repositoryId,
 	})
 	if err != nil {
 		return types.PullRequest{}, errors.WithMessage(err, "query error")
 	}
 
-	return *resp.PullRequest, nil
+	prResp, err := g.qc.RepositoryPullRequest(ctx, &types.QueryGetRepositoryPullRequestRequest{
+		Id:             repoResp.Repository.Owner.Id,
+		RepositoryName: repoResp.Repository.Name,
+		PullIid:        pullRequestIid,
+	})
+	if err != nil {
+		return types.PullRequest{}, errors.WithMessage(err, "query error")
+	}
+
+	return *prResp.PullRequest, nil
 }
 
 func (g GitopiaClient) Task(ctx context.Context, id uint64) (types.Task, error) {
