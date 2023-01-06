@@ -79,7 +79,7 @@ func (e *InvokeMergePullRequestEvent) UnMarshal(eventBuf []byte) error {
 
 type InvokeMergePullRequestEventHandler struct {
 	tmc *tm.Client
-	gc  app.GitopiaClient
+	gc  app.GitopiaProxy
 
 	cc consumer.Client
 
@@ -92,7 +92,7 @@ type InvokeMergePullRequestEventHandler struct {
 }
 
 func NewInvokeMergePullRequestEventHandler(
-	g app.GitopiaClient,
+	g app.GitopiaProxy,
 	t *tm.Client,
 	c consumer.Client) InvokeMergePullRequestEventHandler {
 	return InvokeMergePullRequestEventHandler{

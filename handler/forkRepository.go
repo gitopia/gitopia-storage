@@ -96,7 +96,7 @@ func (e *InvokeForkRepositoryEvent) UnMarshal(eventBuf []byte) error {
 
 type InvokeForkRepositoryEventHandler struct {
 	tmc *tm.Client
-	gc  app.GitopiaClient
+	gc  app.GitopiaProxy
 
 	cc consumer.Client
 
@@ -109,7 +109,7 @@ type InvokeForkRepositoryEventHandler struct {
 }
 
 func NewInvokeForkRepositoryEventHandler(
-	g app.GitopiaClient,
+	g app.GitopiaProxy,
 	t *tm.Client,
 	c consumer.Client) InvokeForkRepositoryEventHandler {
 	return InvokeForkRepositoryEventHandler{
