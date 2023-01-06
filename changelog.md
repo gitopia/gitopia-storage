@@ -1,5 +1,9 @@
 # Changelog
 
+## [v1.8.0] - UNRELEASED
+
+- Bump gitopia version to v1.3.0
+
 ## [v1.7.0] - 2023-02-09
 
 - Fix event resubscription on reconnection
