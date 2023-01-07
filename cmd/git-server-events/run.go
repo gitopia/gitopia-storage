@@ -31,7 +31,7 @@ func NewRunCmd() *cobra.Command {
 func run(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
-	clientCtx, err := GetClientContext(cmd)
+	clientCtx, err := gitopia.GetClientContext(cmd)
 	if err != nil {
 		return errors.Wrap(err, "error initializing client context")
 	}
