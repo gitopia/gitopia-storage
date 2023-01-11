@@ -46,12 +46,12 @@ func run(cmd *cobra.Command, args []string) error {
 	}()
 	gp := app.NewGitopiaProxy(gc)
 
-	ftmc, err := tm.NewClient(viper.GetString("tm_addr"))
+	ftmc, err := tm.NewClient(viper.GetString("TM_ADDR"))
 	if err != nil {
 		return errors.WithMessage(err, "tm error")
 	}
 
-	mtmc, err := tm.NewClient(viper.GetString("tm_addr"))
+	mtmc, err := tm.NewClient(viper.GetString("TM_ADDR"))
 	if err != nil {
 		return errors.WithMessage(err, "tm error")
 	}

@@ -44,7 +44,7 @@ func ParseRepositoryIdfromURI(uri string) (uint64, error) {
 }
 
 func HavePushPermission(repoId uint64, address string) (havePermission bool, err error) {
-	grpcUrl := viper.GetString("gitopia_grpc_url")
+	grpcUrl := viper.GetString("GITOPIA_ADDR")
 	grpcConn, err := grpc.Dial(grpcUrl,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(grpc.ForceCodec(codec.NewProtoCodec(nil).GRPCCodec())),

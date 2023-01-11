@@ -72,7 +72,7 @@ func CreateQuarantineRepo(baseRepositoryID uint64, headRepositoryID uint64, base
 		log.Fatal(err)
 	}
 
-	gitDir := viper.GetString("git_dir")
+	gitDir := viper.GetString("GIT_DIR")
 	baseRepoPath := path.Join(gitDir, fmt.Sprintf("%v.git", baseRepositoryID))
 	headRepoPath := path.Join(gitDir, fmt.Sprintf("%v.git", headRepositoryID))
 

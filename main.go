@@ -1235,7 +1235,7 @@ func main() {
 
 	// Configure git service
 	service := New(Config{
-		Dir:        viper.GetString("git_dir"),
+		Dir:        viper.GetString("GIT_DIR"),
 		AutoCreate: true,
 		Auth:       true,
 	})
@@ -1252,7 +1252,7 @@ func main() {
 	handler := cors.Default().Handler(mux)
 
 	// Start HTTP server
-	if err := http.ListenAndServe(fmt.Sprintf(":%v", viper.GetString("web_server_port")), handler); err != nil {
+	if err := http.ListenAndServe(fmt.Sprintf(":%v", viper.GetString("WEB_SERVER_PORT")), handler); err != nil {
 		log.Fatal(err)
 	}
 }

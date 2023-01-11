@@ -489,7 +489,7 @@ func (h *InvokeMergePullRequestEventHandler) BackfillMissedEvents(ctx context.Co
 			logger.FromContext(ctx).Info("backfill done")
 		}()
 
-		grpcConn, err := grpc.Dial(viper.GetString("gitopia_grpc_url"),
+		grpcConn, err := grpc.Dial(viper.GetString("GITOPIA_ADDR"),
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
 			grpc.WithDefaultCallOptions(grpc.ForceCodec(codec.NewProtoCodec(nil).GRPCCodec())),
 		)

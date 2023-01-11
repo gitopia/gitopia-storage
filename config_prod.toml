@@ -1,8 +1,8 @@
-web_server_port = 5000
-gitopia_grpc_url = "grpc.gitopia.com:9090"
-git_dir = "/var/repos"
-attachment_dir = "/var/attachments"
-tm_addr = "http://grpc.gitopia.com:26657"
-keyring_dir = "/home/ubuntu/git-server"
-gas_prices = "0.001ulore"
-chain_id = "gitopia-janus-testnet-2"
+WEB_SERVER_PORT = 5000
+GITOPIA_ADDR = "grpc.gitopia.com:9090"
+GIT_DIR = "/var/repos"
+ATTACHMENT_DIR = "/var/attachments"
+TM_ADDR = "http://grpc.gitopia.com:26657"
+WORKING_DIR = "/home/ubuntu/git-server"
+GAS_PRICES = "0.001ulore"
+CHAIN_ID = "gitopia-janus-testnet-2"
