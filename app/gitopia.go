@@ -101,7 +101,7 @@ func (g GitopiaProxy) RepositoryName(ctx context.Context, id uint64) (string, er
 func (g GitopiaProxy) CheckGitServerAuthorization(ctx context.Context, userAddress string) (bool, error) {
 	resp, err := g.gc.QueryClient().CheckGitServerAuthorization(ctx, &types.QueryCheckGitServerAuthorizationRequest{
 		UserAddress:     userAddress,
-		ProviderAddress: g.gc.Address(),
+		ProviderAddress: g.gc.Address().String(),
 	})
 	if err != nil {
 		return false, errors.WithMessage(err, "query error")
