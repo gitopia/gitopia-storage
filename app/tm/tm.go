@@ -51,7 +51,7 @@ func (c Client) Subscribe(ctx context.Context, q string, h evenHandlerFunc) (<-c
 		for {
 			event := <-c.c.ResponsesCh
 			if event.Error != nil {
-				e <- errors.Wrap(err, "error reading from ws")
+				e <- errors.Wrap(event.Error, "error reading from ws")
 				return
 			}
 
