@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/gitopia/git-server/logger"
+	"github.com/gitopia/gitopia-go/logger"
 	"github.com/pkg/errors"
 	"github.com/tendermint/tendermint/rpc/jsonrpc/client"
 )

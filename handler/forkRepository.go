@@ -16,7 +16,7 @@ import (
 	"github.com/gitopia/git-server/app"
 	"github.com/gitopia/git-server/app/consumer"
 	"github.com/gitopia/git-server/app/tm"
-	"github.com/gitopia/git-server/logger"
+	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia/x/gitopia/types"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"

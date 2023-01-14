@@ -10,7 +10,7 @@ import (
 	"github.com/gitopia/git-server/app/consumer"
 	"github.com/gitopia/git-server/app/tm"
 	"github.com/gitopia/git-server/handler"
-	"github.com/gitopia/git-server/logger"
+	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia-go"
 )
 

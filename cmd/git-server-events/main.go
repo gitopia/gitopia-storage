@@ -7,7 +7,7 @@ import (
 	"os"
 
 	"github.com/cosmos/cosmos-sdk/client"
-	"github.com/gitopia/git-server/logger"
+	"github.com/gitopia/gitopia-go/logger"
 	"github.com/spf13/viper"
 )
 
@@ -33,7 +33,7 @@ func main() {
 
 	rc := NewRootCmd()
 	err = rc.ExecuteContext(ctx)
-	if err != nil {
+		if err != nil {
 		logger.FromContext(ctx).WithError(err).Error("app error")
 	}
 }
