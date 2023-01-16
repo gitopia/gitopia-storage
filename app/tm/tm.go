@@ -7,11 +7,13 @@ import (
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/pkg/errors"
 	"github.com/tendermint/tendermint/rpc/jsonrpc/client"
+	"github.com/tendermint/tendermint/rpc/jsonrpc/types"
 )
 
 const (
 	TM_WS_ENDPOINT    = "/websocket"
-	TM_WS_PING_PERIOD = 15 * time.Second
+	TM_WS_PING_PERIOD = 10 * time.Second
+	TM_WS_MAX_RECONNECT = 3
 )
 
 type Client struct {
@@ -22,7 +24,8 @@ type evenHandlerFunc func(context.Context, []byte) error
 
 func NewClient(addr string) (*Client, error) {
 	wsc, err := client.NewWS(addr, TM_WS_ENDPOINT,
-		client.PingPeriod(TM_WS_PING_PERIOD))
+		client.PingPeriod(TM_WS_PING_PERIOD),
+		client.MaxReconnectAttempts(TM_WS_MAX_RECONNECT))
 	if err != nil {
 		return nil, errors.Wrap(err, "error creating ws client")
 	}
@@ -49,11 +52,17 @@ func (c Client) Subscribe(ctx context.Context, q string, h evenHandlerFunc) (<-c
 			return
 		}
 		for {
-			event := <-c.c.ResponsesCh
-			if event.Error != nil {
-				e <- errors.Wrap(err, "error reading from ws")
+			var event types.RPCResponse
+			select {
+			case event = <- c.c.ResponsesCh:
+			case <- c.c.Quit():
+				e <- errors.New("ws conn closed")
 				return
 			}
+			if event.Error != nil {
+				e <- errors.Wrap(event.Error, "error reading from ws")
+				return
+			} 
 
 			jsonBuf, err := event.Result.MarshalJSON()
 			if err != nil {
