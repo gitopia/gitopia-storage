@@ -111,7 +111,7 @@ func uploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	attachmentDir := viper.GetString("attachment_dir")
+	attachmentDir := viper.GetString("ATTACHMENT_DIR")
 	shaString := hex.EncodeToString(sha.Sum(nil))
 	filePath := fmt.Sprintf("%s/%s", attachmentDir, shaString)
 	localFile, err := os.Create(filePath)
@@ -154,7 +154,7 @@ func getAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 	repositoryName := blocks[3]
 	tagName := blocks[4]
 
-	grpcUrl := viper.GetString("gitopia_grpc_url")
+	grpcUrl := viper.GetString("GITOPIA_ADDR")
 	grpcConn, err := grpc.Dial(grpcUrl,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(grpc.ForceCodec(codec.NewProtoCodec(nil).GRPCCodec())),
@@ -185,7 +185,7 @@ func getAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sha := res.Release.Attachments[i].Sha
-	filePath := fmt.Sprintf("%s/%s", viper.GetString("attachment_dir"), sha)
+	filePath := fmt.Sprintf("%s/%s", viper.GetString("ATTACHMENT_DIR"), sha)
 	file, err := os.Open(filePath)
 	if err != nil {
 		logError("attachment does not exist", err)
@@ -315,7 +315,7 @@ func (s *Server) pullRequestCheckHandler(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) getRawFileHandler(w http.ResponseWriter, r *http.Request) {
-	grpcUrl := viper.GetString("gitopia_grpc_url")
+	grpcUrl := viper.GetString("GITOPIA_ADDR")
 	grpcConn, err := grpc.Dial(grpcUrl,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(grpc.ForceCodec(codec.NewProtoCodec(nil).GRPCCodec())),

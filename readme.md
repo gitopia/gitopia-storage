@@ -16,7 +16,7 @@ docker build . --build-arg USER=<USER> \
 
 ### Usage
 
-Make necessary changes in `config.toml` for production and also set the following environment variable. Create `git_dir` and `attachments_dir` and verify the permissions.
+Make necessary changes in `config.toml` for production and also set the following environment variable. Create `GIT_DIR` and `ATTACHMENT_DIR` and verify the permissions.
 
 To start the server, execute the following command
 
@@ -29,7 +29,7 @@ docker run -it \
 ```
 
 > **Important**  
-> Make sure that `source`, `target` in the docker run command and the `git_dir` in the configuration file have the same path. This is required because forked repositories link to parent repositories via the git alternates mechanism wherein the absolute path of the parent repository is stored in the forked repository's alternates file.
+> Make sure that `source`, `target` in the docker run command and the `GIT_DIR` in the configuration file have the same path. This is required because forked repositories link to parent repositories via the git alternates mechanism wherein the absolute path of the parent repository is stored in the forked repository's alternates file.
 
 The server will be listening at port `5000`
 
@@ -74,7 +74,7 @@ make build
 
 ### Usage
 
-Make necessary changes in `config.toml` for production and also set the following environment variable. Create `git_dir` and verify the permissions.
+Make necessary changes in `config.toml` for production and also set the following environment variable. Create `GIT_DIR` and verify the permissions.
 
 Create a key for git-server-events and send some tokens to it's address
 

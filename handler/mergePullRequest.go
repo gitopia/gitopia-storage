@@ -19,7 +19,7 @@ import (
 	"github.com/gitopia/git-server/app"
 	"github.com/gitopia/git-server/app/consumer"
 	"github.com/gitopia/git-server/app/tm"
-	"github.com/gitopia/git-server/logger"
+	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/git-server/utils"
 	"github.com/gitopia/gitopia/x/gitopia/types"
 	"github.com/pkg/errors"
@@ -79,7 +79,7 @@ func (e *InvokeMergePullRequestEvent) UnMarshal(eventBuf []byte) error {
 
 type InvokeMergePullRequestEventHandler struct {
 	tmc *tm.Client
-	gc  app.GitopiaClient
+	gc  app.GitopiaProxy
 
 	cc consumer.Client
 
@@ -92,7 +92,7 @@ type InvokeMergePullRequestEventHandler struct {
 }
 
 func NewInvokeMergePullRequestEventHandler(
-	g app.GitopiaClient,
+	g app.GitopiaProxy,
 	t *tm.Client,
 	c consumer.Client) InvokeMergePullRequestEventHandler {
 	return InvokeMergePullRequestEventHandler{
@@ -489,7 +489,7 @@ func (h *InvokeMergePullRequestEventHandler) BackfillMissedEvents(ctx context.Co
 			logger.FromContext(ctx).Info("backfill done")
 		}()
 
-		grpcConn, err := grpc.Dial(viper.GetString("gitopia_grpc_url"),
+		grpcConn, err := grpc.Dial(viper.GetString("GITOPIA_ADDR"),
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
 			grpc.WithDefaultCallOptions(grpc.ForceCodec(codec.NewProtoCodec(nil).GRPCCodec())),
 		)

@@ -1,6 +1,11 @@
 # Changelog
 
-## [v1.5.0] - 
+## [v1.6.0] - 2023-01-17
+
+- Fix websocket connection error
+- Refactor: use gitopia-go client library
+
+## [v1.5.0] - 2022-12-23
 
 - use cosmos-sdk client instead of ignite client
 

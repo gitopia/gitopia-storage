@@ -10,7 +10,8 @@ import (
 	"github.com/gitopia/git-server/app/consumer"
 	"github.com/gitopia/git-server/app/tm"
 	"github.com/gitopia/git-server/handler"
-	"github.com/gitopia/git-server/logger"
+	"github.com/gitopia/gitopia-go/logger"
+	"github.com/gitopia/gitopia-go"
 )
 
 func NewRunCmd() *cobra.Command {
@@ -30,26 +31,27 @@ func NewRunCmd() *cobra.Command {
 func run(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
-	clientCtx, err := GetClientContext(cmd)
+	clientCtx, err := gitopia.GetClientContext(cmd)
 	if err != nil {
 		return errors.Wrap(err, "error initializing client context")
 	}
 	txf := tx.NewFactoryCLI(clientCtx, cmd.Flags())
 
-	gc, err := app.NewGitopiaClient(ctx, clientCtx, txf)
+	gc, err := gitopia.NewClient(ctx, clientCtx, txf)
 	if err != nil {
 		return errors.WithMessage(err, "gitopia client error")
 	}
 	defer func() {
 		gc.Close()
 	}()
+	gp := app.NewGitopiaProxy(gc)
 
-	ftmc, err := tm.NewClient(viper.GetString("tm_addr"))
+	ftmc, err := tm.NewClient(viper.GetString("TM_ADDR"))
 	if err != nil {
 		return errors.WithMessage(err, "tm error")
 	}
 
-	mtmc, err := tm.NewClient(viper.GetString("tm_addr"))
+	mtmc, err := tm.NewClient(viper.GetString("TM_ADDR"))
 	if err != nil {
 		return errors.WithMessage(err, "tm error")
 	}
@@ -64,8 +66,8 @@ func run(cmd *cobra.Command, args []string) error {
 		return errors.WithMessage(err, "error creating consumer client")
 	}
 
-	forkHandler := handler.NewInvokeForkRepositoryEventHandler(gc, ftmc, fcc)
-	mergeHandler := handler.NewInvokeMergePullRequestEventHandler(gc, mtmc, mcc)
+	forkHandler := handler.NewInvokeForkRepositoryEventHandler(gp, ftmc, fcc)
+	mergeHandler := handler.NewInvokeMergePullRequestEventHandler(gp, mtmc, mcc)
 
 	// _, forkBackfillErr := forkHandler.BackfillMissedEvents(ctx)
 	// _, mergeBackfillErr := mergeHandler.BackfillMissedEvents(ctx)

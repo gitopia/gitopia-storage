@@ -16,7 +16,7 @@ import (
 	"github.com/gitopia/git-server/app"
 	"github.com/gitopia/git-server/app/consumer"
 	"github.com/gitopia/git-server/app/tm"
-	"github.com/gitopia/git-server/logger"
+	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia/x/gitopia/types"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
@@ -96,7 +96,7 @@ func (e *InvokeForkRepositoryEvent) UnMarshal(eventBuf []byte) error {
 
 type InvokeForkRepositoryEventHandler struct {
 	tmc *tm.Client
-	gc  app.GitopiaClient
+	gc  app.GitopiaProxy
 
 	cc consumer.Client
 
@@ -109,7 +109,7 @@ type InvokeForkRepositoryEventHandler struct {
 }
 
 func NewInvokeForkRepositoryEventHandler(
-	g app.GitopiaClient,
+	g app.GitopiaProxy,
 	t *tm.Client,
 	c consumer.Client) InvokeForkRepositoryEventHandler {
 	return InvokeForkRepositoryEventHandler{
@@ -205,8 +205,8 @@ func (h *InvokeForkRepositoryEventHandler) Process(ctx context.Context, event In
 		return err
 	}
 
-	sourceRepoPath := path.Join(viper.GetString("git_dir"), fmt.Sprintf("%v.git", event.RepoId))
-	targetRepoPath := path.Join(viper.GetString("git_dir"), fmt.Sprintf("%v.git", forkedRepoId))
+	sourceRepoPath := path.Join(viper.GetString("GIT_DIR"), fmt.Sprintf("%v.git", event.RepoId))
+	targetRepoPath := path.Join(viper.GetString("GIT_DIR"), fmt.Sprintf("%v.git", forkedRepoId))
 	cmd := exec.Command("git", "clone", "--shared", "--bare", sourceRepoPath, targetRepoPath)
 	out, err := cmd.Output()
 	if err != nil {
@@ -285,7 +285,7 @@ func (h *InvokeForkRepositoryEventHandler) BackfillMissedEvents(ctx context.Cont
 			logger.FromContext(ctx).Info("backfill done")
 		}()
 
-		grpcConn, err := grpc.Dial(viper.GetString("gitopia_grpc_url"),
+		grpcConn, err := grpc.Dial(viper.GetString("GITOPIA_ADDR"),
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
 			grpc.WithDefaultCallOptions(grpc.ForceCodec(codec.NewProtoCodec(nil).GRPCCodec())),
 		)
