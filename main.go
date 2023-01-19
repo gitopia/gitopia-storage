@@ -756,7 +756,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				FilesChanged: uint64(changes.Len()),
 			}
 			DiffStatResponseJson, err := json.Marshal(DiffStatResponse)
-			w.Write(DiffStatResponseJson)
+			w.Write(DiffStatResponseJson)   
 			return
 		}
 
