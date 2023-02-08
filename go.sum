@@ -209,6 +209,10 @@ github.com/gitopia/gitopia v1.2.0 h1:hckyl7WMt6GUizzOFxG3KNpCO4eg8xWuhVKFola9eXA
 github.com/gitopia/gitopia v1.2.0/go.mod h1:1ojGcW3i/g9fd8pbx+eyIZXYKtvylX1xcrOzK7sO0UE=
 github.com/gitopia/gitopia-go v0.1.0 h1:PCWgu7tlASzFdy7F9c2IdEROpT9PsFsSAjQpPY/5yPo=
 github.com/gitopia/gitopia-go v0.1.0/go.mod h1:fd78h/08oBxoTAdqk3Dwcoc6DUTdt7nl9uRKub25ePs=
+github.com/gitopia/gitopia-go v0.2.0-rc h1:cfpGPi2ECK2AXGQvpaoYx6YMzoZAUMb8qRcf/TE/rNQ=
+github.com/gitopia/gitopia-go v0.2.0-rc/go.mod h1:fd78h/08oBxoTAdqk3Dwcoc6DUTdt7nl9uRKub25ePs=
+github.com/gitopia/gitopia-go v0.2.0-rc.1 h1:7OE3jwhD2pQJSslrIdLF2hu734CyzneNHJOHBYOZrkY=
+github.com/gitopia/gitopia-go v0.2.0-rc.1/go.mod h1:fd78h/08oBxoTAdqk3Dwcoc6DUTdt7nl9uRKub25ePs=
 github.com/gitopia/go-diff v0.0.0-20221011073329-132b1aebc86c h1:rALNQejs3vSoEGgtT+jyB5svZ7JOUbaP2HpzHmVWhmU=
 github.com/gitopia/go-diff v0.0.0-20221011073329-132b1aebc86c/go.mod h1:/1GKA+kU8l5Wx8iXv16a7JLB1ddvhuqcxlDodtKCQF8=
 github.com/gitopia/go-git/v5 v5.4.3-0.20221011074003-f70479dc646c h1:CqqdMQIequFDI6w9JKccH7D8RhXuIVesCcqtCIUlzZA=

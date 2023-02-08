@@ -15,7 +15,6 @@ import (
 	"github.com/cosmos/cosmos-sdk/types/tx"
 	"github.com/gitopia/git-server/app"
 	"github.com/gitopia/git-server/app/consumer"
-	"github.com/gitopia/git-server/app/tm"
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia/x/gitopia/types"
 	"github.com/pkg/errors"
@@ -95,8 +94,7 @@ func (e *InvokeForkRepositoryEvent) UnMarshal(eventBuf []byte) error {
 }
 
 type InvokeForkRepositoryEventHandler struct {
-	tmc *tm.Client
-	gc  app.GitopiaProxy
+	gc app.GitopiaProxy
 
 	cc consumer.Client
 
@@ -108,12 +106,8 @@ type InvokeForkRepositoryEventHandler struct {
 	offsetChan     chan uint64
 }
 
-func NewInvokeForkRepositoryEventHandler(
-	g app.GitopiaProxy,
-	t *tm.Client,
-	c consumer.Client) InvokeForkRepositoryEventHandler {
+func NewInvokeForkRepositoryEventHandler(g app.GitopiaProxy, c consumer.Client) InvokeForkRepositoryEventHandler {
 	return InvokeForkRepositoryEventHandler{
-		tmc:          t,
 		gc:           g,
 		cc:           c,
 		offsetChan:   make(chan uint64),
@@ -347,7 +341,6 @@ func (h *InvokeForkRepositoryEventHandler) BackfillMissedEvents(ctx context.Cont
 							TxHeight:        uint64(r.Height),
 						}
 
-						// backup head commit to IPFS
 						err = h.Process(ctx, event)
 						if err != nil {
 							errChan <- errors.WithMessage(err, "error processing event")

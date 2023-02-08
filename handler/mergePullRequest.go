@@ -18,9 +18,8 @@ import (
 	"github.com/cosmos/cosmos-sdk/types/tx"
 	"github.com/gitopia/git-server/app"
 	"github.com/gitopia/git-server/app/consumer"
-	"github.com/gitopia/git-server/app/tm"
-	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/git-server/utils"
+	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia/x/gitopia/types"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
@@ -78,8 +77,7 @@ func (e *InvokeMergePullRequestEvent) UnMarshal(eventBuf []byte) error {
 }
 
 type InvokeMergePullRequestEventHandler struct {
-	tmc *tm.Client
-	gc  app.GitopiaProxy
+	gc app.GitopiaProxy
 
 	cc consumer.Client
 
@@ -91,12 +89,8 @@ type InvokeMergePullRequestEventHandler struct {
 	offsetChan     chan uint64
 }
 
-func NewInvokeMergePullRequestEventHandler(
-	g app.GitopiaProxy,
-	t *tm.Client,
-	c consumer.Client) InvokeMergePullRequestEventHandler {
+func NewInvokeMergePullRequestEventHandler(g app.GitopiaProxy, c consumer.Client) InvokeMergePullRequestEventHandler {
 	return InvokeMergePullRequestEventHandler{
-		tmc:          t,
 		gc:           g,
 		cc:           c,
 		offsetChan:   make(chan uint64),
@@ -548,7 +542,6 @@ func (h *InvokeMergePullRequestEventHandler) BackfillMissedEvents(ctx context.Co
 							TxHeight:      uint64(r.Height),
 						}
 
-						// backup head commit to IPFS
 						err = h.Process(ctx, event)
 						if err != nil {
 							errChan <- errors.WithMessage(err, "error processing event")
