@@ -12,6 +12,11 @@ import (
 	"github.com/gitopia/gitopia-go/logger"
 )
 
+const (
+	invokeForkRepositoryQuery   = "tm.event='Tx' AND message.action='InvokeForkRepository'"
+	InvokeMergePullRequestQuery = "tm.event='Tx' AND message.action='InvokeMergePullRequest'"
+)
+
 func NewRunCmd() *cobra.Command {
 	var cmdRun = &cobra.Command{
 		Use:           "run",
@@ -44,12 +49,12 @@ func run(cmd *cobra.Command, args []string) error {
 	}()
 	gp := app.NewGitopiaProxy(gc)
 
-	ftmc, err := gitopia.NewWSEvents(ctx)
+	ftmc, err := gitopia.NewWSEvents(ctx, invokeForkRepositoryQuery)
 	if err != nil {
 		return errors.WithMessage(err, "tm error")
 	}
 
-	mtmc, err := gitopia.NewWSEvents(ctx)
+	mtmc, err := gitopia.NewWSEvents(ctx, InvokeMergePullRequestQuery)
 	if err != nil {
 		return errors.WithMessage(err, "tm error")
 	}
@@ -70,11 +75,8 @@ func run(cmd *cobra.Command, args []string) error {
 	// _, forkBackfillErr := forkHandler.BackfillMissedEvents(ctx)
 	// _, mergeBackfillErr := mergeHandler.BackfillMissedEvents(ctx)
 
-	invokeForkRepositoryQuery := "tm.event='Tx' AND message.action='InvokeForkRepository'"
-	InvokeMergePullRequestQuery := "tm.event='Tx' AND message.action='InvokeMergePullRequest'"
-
-	forkDone, forkSubscribeErr := ftmc.Subscribe(ctx, invokeForkRepositoryQuery, forkHandler.Handle)
-	mergeDone, mergeSubscribeErr := mtmc.Subscribe(ctx, InvokeMergePullRequestQuery, mergeHandler.Handle)
+	forkDone, forkSubscribeErr := ftmc.Subscribe(ctx, forkHandler.Handle)
+	mergeDone, mergeSubscribeErr := mtmc.Subscribe(ctx, mergeHandler.Handle)
 
 	// wait for error from all the concurrent event processors
 	select {

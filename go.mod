@@ -6,7 +6,7 @@ require (
 	github.com/buger/jsonparser v1.1.1
 	github.com/cosmos/cosmos-sdk v0.46.4
 	github.com/gitopia/gitopia v1.2.0
-	github.com/gitopia/gitopia-go v0.2.0-rc.1
+	github.com/gitopia/gitopia-go v0.2.0-rc.2
 	github.com/gitopia/go-git/v5 v5.4.3-0.20221011074003-f70479dc646c
 	github.com/go-git/go-billy/v5 v5.3.1
 	github.com/libgit2/git2go/v33 v33.0.4
@@ -14,7 +14,6 @@ require (
 	github.com/rs/cors v1.8.2
 	github.com/spf13/cobra v1.5.0
 	github.com/spf13/viper v1.13.0
-	github.com/tendermint/tendermint v0.34.22
 	google.golang.org/grpc v1.50.1
 )
 
@@ -143,6 +142,7 @@ require (
 	github.com/tendermint/btcd v0.1.1 // indirect
 	github.com/tendermint/crypto v0.0.0-20191022145703-50d29ede1e15 // indirect
 	github.com/tendermint/go-amino v0.16.0 // indirect
+	github.com/tendermint/tendermint v0.34.22 // indirect
 	github.com/tendermint/tm-db v0.6.7 // indirect
 	github.com/ulikunitz/xz v0.5.8 // indirect
 	github.com/xanzy/ssh-agent v0.3.1 // indirect
