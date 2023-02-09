@@ -3,15 +3,18 @@ package main
 import (
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 
 	"github.com/cosmos/cosmos-sdk/client/tx"
 	"github.com/gitopia/git-server/app"
 	"github.com/gitopia/git-server/app/consumer"
-	"github.com/gitopia/git-server/app/tm"
 	"github.com/gitopia/git-server/handler"
-	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia-go"
+	"github.com/gitopia/gitopia-go/logger"
+)
+
+const (
+	invokeForkRepositoryQuery   = "tm.event='Tx' AND message.action='InvokeForkRepository'"
+	InvokeMergePullRequestQuery = "tm.event='Tx' AND message.action='InvokeMergePullRequest'"
 )
 
 func NewRunCmd() *cobra.Command {
@@ -46,12 +49,12 @@ func run(cmd *cobra.Command, args []string) error {
 	}()
 	gp := app.NewGitopiaProxy(gc)
 
-	ftmc, err := tm.NewClient(viper.GetString("TM_ADDR"))
+	ftmc, err := gitopia.NewWSEvents(ctx, invokeForkRepositoryQuery)
 	if err != nil {
 		return errors.WithMessage(err, "tm error")
 	}
 
-	mtmc, err := tm.NewClient(viper.GetString("TM_ADDR"))
+	mtmc, err := gitopia.NewWSEvents(ctx, InvokeMergePullRequestQuery)
 	if err != nil {
 		return errors.WithMessage(err, "tm error")
 	}
@@ -66,17 +69,14 @@ func run(cmd *cobra.Command, args []string) error {
 		return errors.WithMessage(err, "error creating consumer client")
 	}
 
-	forkHandler := handler.NewInvokeForkRepositoryEventHandler(gp, ftmc, fcc)
-	mergeHandler := handler.NewInvokeMergePullRequestEventHandler(gp, mtmc, mcc)
+	forkHandler := handler.NewInvokeForkRepositoryEventHandler(gp, fcc)
+	mergeHandler := handler.NewInvokeMergePullRequestEventHandler(gp, mcc)
 
 	// _, forkBackfillErr := forkHandler.BackfillMissedEvents(ctx)
 	// _, mergeBackfillErr := mergeHandler.BackfillMissedEvents(ctx)
 
-	invokeForkRepositoryQuery := "tm.event='Tx' AND message.action='InvokeForkRepository'"
-	InvokeMergePullRequestQuery := "tm.event='Tx' AND message.action='InvokeMergePullRequest'"
-
-	forkDone, forkSubscribeErr := ftmc.Subscribe(ctx, invokeForkRepositoryQuery, forkHandler.Handle)
-	mergeDone, mergeSubscribeErr := mtmc.Subscribe(ctx, InvokeMergePullRequestQuery, mergeHandler.Handle)
+	forkDone, forkSubscribeErr := ftmc.Subscribe(ctx, forkHandler.Handle)
+	mergeDone, mergeSubscribeErr := mtmc.Subscribe(ctx, mergeHandler.Handle)
 
 	// wait for error from all the concurrent event processors
 	select {
