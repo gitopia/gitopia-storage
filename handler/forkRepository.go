@@ -341,6 +341,7 @@ func (h *InvokeForkRepositoryEventHandler) BackfillMissedEvents(ctx context.Cont
 							TxHeight:        uint64(r.Height),
 						}
 
+						// The missed events will be processed for the current/latest state of the repository, and not the state of the repository when the event was triggered
 						err = h.Process(ctx, event)
 						if err != nil {
 							errChan <- errors.WithMessage(err, "error processing event")
