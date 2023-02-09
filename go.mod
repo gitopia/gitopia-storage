@@ -6,7 +6,7 @@ require (
 	github.com/buger/jsonparser v1.1.1
 	github.com/cosmos/cosmos-sdk v0.46.4
 	github.com/gitopia/gitopia v1.2.0
-	github.com/gitopia/gitopia-go v0.2.0-rc.2
+	github.com/gitopia/gitopia-go v0.2.0
 	github.com/gitopia/go-git/v5 v5.4.3-0.20221011074003-f70479dc646c
 	github.com/go-git/go-billy/v5 v5.3.1
 	github.com/libgit2/git2go/v33 v33.0.4

@@ -1,6 +1,6 @@
 # Changelog
 
-## [v1.7.0] - UNRELEASED
+## [v1.7.0] - 2023-02-09
 
 - Fix event resubscription on reconnection
 - Move websocket logic to gitopia-go

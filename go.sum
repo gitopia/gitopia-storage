@@ -207,8 +207,8 @@ github.com/fsnotify/fsnotify v1.5.4/go.mod h1:OVB6XrOHzAwXMpEM7uPOzcehqUV2UqJxmV
 github.com/ghodss/yaml v1.0.0/go.mod h1:4dBDuWmgqj2HViK6kFavaiC9ZROes6MMH2rRYeMEF04=
 github.com/gitopia/gitopia v1.2.0 h1:hckyl7WMt6GUizzOFxG3KNpCO4eg8xWuhVKFola9eXA=
 github.com/gitopia/gitopia v1.2.0/go.mod h1:1ojGcW3i/g9fd8pbx+eyIZXYKtvylX1xcrOzK7sO0UE=
-github.com/gitopia/gitopia-go v0.2.0-rc.2 h1:M8gkmrNxxhobnvx6MFSY9U+Qe9BQs5F8qNnAlOQ6TAY=
-github.com/gitopia/gitopia-go v0.2.0-rc.2/go.mod h1:fd78h/08oBxoTAdqk3Dwcoc6DUTdt7nl9uRKub25ePs=
+github.com/gitopia/gitopia-go v0.2.0 h1:lKG8FSPdi02wOU5w5paSbr314DNm8HqrOBWC/noT30k=
+github.com/gitopia/gitopia-go v0.2.0/go.mod h1:fd78h/08oBxoTAdqk3Dwcoc6DUTdt7nl9uRKub25ePs=
 github.com/gitopia/go-diff v0.0.0-20221011073329-132b1aebc86c h1:rALNQejs3vSoEGgtT+jyB5svZ7JOUbaP2HpzHmVWhmU=
 github.com/gitopia/go-diff v0.0.0-20221011073329-132b1aebc86c/go.mod h1:/1GKA+kU8l5Wx8iXv16a7JLB1ddvhuqcxlDodtKCQF8=
 github.com/gitopia/go-git/v5 v5.4.3-0.20221011074003-f70479dc646c h1:CqqdMQIequFDI6w9JKccH7D8RhXuIVesCcqtCIUlzZA=
