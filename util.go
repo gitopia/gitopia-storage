@@ -14,15 +14,6 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-func ReleaseAttachmentExists(attachments []*types.Attachment, name string) (int, bool) {
-	for i, v := range attachments {
-		if v.Name == name {
-			return i, true
-		}
-	}
-	return 0, false
-}
-
 func ParseRepositoryIdfromURI(uri string) (uint64, error) {
 	// u, err := url.Parse(uri)
 	// if err != nil {
