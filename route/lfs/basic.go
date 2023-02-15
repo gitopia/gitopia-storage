@@ -123,15 +123,6 @@ func (h *BasicHandler) ServeUploadHandler(w http.ResponseWriter, r *http.Request
 
 // POST /{owner}/{repo}.git/info/lfs/object/basic/verify
 func (h *BasicHandler) ServeVerifyHandler(w http.ResponseWriter, r *http.Request) {
-	components := strings.Split(r.URL.Path, "/")
-	if len(components) != 7 {
-		responseJSON(w, http.StatusBadRequest, responseError{
-			Message: "Invalid oid",
-		})
-		return
-	}
-	oid := lfsutil.OID(components[6])
-
 	var request basicVerifyRequest
 	defer r.Body.Close()
 
@@ -151,7 +142,7 @@ func (h *BasicHandler) ServeVerifyHandler(w http.ResponseWriter, r *http.Request
 
 	s := h.DefaultStorager()
 
-	size, err := s.Size(oid)
+	size, err := s.Size(request.Oid)
 	if err != nil {
 		responseJSON(w, http.StatusNotFound, responseError{
 			Message: "Object does not exist",
