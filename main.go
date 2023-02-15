@@ -17,7 +17,11 @@ import (
 
 	"github.com/cosmos/cosmos-sdk/simapp"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	lfsutil "github.com/gitopia/git-server/lfs"
 	"github.com/gitopia/git-server/route"
+	"github.com/gitopia/git-server/route/lfs"
+	"github.com/gitopia/git-server/route/pr"
+	"github.com/gitopia/git-server/utils"
 	offchaintypes "github.com/gitopia/gitopia/x/offchain/types"
 	"github.com/gitopia/go-git/v5/plumbing/cache"
 	"github.com/gitopia/go-git/v5/plumbing/format/pktline"
@@ -66,21 +70,8 @@ func (w writeFlusher) Write(p []byte) (int, error) {
 	return w.wf.Write(p)
 }
 
-func getCredential(req *http.Request) (gogittransporthttp.TokenAuth, error) {
-	cred := gogittransporthttp.TokenAuth{}
-
-	reqToken := req.Header.Get("Authorization")
-	splitToken := strings.Split(reqToken, "Bearer ")
-	if len(splitToken) != 2 {
-		return cred, fmt.Errorf("authentication failed")
-	}
-	cred.Token = splitToken[1]
-
-	return cred, nil
-}
-
 func AuthFunc(cred gogittransporthttp.TokenAuth, req *Request) (bool, error) {
-	repoId, err := ParseRepositoryIdfromURI(req.URL.Path)
+	repoId, err := utils.ParseRepositoryIdfromURI(req.URL.Path)
 	if err != nil {
 		return false, err
 	}
@@ -104,7 +95,7 @@ func AuthFunc(cred gogittransporthttp.TokenAuth, req *Request) (bool, error) {
 	}
 
 	address := msgs[0].GetSigners()[0].String()
-	havePushPermission, err := HavePushPermission(repoId, address)
+	havePushPermission, err := utils.HavePushPermission(repoId, address)
 	if err != nil {
 		return false, fmt.Errorf("error checking push permission: %s", err.Error())
 	}
@@ -293,10 +284,17 @@ type service struct {
 	rpc     string
 }
 
+type lfsService struct {
+	method  string
+	suffix  string
+	handler http.HandlerFunc
+}
+
 type Server struct {
-	config   Config
-	services []service
-	AuthFunc func(gogittransporthttp.TokenAuth, *Request) (bool, error)
+	config      Config
+	services    []service
+	lfsServices []lfsService
+	AuthFunc    func(gogittransporthttp.TokenAuth, *Request) (bool, error)
 }
 
 type Request struct {
@@ -307,10 +305,23 @@ type Request struct {
 
 func New(cfg Config) *Server {
 	s := Server{config: cfg}
+	basic := &lfs.BasicHandler{
+		DefaultStorage: lfsutil.Storage(lfsutil.StorageLocal),
+		Storagers: map[lfsutil.Storage]lfsutil.Storager{
+			lfsutil.StorageLocal: &lfsutil.LocalStorage{Root: viper.GetString("LFS_OBJECTS_DIR")},
+		},
+	}
 	s.services = []service{
 		{"GET", "/info/refs", s.getInfoRefs, ""},
 		{"POST", "/git-upload-pack", s.postRPC, "git-upload-pack"},
 		{"POST", "/git-receive-pack", s.postRPC, "git-receive-pack"},
+	}
+
+	s.lfsServices = []lfsService{
+		{"POST", "/objects/batch", lfs.Authenticate(basic.ServeBatchHandler)},
+		{"GET", "/objects/basic", basic.ServeDownloadHandler},
+		{"PUT", "/objects/basic", lfs.Authenticate(basic.ServeUploadHandler)},
+		{"POST", "/objects/basic/verify", basic.ServeVerifyHandler},
 	}
 
 	// Use PATH if full path is not specified
@@ -340,6 +351,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Find the git subservice to handle the request
 	svc, repoUrlPath := s.findService(r)
 	if svc == nil {
+		// Find git lfs service
+		for _, lfsService := range s.lfsServices {
+			if lfsService.method == r.Method &&
+				(strings.HasSuffix(r.URL.Path, lfsService.suffix) ||
+					(len(r.URL.Path) > 65 && strings.HasSuffix(r.URL.Path[:len(r.URL.Path)-65], lfsService.suffix))) {
+				lfsService.handler(w, r)
+				return
+			}
+		}
+
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
@@ -372,7 +393,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		cred, err := getCredential(r)
+		cred, err := utils.GetCredential(r)
 		if err != nil {
 			logError("auth", err)
 			w.WriteHeader(http.StatusUnauthorized)
@@ -541,6 +562,15 @@ func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
 		defer ts.Close()
 
 		req := packp.NewReferenceUpdateRequest()
+		// Loop over header names
+		for name, values := range r.Header {
+			// Loop over all values for the name.
+			for _, value := range values {
+				fmt.Println(name, value)
+			}
+		}
+		b, _ := ioutil.ReadAll(r.Body)
+		_ = b
 		if err := req.Decode(r.Body); err != nil {
 			return
 		}
@@ -661,11 +691,11 @@ func main() {
 	mux.Handle("/commits/", http.HandlerFunc(route.CommitsHandler))
 	mux.Handle("/content", http.HandlerFunc(route.ContentHandler))
 	mux.Handle("/diff", http.HandlerFunc(route.CommitDiffHandler))
-	mux.Handle("/pull/diff", http.HandlerFunc(route.PullDiffHandler))
+	mux.Handle("/pull/diff", http.HandlerFunc(pr.PullDiffHandler))
 	mux.Handle("/upload", http.HandlerFunc(route.UploadAttachmentHandler))
 	mux.Handle("/releases", http.HandlerFunc(route.GetAttachmentHandler))
-	mux.Handle("/pull/commits", http.HandlerFunc(route.PullRequestCommitsHandler))
-	mux.Handle("/pull/check", http.HandlerFunc(route.PullRequestCheckHandler))
+	mux.Handle("/pull/commits", http.HandlerFunc(pr.PullRequestCommitsHandler))
+	mux.Handle("/pull/check", http.HandlerFunc(pr.PullRequestCheckHandler))
 	mux.Handle("/raw", http.HandlerFunc(route.GetRawFileHandler))
 
 	handler := cors.Default().Handler(mux)

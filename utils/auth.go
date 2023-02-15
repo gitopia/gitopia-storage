@@ -1,18 +1,34 @@
-package main
+package utils
 
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/cosmos/cosmos-sdk/codec"
 	"github.com/gitopia/gitopia/x/gitopia/types"
 	"github.com/gitopia/gitopia/x/gitopia/utils"
+	gogittransporthttp "github.com/gitopia/go-git/v5/plumbing/transport/http"
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
+
+func GetCredential(req *http.Request) (gogittransporthttp.TokenAuth, error) {
+	cred := gogittransporthttp.TokenAuth{}
+
+	reqToken := req.Header.Get("Authorization")
+	splitToken := strings.Split(reqToken, "Bearer ")
+	if len(splitToken) != 2 {
+		return cred, fmt.Errorf("authentication failed")
+	}
+	cred.Token = splitToken[1]
+
+	return cred, nil
+}
 
 func ParseRepositoryIdfromURI(uri string) (uint64, error) {
 	// u, err := url.Parse(uri)
