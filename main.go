@@ -26,7 +26,6 @@ import (
 	"github.com/gitopia/go-git/v5/plumbing/format/objfile"
 	"github.com/gitopia/go-git/v5/plumbing/format/pktline"
 	"github.com/gitopia/go-git/v5/plumbing/object"
-	"github.com/gitopia/go-git/v5/plumbing/protocol/packp"
 	"github.com/gitopia/go-git/v5/plumbing/transport"
 	gogittransporthttp "github.com/gitopia/go-git/v5/plumbing/transport/http"
 	"github.com/gitopia/go-git/v5/plumbing/transport/server"
@@ -1208,7 +1207,11 @@ func main() {
 	service := New(Config{
 		Dir:        viper.GetString("GIT_DIR"),
 		AutoCreate: true,
-		Auth:       true,
+		Auth:       false,
+		AutoHooks:  true,
+		Hooks: &HookScripts{
+			PreReceive:  "gitopia-pre-receive <&0",
+		},
 	})
 
 	// Configure git server. Will create git repos path if it does not exist.
