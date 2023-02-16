@@ -1,7 +1,7 @@
 package main
 
 import (
-	contextB "context"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -1095,84 +1095,55 @@ func (s *Server) getInfoRefs(_ string, w http.ResponseWriter, r *Request) {
 // }
 
 func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
-	// context := "post-rpc"
-	// body := r.Body
-	defer r.Body.Close()
+	context := "post-rpc"
+	body := r.Body
 
-	// if r.Header.Get("Content-Encoding") == "gzip" {
-	// 	var err error
-	// 	_, err := gzip.NewReader(r.Body)
-	// 	if err != nil {
-	// 		fail500(w, context, err)
-	// 		return
-	// 	}
-	// }
-	fs := osfs.New(r.RepoPath)
-	_, err := fs.Stat(".git")
-	if err == nil {
-		fs, err = fs.Chroot(".git")
+	if r.Header.Get("Content-Encoding") == "gzip" {
+		var err error
+		body, err = gzip.NewReader(r.Body)
 		if err != nil {
+			fail500(w, context, err)
 			return
 		}
 	}
-	storage := filesystem.NewStorageWithOptions(fs, cache.NewObjectLRUDefault(), filesystem.Options{KeepDescriptors: true, LargeObjectThreshold: LARGE_OBJECT_THRESHOLD})
-	ep, _ := transport.NewEndpoint(r.RepoPath)
-	loader := server.MapLoader{}
-	loader[ep.String()] = storage
-	session := server.NewServer(loader)
+
+	cmd, pipe := gitCommand(s.config.GitPath, subCommand(rpc), "--stateless-rpc", r.RepoPath)
+	//defer pipe.Close()
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		fail500(w, context, err)
+		return
+	}
+	defer stdin.Close()
+
+	if err := cmd.Start(); err != nil {
+		fail500(w, context, err)
+		return
+	}
+	defer cleanUpProcessGroup(cmd)
+
+	if _, err := io.Copy(stdin, body); err != nil {
+		fail500(w, context, err)
+		return
+	}
+	stdin.Close()
 
 	w.Header().Add("Content-Type", fmt.Sprintf("application/x-%s-result", rpc))
 	w.Header().Add("Cache-Control", "no-cache")
 	w.WriteHeader(200)
 
-	switch rpc {
-	case "git-receive-pack":
-		ts, err := session.NewReceivePackSession(ep, nil)
-		if err != nil {
-			fmt.Println(err)
-		}
-		defer ts.Close()
-
-		req := packp.NewReferenceUpdateRequest()
-		if err := req.Decode(r.Body); err != nil {
-			return
-		}
-
-		status, err := ts.ReceivePack(contextB.TODO(), req)
-		if status != nil {
-			if err := status.Encode(w); err != nil {
-				fmt.Println(err)
-			}
-		}
-
-		if err != nil {
-			fmt.Println(err)
-		}
-
-	case "git-upload-pack":
-		ts, err := session.NewUploadPackSession(ep, nil)
-		if err != nil {
-			fmt.Println(err)
-		}
-		defer ts.Close()
-
-		req := packp.NewUploadPackRequest()
-		if err := req.Decode(r.Body); err != nil {
-			return
-		}
-
-		status, err := ts.UploadPack(contextB.TODO(), req)
-		if status != nil {
-			if err := status.Encode(w); err != nil {
-				fmt.Println(err)
-			}
-		}
-
-		if err != nil {
-			fmt.Println(err)
-		}
+	// _, err = io.Copy(os.Stdout, pipe)
+	// fmt.Println(err)
+	
+	if _, err := io.Copy(newWriteFlusher(w), pipe); err != nil {
+		logError(context, err)
+		return
 	}
-
+	if err := cmd.Wait(); err != nil {
+		logError(context, err)
+		return
+	}
+	
 }
 
 func (s *Server) Setup() error {
