@@ -26,17 +26,25 @@ func receive(hook *gitkit.HookInfo, tmpPath string) error {
 }
 
 func main() {
-  receiver := gitkit.Receiver{
-    MasterOnly:  false,         // if set to true, only pushes to master branch will be allowed
-    TmpDir:      "/tmp/gitkit", // directory for temporary git checkouts
-    HandlerFunc: receive,       // your handler function
-  }
+	// f, err  := os.OpenFile("/tmp/gitkit/app.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 777)
+	// if err != nil {
+	//   panic(err)
+	// }
+	// log.SetOutput(f)
+	receiver := gitkit.Receiver{
+		MasterOnly:  false,         // if set to true, only pushes to master branch will be allowed
+		TmpDir:      "/tmp/gitkit", // directory for temporary git checkouts
+		HandlerFunc: receive,       // your handler function
+	}
 
-  // Git hook data is provided via STDIN
-  if err := receiver.Handle(os.Stdin); err != nil {
-    // log.Println("Error:", err)
-     msg := "Error:"+err.Error()
-    fmt.Fprint(os.Stderr, fmt.Sprintf("%04x%s\n",len(msg), msg))// fmt.Sprintf("%04x%s\n",len(msg)
-    os.Exit(1) // terminating with non-zero status will cancel push
-  }
+	// Git hook data is provided via STDIN
+	if err := receiver.Handle(os.Stdin); err != nil {
+		// log.Println("Error:", err)
+		msg := err.Error()
+    // 4 length characters + 3 ng + 1 new line = 8
+		//fmt.Fprintf(os.Stdout, "%04x%s\n", len(msg)+5, msg)
+		fmt.Fprintf(os.Stdout, "%s\n",msg)
+		os.Exit(1) // terminating with non-zero status will cancel push
+	}
+	// os.Exit(0)
 }

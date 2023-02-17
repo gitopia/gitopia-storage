@@ -1,6 +1,8 @@
 package main
 
 import (
+	// contextB "context"
+	// "github.com/gitopia/go-git/v5/plumbing/protocol/packp"
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
@@ -28,6 +30,7 @@ import (
 	"github.com/gitopia/go-git/v5/plumbing/object"
 	"github.com/gitopia/go-git/v5/plumbing/transport"
 	gogittransporthttp "github.com/gitopia/go-git/v5/plumbing/transport/http"
+
 	"github.com/gitopia/go-git/v5/plumbing/transport/server"
 	"github.com/gitopia/go-git/v5/storage/filesystem"
 	"github.com/go-git/go-billy/v5/osfs"
@@ -1137,23 +1140,70 @@ func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
 	w.Header().Add("Cache-Control", "no-cache")
 	w.WriteHeader(200)
 
-	// _, err = io.Copy(os.Stdout, pipe)
-	// fmt.Println(err)
+	_, err = io.Copy(os.Stdout, pipe)
+	fmt.Println(err)
 	
-	if _, err := io.Copy(w, pipe); err != nil {
-		logError(context, err)
-		return
-	}
-	
-	if _, err := io.Copy(newWriteFlusher(w), p); err != nil {
-		logError(context, err)
-		return
-	}
+	fmt.Println("***")
+	_, err = io.Copy(os.Stdout, p)
+	fmt.Println(err)
+
+	// if _, err := io.Copy(w, pipe); err != nil {
+	// 	logError(context, err)
+	// 	return
+	// }
+
+	// if _, err := io.Copy(newWriteFlusher(w), p); err != nil {
+	// 	logError(context, err)
+	// 	return
+	// }
+
+
 	if err := cmd.Wait(); err != nil {
 		logError(context, err)
 		return
-	}
-	
+	} 
+
+	//*******************************************************************************************************
+
+	// fs := osfs.New(r.RepoPath)
+	// _, err := fs.Stat(".git")
+	// if err == nil {
+	// 	fs, err = fs.Chroot(".git")
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// }
+	// storage := filesystem.NewStorageWithOptions(fs, cache.NewObjectLRUDefault(), filesystem.Options{KeepDescriptors: true, LargeObjectThreshold: LARGE_OBJECT_THRESHOLD})
+	// ep, _ := transport.NewEndpoint(r.RepoPath)
+	// loader := server.MapLoader{}
+	// loader[ep.String()] = storage
+	// session := server.NewServer(loader)
+	// ts, err := session.NewReceivePackSession(ep, nil)
+	// 	if err != nil {
+	// 		fmt.Println(err)
+	// 	}
+	// 	defer ts.Close()
+
+	// 	req := packp.NewReferenceUpdateRequest()
+	// 	if err := req.Decode(r.Body); err != nil {
+	// 		return
+	// 	}
+	// 	req.Progress = os.Stdout
+
+	// 	status, err := ts.ReceivePack(contextB.TODO(), req)
+
+	// 	status.Encode(os.Stdout)
+
+	// 	if status != nil {
+	// 		if err := status.Encode(w); err != nil {
+	// 			fmt.Println(err)
+	// 		}
+	// 	}
+
+	// 	if err != nil {
+	// 		fmt.Println(err)
+	// 	}
+
 }
 
 func (s *Server) Setup() error {
@@ -1183,6 +1233,7 @@ func gitCommand(name string, args ...string) (*exec.Cmd, io.Reader) {
 	cmd := exec.Command(name, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Env = os.Environ()
+	//cmd.Env = append(cmd.Env, "GIT_TRACE=1")
 
 	r, _ := cmd.StdoutPipe()
 	//cmd.Stderr = cmd.Stdout
@@ -1219,7 +1270,7 @@ func main() {
 		Dir:        viper.GetString("GIT_DIR"),
 		AutoCreate: true,
 		Auth:       false,
-		AutoHooks:  true,
+		AutoHooks:  false,
 		Hooks: &HookScripts{
 			PreReceive:  "gitopia-pre-receive | cat",
 		},
