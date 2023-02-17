@@ -1108,12 +1108,18 @@ func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
 
 	cmd, pipe := gitCommand(s.config.GitPath, subCommand(rpc), "--stateless-rpc", r.RepoPath)
 	//defer pipe.Close()
+	
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		fail500(w, context, err)
 		return
 	}
 	defer stdin.Close()
+	p, err := cmd.StderrPipe()
+	if err != nil {
+		fail500(w, context, err)
+		return
+	}
 
 	if err := cmd.Start(); err != nil {
 		fail500(w, context, err)
@@ -1123,7 +1129,7 @@ func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
 
 	if _, err := io.Copy(stdin, body); err != nil {
 		fail500(w, context, err)
-		return
+		return 
 	}
 	stdin.Close()
 
@@ -1134,7 +1140,12 @@ func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
 	// _, err = io.Copy(os.Stdout, pipe)
 	// fmt.Println(err)
 	
-	if _, err := io.Copy(newWriteFlusher(w), pipe); err != nil {
+	if _, err := io.Copy(w, pipe); err != nil {
+		logError(context, err)
+		return
+	}
+	
+	if _, err := io.Copy(newWriteFlusher(w), p); err != nil {
 		logError(context, err)
 		return
 	}
@@ -1174,7 +1185,7 @@ func gitCommand(name string, args ...string) (*exec.Cmd, io.Reader) {
 	cmd.Env = os.Environ()
 
 	r, _ := cmd.StdoutPipe()
-	cmd.Stderr = cmd.Stdout
+	//cmd.Stderr = cmd.Stdout
 
 	return cmd, r
 }
@@ -1210,7 +1221,7 @@ func main() {
 		Auth:       false,
 		AutoHooks:  true,
 		Hooks: &HookScripts{
-			PreReceive:  "gitopia-pre-receive <&0",
+			PreReceive:  "gitopia-pre-receive | cat",
 		},
 	})
 
