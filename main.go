@@ -1,8 +1,6 @@
 package main
 
 import (
-	// contextB "context"
-	// "github.com/gitopia/go-git/v5/plumbing/protocol/packp"
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
@@ -52,6 +50,13 @@ type SaveToArweavePostBody struct {
 	RemoteRefName    string `json:"remote_ref_name"`
 	NewRemoteRefSha  string `json:"new_remote_ref_sha"`
 	PrevRemoteRefSha string `json:"prev_remote_ref_sha"`
+}
+
+var env []string
+func init() {
+	for _, key := range viper.AllKeys() {
+		env = append(env, key + "=" +viper.GetString(key) )
+	}
 }
 
 func newWriteFlusher(w http.ResponseWriter) io.Writer {
@@ -1109,7 +1114,7 @@ func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
 		}
 	}
 
-	cmd, pipe := gitCommand(s.config.GitPath, subCommand(rpc), "--stateless-rpc", r.RepoPath)
+	cmd, outPipe := gitCommand(s.config.GitPath, subCommand(rpc), "--stateless-rpc", r.RepoPath)
 	//defer pipe.Close()
 	
 	stdin, err := cmd.StdinPipe()
@@ -1118,7 +1123,7 @@ func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
 		return
 	}
 	defer stdin.Close()
-	p, err := cmd.StderrPipe()
+	errPipe, err := cmd.StderrPipe()
 	if err != nil {
 		fail500(w, context, err)
 		return
@@ -1140,69 +1145,20 @@ func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
 	w.Header().Add("Cache-Control", "no-cache")
 	w.WriteHeader(200)
 
-	_, err = io.Copy(os.Stdout, pipe)
-	fmt.Println(err)
-	
-	fmt.Println("***")
-	_, err = io.Copy(os.Stdout, p)
-	fmt.Println(err)
+	if _, err := io.Copy(log.Writer(), errPipe); err != nil {
+		logError(context, err)
+		return
+	}
 
-	// if _, err := io.Copy(w, pipe); err != nil {
-	// 	logError(context, err)
-	// 	return
-	// }
-
-	// if _, err := io.Copy(newWriteFlusher(w), p); err != nil {
-	// 	logError(context, err)
-	// 	return
-	// }
-
+	if _, err := io.Copy(newWriteFlusher(w), outPipe); err != nil {
+		logError(context, err)
+		return
+	}
 
 	if err := cmd.Wait(); err != nil {
 		logError(context, err)
 		return
 	} 
-
-	//*******************************************************************************************************
-
-	// fs := osfs.New(r.RepoPath)
-	// _, err := fs.Stat(".git")
-	// if err == nil {
-	// 	fs, err = fs.Chroot(".git")
-	// 	if err != nil {
-	// 		return
-	// 	}
-	// }
-	// storage := filesystem.NewStorageWithOptions(fs, cache.NewObjectLRUDefault(), filesystem.Options{KeepDescriptors: true, LargeObjectThreshold: LARGE_OBJECT_THRESHOLD})
-	// ep, _ := transport.NewEndpoint(r.RepoPath)
-	// loader := server.MapLoader{}
-	// loader[ep.String()] = storage
-	// session := server.NewServer(loader)
-	// ts, err := session.NewReceivePackSession(ep, nil)
-	// 	if err != nil {
-	// 		fmt.Println(err)
-	// 	}
-	// 	defer ts.Close()
-
-	// 	req := packp.NewReferenceUpdateRequest()
-	// 	if err := req.Decode(r.Body); err != nil {
-	// 		return
-	// 	}
-	// 	req.Progress = os.Stdout
-
-	// 	status, err := ts.ReceivePack(contextB.TODO(), req)
-
-	// 	status.Encode(os.Stdout)
-
-	// 	if status != nil {
-	// 		if err := status.Encode(w); err != nil {
-	// 			fmt.Println(err)
-	// 		}
-	// 	}
-
-	// 	if err != nil {
-	// 		fmt.Println(err)
-	// 	}
 
 }
 
@@ -1233,7 +1189,7 @@ func gitCommand(name string, args ...string) (*exec.Cmd, io.Reader) {
 	cmd := exec.Command(name, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Env = os.Environ()
-	//cmd.Env = append(cmd.Env, "GIT_TRACE=1")
+	cmd.Env = append(cmd.Env, env...)
 
 	r, _ := cmd.StdoutPipe()
 	//cmd.Stderr = cmd.Stdout
@@ -1270,9 +1226,9 @@ func main() {
 		Dir:        viper.GetString("GIT_DIR"),
 		AutoCreate: true,
 		Auth:       false,
-		AutoHooks:  false,
+		AutoHooks:  true,
 		Hooks: &HookScripts{
-			PreReceive:  "gitopia-pre-receive | cat",
+			PreReceive:  "gitopia-pre-receive",
 		},
 	})
 
