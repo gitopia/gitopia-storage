@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 
 	"github.com/gitopia/gitopia-go"
 	"github.com/gitopia/gitopia/x/gitopia/types"
@@ -57,6 +58,30 @@ func receive(reader io.Reader) error {
 	// Reject force push
 	if !AllowForcePush && force {
 		return NonFFErr
+	}
+
+	// create dangling ref
+	if force {
+		cmd := exec.Command("git", "update-ref", "refs/dangling/"+input.OldRev, input.OldRev)
+		errPipe, err := cmd.StderrPipe()
+		if err != nil {
+			return errors.Wrap(err, "error getting update ref err stream")
+		}
+
+		err = cmd.Start()
+		if err != nil {
+			return errors.Wrap(err, "error craeting update-ref command")
+		}
+
+		er, err := io.ReadAll(errPipe)
+		if err != nil {
+			return errors.Wrap(err, "error reading update ref err stream")
+		}
+
+		err = cmd.Wait()
+		if err != nil {
+			return errors.Wrap(err, "error waiting to run update-ref command:"+string(er))
+		}
 	}
 
 	return nil
