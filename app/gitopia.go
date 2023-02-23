@@ -19,7 +19,7 @@ type GitopiaProxy struct {
 	gc gitopia.Client
 }
 
-func NewGitopiaProxy(g gitopia.Client) GitopiaProxy{
+func NewGitopiaProxy(g gitopia.Client) GitopiaProxy {
 	return GitopiaProxy{g}
 }
 
@@ -70,10 +70,11 @@ func (g GitopiaProxy) UpdateTask(ctx context.Context, creator string, id uint64,
 	return nil
 }
 
-func (g GitopiaProxy) SetPullRequestState(ctx context.Context, creator string, id uint64, state string, mergeCommitSha string, taskId uint64) error {
+func (g GitopiaProxy) SetPullRequestState(ctx context.Context, creator string, repositoryId, iid uint64, state string, mergeCommitSha string, taskId uint64) error {
 	msg := &types.MsgSetPullRequestState{
 		Creator:        creator,
-		Iid:             id,
+		RepositoryId:   repositoryId,
+		Iid:            iid,
 		State:          state,
 		MergeCommitSha: mergeCommitSha,
 		TaskId:         taskId,
@@ -122,15 +123,24 @@ func (g GitopiaProxy) RepositoryId(ctx context.Context, address string, repoName
 	return resp.Repository.Id, nil
 }
 
-func (g GitopiaProxy) PullRequest(ctx context.Context, id uint64) (types.PullRequest, error) {
-	resp, err := g.gc.QueryClient().RepositoryPullRequest(ctx, &types.QueryGetRepositoryPullRequestRequest{
-		Id: id,
+func (g GitopiaProxy) PullRequest(ctx context.Context, repositoryId uint64, pullRequestIid uint64) (types.PullRequest, error) {
+	repoResp, err := g.gc.QueryClient().Repository(ctx, &types.QueryGetRepositoryRequest{
+		Id: repositoryId,
 	})
 	if err != nil {
 		return types.PullRequest{}, errors.WithMessage(err, "query error")
 	}
 
-	return *resp.PullRequest, nil
+	prResp, err := g.gc.QueryClient().RepositoryPullRequest(ctx, &types.QueryGetRepositoryPullRequestRequest{
+		Id:             repoResp.Repository.Owner.Id,
+		RepositoryName: repoResp.Repository.Name,
+		PullIid:        pullRequestIid,
+	})
+	if err != nil {
+		return types.PullRequest{}, errors.WithMessage(err, "query error")
+	}
+
+	return *prResp.PullRequest, nil
 }
 
 func (g GitopiaProxy) Task(ctx context.Context, id uint64) (types.Task, error) {
