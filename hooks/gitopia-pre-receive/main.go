@@ -41,7 +41,7 @@ func isForcePushAllowedForBranch(repo uint64, branch string) (bool, error) {
 func receive(reader io.Reader) error {
 	input, err := Parse(reader)
 	if err != nil {
-		return errors.Wrap(err, "error connecting to gitopia")
+		return errors.Wrap(err, "error parsing input")
 	}
 	// Check if push is non fast-forward (force)
 	force, err := input.IsForcePush()

@@ -53,11 +53,6 @@ type SaveToArweavePostBody struct {
 }
 
 var env []string
-func init() {
-	for _, key := range viper.AllKeys() {
-		env = append(env, key + "=" +viper.GetString(key) )
-	}
-}
 
 func newWriteFlusher(w http.ResponseWriter) io.Writer {
 	return writeFlusher{w.(interface {
@@ -1116,7 +1111,7 @@ func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
 
 	cmd, outPipe := gitCommand(s.config.GitPath, subCommand(rpc), "--stateless-rpc", r.RepoPath)
 	//defer pipe.Close()
-	
+
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		fail500(w, context, err)
@@ -1137,7 +1132,7 @@ func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
 
 	if _, err := io.Copy(stdin, body); err != nil {
 		fail500(w, context, err)
-		return 
+		return
 	}
 	stdin.Close()
 
@@ -1158,7 +1153,7 @@ func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
 	if err := cmd.Wait(); err != nil {
 		logError(context, err)
 		return
-	} 
+	}
 
 }
 
@@ -1214,6 +1209,9 @@ func main() {
 
 	logInfo("ENV", os.Getenv("ENV"))
 	fmt.Println(viper.AllSettings())
+	for _, key := range viper.AllKeys() {
+		env = append(env, strings.ToUpper(key)+"="+viper.GetString(key))
+	}
 
 	conf := sdk.GetConfig()
 	conf.SetBech32PrefixForAccount(AccountAddressPrefix, AccountPubKeyPrefix)
@@ -1228,7 +1226,7 @@ func main() {
 		Auth:       false,
 		AutoHooks:  true,
 		Hooks: &HookScripts{
-			PreReceive:  "gitopia-pre-receive",
+			PreReceive: "gitopia-pre-receive",
 		},
 	})
 

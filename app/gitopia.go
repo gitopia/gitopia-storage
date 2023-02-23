@@ -73,7 +73,7 @@ func (g GitopiaProxy) UpdateTask(ctx context.Context, creator string, id uint64,
 func (g GitopiaProxy) SetPullRequestState(ctx context.Context, creator string, id uint64, state string, mergeCommitSha string, taskId uint64) error {
 	msg := &types.MsgSetPullRequestState{
 		Creator:        creator,
-		Id:             id,
+		Iid:             id,
 		State:          state,
 		MergeCommitSha: mergeCommitSha,
 		TaskId:         taskId,
@@ -123,7 +123,7 @@ func (g GitopiaProxy) RepositoryId(ctx context.Context, address string, repoName
 }
 
 func (g GitopiaProxy) PullRequest(ctx context.Context, id uint64) (types.PullRequest, error) {
-	resp, err := g.gc.QueryClient().PullRequest(ctx, &types.QueryGetPullRequestRequest{
+	resp, err := g.gc.QueryClient().RepositoryPullRequest(ctx, &types.QueryGetRepositoryPullRequestRequest{
 		Id: id,
 	})
 	if err != nil {

@@ -42,12 +42,13 @@ func Parse(inputStream io.Reader) (*Input, error) {
 
 	chunks := strings.Split(string(line), " ")
 	if len(chunks) != 3 {
-		return nil, fmt.Errorf("Invalid hook input")
+		return nil, fmt.Errorf("invalid hook input")
 	}
 	refchunks := strings.Split(chunks[2], "/")
 
 	dir, _ := os.Getwd()
-	id, err := strconv.ParseUint(filepath.Base(dir), 10, 64)
+	b, _, _ := strings.Cut(filepath.Base(dir), ".") // "repoid.git"
+	id, err := strconv.ParseUint(b, 10, 64)
 	if err != nil {
 		return nil, err
 	}
