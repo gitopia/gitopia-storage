@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-var NonFFErr = errors.New("non fast-forward pushed are not allowed")
+var NonFFErr = errors.New("non fast-forward pushes are not allowed")
 
 func isForcePushAllowedForBranch(repo uint64, branch string) (bool, error) {
 	qc, err := gitopia.GetQueryClient(viper.GetString("GITOPIA_ADDR"))
