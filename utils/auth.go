@@ -2,6 +2,7 @@ package utils
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
@@ -9,8 +10,10 @@ import (
 	"strings"
 
 	"github.com/cosmos/cosmos-sdk/codec"
+	gitopia "github.com/gitopia/gitopia/app"
 	"github.com/gitopia/gitopia/x/gitopia/types"
 	"github.com/gitopia/gitopia/x/gitopia/utils"
+	offchaintypes "github.com/gitopia/gitopia/x/offchain/types"
 	gogittransporthttp "github.com/gitopia/go-git/v5/plumbing/transport/http"
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
@@ -28,6 +31,73 @@ func GetCredential(req *http.Request) (gogittransporthttp.TokenAuth, error) {
 	cred.Token = splitToken[1]
 
 	return cred, nil
+}
+
+// DecodeBasic extracts username and password from given header using HTTP Basic Auth.
+// It returns empty strings if values are not presented or not valid.
+func DecodeBasic(header http.Header) (username, password string) {
+	if len(header) == 0 {
+		return "", ""
+	}
+
+	fields := strings.Fields(header.Get("Authorization"))
+	if len(fields) != 2 || fields[0] != "Basic" {
+		return "", ""
+	}
+
+	p, err := base64.StdEncoding.DecodeString(fields[1])
+	if err != nil {
+		return "", ""
+	}
+
+	creds := strings.SplitN(string(p), ":", 2)
+	if len(creds) == 1 {
+		return creds[0], ""
+	}
+	return creds[0], creds[1]
+}
+
+func ValidateBasicAuth(req *http.Request, username, password string) (bool, error) {
+	repoId, err := ParseRepositoryIdfromURI(req.URL.Path)
+	if err != nil {
+		return false, err
+	}
+
+	encConf := gitopia.MakeEncodingConfig()
+	offchaintypes.RegisterInterfaces(encConf.InterfaceRegistry)
+	offchaintypes.RegisterLegacyAminoCodec(encConf.Amino)
+
+	verifier := offchaintypes.NewVerifier(encConf.TxConfig.SignModeHandler())
+	txDecoder := encConf.TxConfig.TxJSONDecoder()
+
+	tx, err := txDecoder([]byte(password))
+	if err != nil {
+		return false, fmt.Errorf("error decoding")
+	}
+
+	// Verify push permission
+	msgs := tx.GetMsgs()
+	if len(msgs) != 1 || len(msgs[0].GetSigners()) != 1 {
+		return false, fmt.Errorf("invalid signature")
+	}
+
+	address := msgs[0].GetSigners()[0].String()
+	havePushPermission, err := HavePushPermission(repoId, address)
+	if err != nil {
+		return false, fmt.Errorf("error checking push permission: %s", err.Error())
+	}
+
+	if !havePushPermission {
+		return false, fmt.Errorf("user does not have push permission")
+	}
+
+	// Verify signature
+	err = verifier.Verify(tx)
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
 }
 
 func ParseRepositoryIdfromURI(uri string) (uint64, error) {

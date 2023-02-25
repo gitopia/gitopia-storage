@@ -15,13 +15,13 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/cosmos/cosmos-sdk/simapp"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	lfsutil "github.com/gitopia/git-server/lfs"
 	"github.com/gitopia/git-server/route"
 	"github.com/gitopia/git-server/route/lfs"
 	"github.com/gitopia/git-server/route/pr"
 	"github.com/gitopia/git-server/utils"
+	gitopia "github.com/gitopia/gitopia/app"
 	offchaintypes "github.com/gitopia/gitopia/x/offchain/types"
 	"github.com/gitopia/go-git/v5/plumbing/cache"
 	"github.com/gitopia/go-git/v5/plumbing/format/pktline"
@@ -76,7 +76,7 @@ func AuthFunc(cred gogittransporthttp.TokenAuth, req *Request) (bool, error) {
 		return false, err
 	}
 
-	encConf := simapp.MakeTestEncodingConfig()
+	encConf := gitopia.MakeEncodingConfig()
 	offchaintypes.RegisterInterfaces(encConf.InterfaceRegistry)
 	offchaintypes.RegisterLegacyAminoCodec(encConf.Amino)
 
@@ -110,7 +110,7 @@ func AuthFunc(cred gogittransporthttp.TokenAuth, req *Request) (bool, error) {
 		return false, err
 	}
 
-	return true, err
+	return true, nil
 }
 
 var reSlashDedup = regexp.MustCompile(`\/{2,}`)

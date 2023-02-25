@@ -167,19 +167,32 @@ type basicVerifyRequest struct {
 // Authenticate tries to authenticate user via HTTP Basic Auth. It first tries to authenticate
 // as plain username and password, then use username as access token if previous step failed.
 func Authenticate(h http.HandlerFunc) http.HandlerFunc {
-	// askCredentials := func(w http.ResponseWriter) {
-	// 	// w.Header().Set("Lfs-Authenticate", `Basic realm="Git LFS"`)
-	// 	responseJSON(w, http.StatusUnauthorized, responseError{
-	// 		Message: "Credentials needed",
-	// 	})
-	// }
+	askCredentials := func(w http.ResponseWriter) {
+		// w.Header().Set("Lfs-Authenticate", `Basic realm="Git LFS"`)
+		responseJSON(w, http.StatusUnauthorized, responseError{
+			Message: "Credentials needed",
+		})
+	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		// _, err := utils.GetCredential(r)
-		// if err != nil {
-		// 	askCredentials(w)
-		// 	return
-		// }
+		username, password := utils.DecodeBasic(r.Header)
+		if username == "" {
+			askCredentials(w)
+			return
+		}
+
+		allow, err := utils.ValidateBasicAuth(r, username, password)
+		if !allow || err != nil {
+			if err != nil {
+				log.WithFields(log.Fields{
+					"username": username,
+					"error":    err.Error(),
+				}).Error("Failed to authenticate user")
+			}
+
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
 
 		h(w, r)
 	}
