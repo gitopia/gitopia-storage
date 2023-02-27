@@ -129,7 +129,7 @@ func (h *BasicHandler) ServeBatchHandler(w http.ResponseWriter, r *http.Request)
 		s := h.DefaultStorager()
 		storedSet := make(map[lfsutil.OID]int64, 0)
 		for _, obj := range request.Objects {
-			if size, err := s.Size(obj.Oid); err != nil {
+			if size, _ := s.Size(obj.Oid); size != 0 {
 				storedSet[obj.Oid] = size
 			}
 		}

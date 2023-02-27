@@ -1,5 +1,12 @@
 # Changelog
 
+## [v1.9.0] - UNRELEASED
+
+- Added support for git lfs
+- Use git cli instead of go-git for pack-protocol
+- Changed http auth from Bearer to Basic
+- Refactored routes
+
 ## [v1.8.0] - 2023-02-22
 
 - Upgrade gitopia version to v1.3.0

@@ -386,9 +386,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		token := utils.DecodeBearer(r.Header)
+		_, token := utils.DecodeBasic(r.Header)
 		if token == "" {
-			logError("auth", errors.New("bearer token missing"))
+			logError("auth", errors.New("basic auth credentials missing"))
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
