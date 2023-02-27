@@ -1,46 +1,19 @@
 package main
 
 import (
-	"context"
 	"io"
 	"log"
 	"os"
-	"os/exec"
 
-	"github.com/gitopia/gitopia-go"
-	"github.com/gitopia/gitopia/x/gitopia/types"
+	"github.com/gitopia/git-server/hooks/utils"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 )
 
 var NonFFErr = errors.New("non fast-forward pushes are not allowed")
 
-func isForcePushAllowedForBranch(repo uint64, branch string) (bool, error) {
-	qc, err := gitopia.GetQueryClient(viper.GetString("GITOPIA_ADDR"))
-	if err != nil {
-		return false, errors.Wrap(err, "error connecting to gitopia")
-	}
-
-	res, err := qc.Repository(context.Background(), &types.QueryGetRepositoryRequest{
-		Id: repo,
-	})
-	if err != nil {
-		return false, errors.Wrap(err, "error querying repo")
-	}
-
-	branchRes, err := qc.RepositoryBranch(context.Background(), &types.QueryGetRepositoryBranchRequest{
-		Id:             res.Repository.Owner.Id,
-		RepositoryName: res.Repository.Name,
-		BranchName:     branch,
-	})
-	if err != nil {
-		return false, errors.Wrap(err, "error querying repo branch")
-	}
-	return branchRes.Branch.AllowForcePush, nil
-}
-
 func receive(reader io.Reader) error {
-	input, err := Parse(reader)
+	input, err := utils.Parse(reader)
 	if err != nil {
 		return errors.Wrap(err, "error parsing input")
 	}
@@ -50,7 +23,7 @@ func receive(reader io.Reader) error {
 		return errors.Wrap(err, "error checking force push")
 	}
 
-	AllowForcePush, err := isForcePushAllowedForBranch(input.RepoId, input.RefName)
+	AllowForcePush, err := IsForcePushAllowedForBranch(input.RepoId, input.RefName)
 	if err != nil {
 		return errors.Wrap(err, "error fetching force push config")
 	}
@@ -58,30 +31,6 @@ func receive(reader io.Reader) error {
 	// Reject force push
 	if !AllowForcePush && force {
 		return NonFFErr
-	}
-
-	// create dangling ref
-	if force {
-		cmd := exec.Command("git", "update-ref", "refs/dangling/"+input.OldRev, input.OldRev)
-		errPipe, err := cmd.StderrPipe()
-		if err != nil {
-			return errors.Wrap(err, "error getting update ref err stream")
-		}
-
-		err = cmd.Start()
-		if err != nil {
-			return errors.Wrap(err, "error craeting update-ref command")
-		}
-
-		er, err := io.ReadAll(errPipe)
-		if err != nil {
-			return errors.Wrap(err, "error reading update ref err stream")
-		}
-
-		err = cmd.Wait()
-		if err != nil {
-			return errors.Wrap(err, "error waiting to run update-ref command:"+string(er))
-		}
 	}
 
 	return nil

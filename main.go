@@ -1227,6 +1227,7 @@ func main() {
 		AutoHooks:  true,
 		Hooks: &HookScripts{
 			PreReceive: "gitopia-pre-receive",
+			PostReceive: "gitopia-post-receive",
 		},
 	})
 
