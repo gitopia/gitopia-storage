@@ -1,7 +1,8 @@
 package main
 
 import (
-	contextB "context"
+	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -23,14 +24,6 @@ import (
 	"github.com/gitopia/git-server/utils"
 	gitopia "github.com/gitopia/gitopia/app"
 	offchaintypes "github.com/gitopia/gitopia/x/offchain/types"
-	"github.com/gitopia/go-git/v5/plumbing/cache"
-	"github.com/gitopia/go-git/v5/plumbing/format/pktline"
-	"github.com/gitopia/go-git/v5/plumbing/protocol/packp"
-	"github.com/gitopia/go-git/v5/plumbing/transport"
-	gogittransporthttp "github.com/gitopia/go-git/v5/plumbing/transport/http"
-	"github.com/gitopia/go-git/v5/plumbing/transport/server"
-	"github.com/gitopia/go-git/v5/storage/filesystem"
-	"github.com/go-git/go-billy/v5/osfs"
 	"github.com/rs/cors"
 	"github.com/spf13/viper"
 )
@@ -70,7 +63,7 @@ func (w writeFlusher) Write(p []byte) (int, error) {
 	return w.wf.Write(p)
 }
 
-func AuthFunc(cred gogittransporthttp.TokenAuth, req *Request) (bool, error) {
+func AuthFunc(token string, req *Request) (bool, error) {
 	repoId, err := utils.ParseRepositoryIdfromURI(req.URL.Path)
 	if err != nil {
 		return false, err
@@ -83,7 +76,7 @@ func AuthFunc(cred gogittransporthttp.TokenAuth, req *Request) (bool, error) {
 	verifier := offchaintypes.NewVerifier(encConf.TxConfig.SignModeHandler())
 	txDecoder := encConf.TxConfig.TxJSONDecoder()
 
-	tx, err := txDecoder([]byte(cred.Token))
+	tx, err := txDecoder([]byte(token))
 	if err != nil {
 		return false, fmt.Errorf("error decoding")
 	}
@@ -294,7 +287,7 @@ type Server struct {
 	config      Config
 	services    []service
 	lfsServices []lfsService
-	AuthFunc    func(gogittransporthttp.TokenAuth, *Request) (bool, error)
+	AuthFunc    func(string, *Request) (bool, error)
 }
 
 type Request struct {
@@ -393,14 +386,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		cred, err := utils.GetCredential(r)
-		if err != nil {
-			logError("auth", err)
+		token := utils.DecodeBearer(r.Header)
+		if token == "" {
+			logError("auth", errors.New("bearer token missing"))
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 
-		allow, err := s.AuthFunc(cred, req)
+		allow, err := s.AuthFunc(token, req)
 		if !allow || err != nil {
 			if err != nil {
 				logError("auth", err)
@@ -440,176 +433,81 @@ func (s *Server) getInfoRefs(_ string, w http.ResponseWriter, r *Request) {
 		http.Error(w, "Not Found", 404)
 		return
 	}
-	fs := osfs.New(r.RepoPath)
-	_, err := fs.Stat(".git")
-	if err == nil {
-		fs, err = fs.Chroot(".git")
-		if err != nil {
-			return
-		}
+
+	cmd, pipe := gitCommand(s.config.GitPath, subCommand(rpc), "--stateless-rpc", "--advertise-refs", r.RepoPath)
+	if err := cmd.Start(); err != nil {
+		fail500(w, context, err)
+		return
 	}
-	storage := filesystem.NewStorageWithOptions(fs, cache.NewObjectLRUDefault(), filesystem.Options{KeepDescriptors: true, LargeObjectThreshold: LARGE_OBJECT_THRESHOLD})
-	ep, _ := transport.NewEndpoint(r.RepoPath)
-	loader := server.MapLoader{}
-	loader[ep.String()] = storage
-	session := server.NewServer(loader)
+	defer cleanUpProcessGroup(cmd)
 
-	switch rpc {
-	case "git-receive-pack":
-		ts, err := session.NewReceivePackSession(ep, nil)
-		if err != nil {
-			logError(context, err)
-		}
-		defer ts.Close()
-		adv, err := ts.AdvertisedReferences()
-		if err != nil {
-			logError(context, err)
-		}
-
-		// Enable smart protocol for http
-		enc := pktline.NewEncoder(w)
-		enc.Encode([]byte(fmt.Sprintf("# service=%s\n", rpc)))
-		enc.Encode(nil)
-
-		if err := adv.Encode(w); err != nil {
-			logError(context, err)
-			return
-		}
-
-	case "git-upload-pack":
-		ts, err := session.NewReceivePackSession(ep, nil)
-		if err != nil {
-			logError(context, err)
-		}
-		defer ts.Close()
-		adv, err := ts.AdvertisedReferences()
-		if err != nil {
-			logError(context, err)
-		}
-
-		// Enable smart protocol for http
-		enc := pktline.NewEncoder(w)
-		enc.Encode([]byte(fmt.Sprintf("# service=%s\n", rpc)))
-		enc.Encode(nil)
-
-		if err := adv.Encode(w); err != nil {
-			logError(context, err)
-			return
-		}
+	if err := packLine(w, fmt.Sprintf("# service=%s\n", rpc)); err != nil {
+		logError(context, err)
+		return
 	}
 
-	// cmd, pipe := gitCommand(s.config.GitPath, subCommand(rpc), "--stateless-rpc", "--advertise-refs", r.RepoPath)
-	// if err := cmd.Start(); err != nil {
-	// 	fail500(w, context, err)
-	// 	return
-	// }
-	// defer cleanUpProcessGroup(cmd)
+	if err := packFlush(w); err != nil {
+		logError(context, err)
+		return
+	}
 
-	// if err := packLine(w, fmt.Sprintf("# service=%s\n", rpc)); err != nil {
-	// 	logError(context, err)
-	// 	return
-	// }
+	if _, err := io.Copy(w, pipe); err != nil {
+		logError(context, err)
+		return
+	}
 
-	// if err := packFlush(w); err != nil {
-	// 	logError(context, err)
-	// 	return
-	// }
-
+	if err := cmd.Wait(); err != nil {
+		logError(context, err)
+		return
+	}
 }
 
-// if err := cmd.Wait(); err != nil {
-// 	logError(context, err)
-// 	return
-// }
-
 func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
-	// context := "post-rpc"
-	// body := r.Body
-	defer r.Body.Close()
+	context := "post-rpc"
+	body := r.Body
 
-	// if r.Header.Get("Content-Encoding") == "gzip" {
-	// 	var err error
-	// 	_, err := gzip.NewReader(r.Body)
-	// 	if err != nil {
-	// 		fail500(w, context, err)
-	// 		return
-	// 	}
-	// }
-	fs := osfs.New(r.RepoPath)
-	_, err := fs.Stat(".git")
-	if err == nil {
-		fs, err = fs.Chroot(".git")
+	if r.Header.Get("Content-Encoding") == "gzip" {
+		var err error
+		body, err = gzip.NewReader(r.Body)
 		if err != nil {
+			fail500(w, context, err)
 			return
 		}
 	}
-	storage := filesystem.NewStorageWithOptions(fs, cache.NewObjectLRUDefault(), filesystem.Options{KeepDescriptors: true, LargeObjectThreshold: LARGE_OBJECT_THRESHOLD})
-	ep, _ := transport.NewEndpoint(r.RepoPath)
-	loader := server.MapLoader{}
-	loader[ep.String()] = storage
-	session := server.NewServer(loader)
+
+	cmd, pipe := gitCommand(s.config.GitPath, subCommand(rpc), "--stateless-rpc", r.RepoPath)
+	defer pipe.Close()
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		fail500(w, context, err)
+		return
+	}
+	defer stdin.Close()
+
+	if err := cmd.Start(); err != nil {
+		fail500(w, context, err)
+		return
+	}
+	defer cleanUpProcessGroup(cmd)
+
+	if _, err := io.Copy(stdin, body); err != nil {
+		fail500(w, context, err)
+		return
+	}
+	stdin.Close()
 
 	w.Header().Add("Content-Type", fmt.Sprintf("application/x-%s-result", rpc))
 	w.Header().Add("Cache-Control", "no-cache")
 	w.WriteHeader(200)
 
-	switch rpc {
-	case "git-receive-pack":
-		ts, err := session.NewReceivePackSession(ep, nil)
-		if err != nil {
-			fmt.Println(err)
-		}
-		defer ts.Close()
-
-		req := packp.NewReferenceUpdateRequest()
-		// Loop over header names
-		for name, values := range r.Header {
-			// Loop over all values for the name.
-			for _, value := range values {
-				fmt.Println(name, value)
-			}
-		}
-		b, _ := ioutil.ReadAll(r.Body)
-		_ = b
-		if err := req.Decode(r.Body); err != nil {
-			return
-		}
-
-		status, err := ts.ReceivePack(contextB.TODO(), req)
-		if status != nil {
-			if err := status.Encode(w); err != nil {
-				fmt.Println(err)
-			}
-		}
-
-		if err != nil {
-			fmt.Println(err)
-		}
-
-	case "git-upload-pack":
-		ts, err := session.NewUploadPackSession(ep, nil)
-		if err != nil {
-			fmt.Println(err)
-		}
-		defer ts.Close()
-
-		req := packp.NewUploadPackRequest()
-		if err := req.Decode(r.Body); err != nil {
-			return
-		}
-
-		status, err := ts.UploadPack(contextB.TODO(), req)
-		if status != nil {
-			if err := status.Encode(w); err != nil {
-				fmt.Println(err)
-			}
-		}
-
-		if err != nil {
-			fmt.Println(err)
-		}
+	if _, err := io.Copy(newWriteFlusher(w), pipe); err != nil {
+		logError(context, err)
+		return
 	}
-
+	if err := cmd.Wait(); err != nil {
+		logError(context, err)
+		return
+	}
 }
 
 func (s *Server) Setup() error {
@@ -635,7 +533,7 @@ func repoExists(p string) bool {
 	return err == nil
 }
 
-func gitCommand(name string, args ...string) (*exec.Cmd, io.Reader) {
+func gitCommand(name string, args ...string) (*exec.Cmd, io.ReadCloser) {
 	cmd := exec.Command(name, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Env = os.Environ()

@@ -14,23 +14,21 @@ import (
 	"github.com/gitopia/gitopia/x/gitopia/types"
 	"github.com/gitopia/gitopia/x/gitopia/utils"
 	offchaintypes "github.com/gitopia/gitopia/x/offchain/types"
-	gogittransporthttp "github.com/gitopia/go-git/v5/plumbing/transport/http"
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-func GetCredential(req *http.Request) (gogittransporthttp.TokenAuth, error) {
-	cred := gogittransporthttp.TokenAuth{}
-
-	reqToken := req.Header.Get("Authorization")
+// DecodeBasic extracts token from given header using HTTP Bearer Auth.
+// It returns empty string if value is not presented or not valid.
+func DecodeBearer(header http.Header) (token string) {
+	reqToken := header.Get("Authorization")
 	splitToken := strings.Split(reqToken, "Bearer ")
 	if len(splitToken) != 2 {
-		return cred, fmt.Errorf("authentication failed")
+		return ""
 	}
-	cred.Token = splitToken[1]
 
-	return cred, nil
+	return splitToken[1]
 }
 
 // DecodeBasic extracts username and password from given header using HTTP Basic Auth.
