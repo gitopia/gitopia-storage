@@ -50,6 +50,8 @@ func receive(reader io.Reader) error {
 }
 
 func main() {
+	log.Println("post-receive")
+	defer log.Println("done:post-receive")
 	viper.AutomaticEnv()
 	// Git hook data is provided via STDIN
 	if err := receive(os.Stdin); err != nil {

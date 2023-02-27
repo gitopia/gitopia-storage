@@ -265,9 +265,10 @@ func (c *Config) Setup() error {
 		}
 	}
 
-	if c.AutoHooks == true {
-		return c.setupHooks()
-	}
+	// NOTE: do not rewrite/create hooks for all existing repos
+	// if c.AutoHooks == true {
+	// 	return c.setupHooks()
+	// }
 
 	return nil
 }

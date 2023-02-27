@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/pkg/errors"
 )
 
 const ZeroSHA = "0000000000000000000000000000000000000000"
@@ -91,7 +93,7 @@ func (i Input) IsForcePush() (bool, error) {
 
 	out, err := exec.Command("git", "merge-base", i.OldRev, i.NewRev).CombinedOutput()
 	if err != nil {
-		return false, fmt.Errorf("git merge base failed: %s", out)
+		return false, errors.WithMessage(err, "git merge base failed" + string(out))
 	}
 
 	base := strings.TrimSpace(string(out))
