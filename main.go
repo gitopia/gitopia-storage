@@ -584,17 +584,17 @@ func main() {
 	mux := http.NewServeMux()
 
 	mux.Handle("/", service)
-	mux.Handle("/objects", http.HandlerFunc(route.ObjectsHandler))
+	mux.Handle("/objects/", http.HandlerFunc(route.ObjectsHandler))
 	mux.Handle("/commits", http.HandlerFunc(route.CommitsHandler))
 	mux.Handle("/commits/", http.HandlerFunc(route.CommitsHandler))
 	mux.Handle("/content", http.HandlerFunc(route.ContentHandler))
 	mux.Handle("/diff", http.HandlerFunc(route.CommitDiffHandler))
 	mux.Handle("/pull/diff", http.HandlerFunc(pr.PullDiffHandler))
 	mux.Handle("/upload", http.HandlerFunc(route.UploadAttachmentHandler))
-	mux.Handle("/releases", http.HandlerFunc(route.GetAttachmentHandler))
+	mux.Handle("/releases/", http.HandlerFunc(route.GetAttachmentHandler))
 	mux.Handle("/pull/commits", http.HandlerFunc(pr.PullRequestCommitsHandler))
 	mux.Handle("/pull/check", http.HandlerFunc(pr.PullRequestCheckHandler))
-	mux.Handle("/raw", http.HandlerFunc(route.GetRawFileHandler))
+	mux.Handle("/raw/", http.HandlerFunc(route.GetRawFileHandler))
 
 	handler := cors.Default().Handler(mux)
 
