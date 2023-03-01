@@ -16,11 +16,9 @@ import (
 const ZeroSHA = "0000000000000000000000000000000000000000"
 
 const (
-	BranchPushAction   = "branch.push"
-	BranchCreateAction = "branch.create"
-	BranchDeleteAction = "branch.delete"
-	TagCreateAction    = "tag.create"
-	TagDeleteAction    = "tag.delete"
+	PushAction   = "push"
+	CreateAction = "create"
+	DeleteAction = "delete"
 )
 
 type Input struct {
@@ -69,20 +67,15 @@ func Parse(inputStream io.Reader) (*Input, error) {
 }
 
 func (i Input) parseHookAction() string {
-	action := "push"
-	context := "branch"
-
-	if i.RefType == "tags" {
-		context = "tag"
-	}
+	action := PushAction
 
 	if i.OldRev == ZeroSHA && i.NewRev != ZeroSHA {
-		action = "create"
+		action = CreateAction
 	} else if i.OldRev != ZeroSHA && i.NewRev == ZeroSHA {
-		action = "delete"
+		action = DeleteAction
 	}
 
-	return fmt.Sprintf("%s.%s", context, action)
+	return action
 }
 
 func (i Input) IsForcePush() (bool, error) {

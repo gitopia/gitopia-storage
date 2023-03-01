@@ -23,7 +23,7 @@ func receive(reader io.Reader) error {
 	}
 
 	// create dangling ref
-	if force {
+	if force || input.Action == utils.DeleteAction{
 		cmd := exec.Command("git", "update-ref", "refs/dangling/"+input.OldRev, input.OldRev)
 		errPipe, err := cmd.StderrPipe()
 		if err != nil {
