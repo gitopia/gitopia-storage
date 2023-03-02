@@ -17,19 +17,24 @@ func receive(reader io.Reader) error {
 	if err != nil {
 		return errors.Wrap(err, "error parsing input")
 	}
+
+	allowForcePush, err := IsForcePushAllowedForBranch(input.RepoId, input.RefName)
+	if err != nil {
+		return errors.Wrap(err, "error fetching force push config")
+	}
+
+	if allowForcePush {
+		return nil
+	}
+
 	// Check if push is non fast-forward (force)
 	force, err := input.IsForcePush()
 	if err != nil {
 		return errors.Wrap(err, "error checking force push")
 	}
 
-	AllowForcePush, err := IsForcePushAllowedForBranch(input.RepoId, input.RefName)
-	if err != nil {
-		return errors.Wrap(err, "error fetching force push config")
-	}
-
 	// Reject force push
-	if !AllowForcePush && force {
+	if force {
 		return NonFFErr
 	}
 
