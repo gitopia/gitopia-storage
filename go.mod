@@ -3,12 +3,14 @@ module github.com/gitopia/git-server
 go 1.18
 
 require (
+	cosmossdk.io/errors v1.0.0-beta.7
 	github.com/buger/jsonparser v1.1.1
 	github.com/cosmos/cosmos-sdk v0.46.10
 	github.com/gitopia/gitopia v1.3.0
-	github.com/gitopia/gitopia-go v0.2.0
+	github.com/gitopia/gitopia-go v0.2.1-0.20230221180246-1bcf769fcf01
 	github.com/gitopia/go-git/v5 v5.4.3-0.20221011074003-f70479dc646c
 	github.com/go-git/go-billy/v5 v5.3.1
+	github.com/google/martian/v3 v3.2.1
 	github.com/libgit2/git2go/v33 v33.0.4
 	github.com/pkg/errors v0.9.1
 	github.com/rs/cors v1.8.2
@@ -23,7 +25,6 @@ require (
 	cloud.google.com/go/compute/metadata v0.2.1 // indirect
 	cloud.google.com/go/iam v0.8.0 // indirect
 	cloud.google.com/go/storage v1.27.0 // indirect
-	cosmossdk.io/errors v1.0.0-beta.7 // indirect
 	cosmossdk.io/math v1.0.0-beta.3 // indirect
 	filippo.io/edwards25519 v1.0.0-rc.1 // indirect
 	github.com/99designs/go-keychain v0.0.0-20191008050251-8e49817e8af4 // indirect

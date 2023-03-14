@@ -1,7 +1,7 @@
 package main
 
 import (
-	contextB "context"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -26,9 +26,9 @@ import (
 	"github.com/gitopia/go-git/v5/plumbing/format/objfile"
 	"github.com/gitopia/go-git/v5/plumbing/format/pktline"
 	"github.com/gitopia/go-git/v5/plumbing/object"
-	"github.com/gitopia/go-git/v5/plumbing/protocol/packp"
 	"github.com/gitopia/go-git/v5/plumbing/transport"
 	gogittransporthttp "github.com/gitopia/go-git/v5/plumbing/transport/http"
+
 	"github.com/gitopia/go-git/v5/plumbing/transport/server"
 	"github.com/gitopia/go-git/v5/storage/filesystem"
 	"github.com/go-git/go-billy/v5/osfs"
@@ -51,6 +51,8 @@ type SaveToArweavePostBody struct {
 	NewRemoteRefSha  string `json:"new_remote_ref_sha"`
 	PrevRemoteRefSha string `json:"prev_remote_ref_sha"`
 }
+
+var env []string
 
 func newWriteFlusher(w http.ResponseWriter) io.Writer {
 	return writeFlusher{w.(interface {
@@ -263,9 +265,10 @@ func (c *Config) Setup() error {
 		}
 	}
 
-	if c.AutoHooks == true {
-		return c.setupHooks()
-	}
+	// NOTE: do not rewrite/create hooks for all existing repos
+	// if c.AutoHooks == true {
+	// 	return c.setupHooks()
+	// }
 
 	return nil
 }
@@ -1095,82 +1098,62 @@ func (s *Server) getInfoRefs(_ string, w http.ResponseWriter, r *Request) {
 // }
 
 func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
-	// context := "post-rpc"
-	// body := r.Body
-	defer r.Body.Close()
+	context := "post-rpc"
+	body := r.Body
 
-	// if r.Header.Get("Content-Encoding") == "gzip" {
-	// 	var err error
-	// 	_, err := gzip.NewReader(r.Body)
-	// 	if err != nil {
-	// 		fail500(w, context, err)
-	// 		return
-	// 	}
-	// }
-	fs := osfs.New(r.RepoPath)
-	_, err := fs.Stat(".git")
-	if err == nil {
-		fs, err = fs.Chroot(".git")
+	if r.Header.Get("Content-Encoding") == "gzip" {
+		var err error
+		body, err = gzip.NewReader(r.Body)
 		if err != nil {
+			fail500(w, context, err)
 			return
 		}
 	}
-	storage := filesystem.NewStorageWithOptions(fs, cache.NewObjectLRUDefault(), filesystem.Options{KeepDescriptors: true, LargeObjectThreshold: LARGE_OBJECT_THRESHOLD})
-	ep, _ := transport.NewEndpoint(r.RepoPath)
-	loader := server.MapLoader{}
-	loader[ep.String()] = storage
-	session := server.NewServer(loader)
+
+	cmd, outPipe := gitCommand(s.config.GitPath, subCommand(rpc), "--stateless-rpc", r.RepoPath)
+	//defer pipe.Close()
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		fail500(w, context, err)
+		return
+	}
+	defer stdin.Close()
+	errPipe, err := cmd.StderrPipe()
+	if err != nil {
+		fail500(w, context, err)
+		return
+	}
+
+	if err := cmd.Start(); err != nil {
+		fail500(w, context, err)
+		return
+	}
+	defer cleanUpProcessGroup(cmd)
+
+	if _, err := io.Copy(stdin, body); err != nil {
+		fail500(w, context, err)
+		return
+	}
+	stdin.Close()
 
 	w.Header().Add("Content-Type", fmt.Sprintf("application/x-%s-result", rpc))
 	w.Header().Add("Cache-Control", "no-cache")
 	w.WriteHeader(200)
 
-	switch rpc {
-	case "git-receive-pack":
-		ts, err := session.NewReceivePackSession(ep, nil)
-		if err != nil {
-			fmt.Println(err)
-		}
-		defer ts.Close()
+	if _, err := io.Copy(log.Writer(), errPipe); err != nil {
+		logError(context, err)
+		return
+	}
 
-		req := packp.NewReferenceUpdateRequest()
-		if err := req.Decode(r.Body); err != nil {
-			return
-		}
+	if _, err := io.Copy(newWriteFlusher(w), outPipe); err != nil {
+		logError(context, err)
+		return
+	}
 
-		status, err := ts.ReceivePack(contextB.TODO(), req)
-		if status != nil {
-			if err := status.Encode(w); err != nil {
-				fmt.Println(err)
-			}
-		}
-
-		if err != nil {
-			fmt.Println(err)
-		}
-
-	case "git-upload-pack":
-		ts, err := session.NewUploadPackSession(ep, nil)
-		if err != nil {
-			fmt.Println(err)
-		}
-		defer ts.Close()
-
-		req := packp.NewUploadPackRequest()
-		if err := req.Decode(r.Body); err != nil {
-			return
-		}
-
-		status, err := ts.UploadPack(contextB.TODO(), req)
-		if status != nil {
-			if err := status.Encode(w); err != nil {
-				fmt.Println(err)
-			}
-		}
-
-		if err != nil {
-			fmt.Println(err)
-		}
+	if err := cmd.Wait(); err != nil {
+		logError(context, err)
+		return
 	}
 
 }
@@ -1202,9 +1185,10 @@ func gitCommand(name string, args ...string) (*exec.Cmd, io.Reader) {
 	cmd := exec.Command(name, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Env = os.Environ()
+	cmd.Env = append(cmd.Env, env...)
 
 	r, _ := cmd.StdoutPipe()
-	cmd.Stderr = cmd.Stdout
+	//cmd.Stderr = cmd.Stdout
 
 	return cmd, r
 }
@@ -1226,6 +1210,9 @@ func main() {
 
 	logInfo("ENV", os.Getenv("ENV"))
 	fmt.Println(viper.AllSettings())
+	for _, key := range viper.AllKeys() {
+		env = append(env, strings.ToUpper(key)+"="+viper.GetString(key))
+	}
 
 	conf := sdk.GetConfig()
 	conf.SetBech32PrefixForAccount(AccountAddressPrefix, AccountPubKeyPrefix)
@@ -1238,6 +1225,11 @@ func main() {
 		Dir:        viper.GetString("GIT_DIR"),
 		AutoCreate: true,
 		Auth:       true,
+		AutoHooks:  true,
+		Hooks: &HookScripts{
+			PreReceive: "gitopia-pre-receive",
+			PostReceive: "gitopia-post-receive",
+		},
 	})
 
 	// Configure git server. Will create git repos path if it does not exist.
