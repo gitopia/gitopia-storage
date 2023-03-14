@@ -1224,7 +1224,7 @@ func main() {
 	service := New(Config{
 		Dir:        viper.GetString("GIT_DIR"),
 		AutoCreate: true,
-		Auth:       false,
+		Auth:       true,
 		AutoHooks:  true,
 		Hooks: &HookScripts{
 			PreReceive: "gitopia-pre-receive",
