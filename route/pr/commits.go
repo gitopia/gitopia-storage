@@ -15,7 +15,7 @@ import (
 func PullRequestCommitsHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("request: %s\n", r.Method+" "+r.Host+r.URL.String())
 
-	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/pull/commits") {
+	if r.Method == "POST" {
 		defer r.Body.Close()
 
 		var body utils.PullRequestCommitsPostBody

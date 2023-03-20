@@ -18,7 +18,7 @@ import (
 func ObjectsHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("request: %s\n", r.Method+" "+r.Host+r.URL.String())
 
-	if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/objects") {
+	if r.Method == "GET" {
 		defer r.Body.Close()
 
 		blocks := strings.Split(r.URL.Path, "/")

@@ -19,7 +19,7 @@ import (
 func CommitsHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("request: %s\n", r.Method+" "+r.Host+r.URL.String())
 
-	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/commits") {
+	if r.Method == "POST" {
 		defer r.Body.Close()
 
 		decoder := json.NewDecoder(r.Body)

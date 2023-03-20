@@ -55,7 +55,7 @@ func getBranchNameAndTreePathFromPath(queryClient types.QueryClient, id, repoNam
 func GetRawFileHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("request: %s\n", r.Method+" "+r.Host+r.URL.String())
 
-	if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/raw") {
+	if r.Method == "GET" {
 		defer r.Body.Close()
 
 		grpcUrl := viper.GetString("GITOPIA_ADDR")

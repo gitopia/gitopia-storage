@@ -39,7 +39,7 @@ func ReleaseAttachmentExists(attachments []*types.Attachment, name string) (int,
 func UploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("request: %s\n", r.Method+" "+r.Host+r.URL.String())
 
-	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/upload") {
+	if r.Method == "POST" {
 		defer r.Body.Close()
 
 		r.Body = http.MaxBytesReader(w, r.Body, MAX_UPLOAD_SIZE)
@@ -109,7 +109,7 @@ func UploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 func GetAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("request: %s\n", r.Method+" "+r.Host+r.URL.String())
 
-	if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/releases") {
+	if r.Method == "GET" {
 		defer r.Body.Close()
 
 		fileName := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]

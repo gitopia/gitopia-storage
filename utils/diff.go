@@ -50,6 +50,7 @@ type DiffStat struct {
 type DiffStatResponse struct {
 	Stat         DiffStat `json:"stat"`
 	FilesChanged uint64   `json:"files_changed"`
+	FileNames    []string `json:"file_names"`
 }
 
 func GrabDiff(change object.Change) (res *Diff, err error) {

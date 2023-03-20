@@ -6,7 +6,6 @@ import (
 	"log"
 	"net/http"
 	"path"
-	"strings"
 
 	"github.com/gitopia/git-server/utils"
 	git "github.com/gitopia/go-git/v5"
@@ -19,7 +18,7 @@ import (
 func CommitDiffHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("request: %s\n", r.Method+" "+r.Host+r.URL.String())
 
-	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/diff") {
+	if r.Method == "POST" {
 		defer r.Body.Close()
 
 		decoder := json.NewDecoder(r.Body)
@@ -102,18 +101,22 @@ func CommitDiffHandler(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 
 		if body.OnlyStat {
+			var addition, deletion int
+			var fileNames []string
+
 			patch, err := changes.Patch()
 			if err != nil {
 				log.Printf("commit-diff: can't generate diff stats")
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
-			addition := 0
-			deletion := 0
+
 			stats := patch.Stats()
 			for _, l := range stats {
 				addition += l.Addition
 				deletion += l.Deletion
+				fileNames = append(fileNames, l.Name)
+
 			}
 			diffStat := utils.DiffStat{
 				Addition: uint64(addition),
@@ -122,8 +125,9 @@ func CommitDiffHandler(w http.ResponseWriter, r *http.Request) {
 			DiffStatResponse := utils.DiffStatResponse{
 				Stat:         diffStat,
 				FilesChanged: uint64(changes.Len()),
+				FileNames:    fileNames,
 			}
-			DiffStatResponseJson, err := json.Marshal(DiffStatResponse)
+			DiffStatResponseJson, _ := json.Marshal(DiffStatResponse)
 			w.Write(DiffStatResponseJson)
 			return
 		}

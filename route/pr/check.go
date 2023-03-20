@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"strings"
 	"time"
 
 	"github.com/gitopia/git-server/utils"
@@ -26,7 +25,7 @@ type pullRequestCheckResponse struct {
 func PullRequestCheckHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("request: %s\n", r.Method+" "+r.Host+r.URL.String())
 
-	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/pull/check") {
+	if r.Method == "POST" {
 		defer r.Body.Close()
 
 		var body utils.PullRequestMergePostBody
