@@ -6,7 +6,7 @@ require (
 	cosmossdk.io/errors v1.0.0-beta.7
 	github.com/buger/jsonparser v1.1.1
 	github.com/cosmos/cosmos-sdk v0.46.10
-	github.com/gitopia/gitopia v1.3.0
+	github.com/gitopia/gitopia v1.4.0-rc
 	github.com/gitopia/gitopia-go v0.2.1-0.20230221180246-1bcf769fcf01
 	github.com/gitopia/go-git/v5 v5.4.3-0.20221011074003-f70479dc646c
 	github.com/go-git/go-billy/v5 v5.3.1
