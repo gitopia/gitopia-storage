@@ -205,10 +205,10 @@ github.com/fsnotify/fsnotify v1.4.9/go.mod h1:znqG4EE+3YCdAaPaxE2ZRY/06pZUdp0tY4
 github.com/fsnotify/fsnotify v1.5.4 h1:jRbGcIw6P2Meqdwuo0H1p6JVLbL5DHKAKlYndzMwVZI=
 github.com/fsnotify/fsnotify v1.5.4/go.mod h1:OVB6XrOHzAwXMpEM7uPOzcehqUV2UqJxmVXmkdnm1bU=
 github.com/ghodss/yaml v1.0.0/go.mod h1:4dBDuWmgqj2HViK6kFavaiC9ZROes6MMH2rRYeMEF04=
-github.com/gitopia/gitopia v1.3.0-rc.0.20230301073831-d29d608f4141 h1:tE+Bi7ugemaCQ3O6lrjxrhlnkSNZOl5Xwky7raRkpgQ=
-github.com/gitopia/gitopia v1.3.0-rc.0.20230301073831-d29d608f4141/go.mod h1:ubmgzP9obiaQ/NauKZ24n97S4Tc1nsnhMROzDPyb4HU=
-github.com/gitopia/gitopia-go v0.2.0 h1:lKG8FSPdi02wOU5w5paSbr314DNm8HqrOBWC/noT30k=
-github.com/gitopia/gitopia-go v0.2.0/go.mod h1:fd78h/08oBxoTAdqk3Dwcoc6DUTdt7nl9uRKub25ePs=
+github.com/gitopia/gitopia v1.3.0 h1:Q6YFbD8wx2CEQk5cm2SepXF2jsLRqvPAwAGlwYaar2A=
+github.com/gitopia/gitopia v1.3.0/go.mod h1:cA9b4wnsBe+V35SkyMd0/RKnKa6aNDtbtGzMuAX8iaE=
+github.com/gitopia/gitopia-go v0.2.1-0.20230221180246-1bcf769fcf01 h1:qczE6q1WPE+b3jiEKjFExpB1ad7IP1i8/EpxZqv2vNs=
+github.com/gitopia/gitopia-go v0.2.1-0.20230221180246-1bcf769fcf01/go.mod h1:fd78h/08oBxoTAdqk3Dwcoc6DUTdt7nl9uRKub25ePs=
 github.com/gitopia/go-diff v0.0.0-20221011073329-132b1aebc86c h1:rALNQejs3vSoEGgtT+jyB5svZ7JOUbaP2HpzHmVWhmU=
 github.com/gitopia/go-diff v0.0.0-20221011073329-132b1aebc86c/go.mod h1:/1GKA+kU8l5Wx8iXv16a7JLB1ddvhuqcxlDodtKCQF8=
 github.com/gitopia/go-git/v5 v5.4.3-0.20221011074003-f70479dc646c h1:CqqdMQIequFDI6w9JKccH7D8RhXuIVesCcqtCIUlzZA=
@@ -301,7 +301,6 @@ github.com/google/go-cmp v0.5.9/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeN
 github.com/google/gofuzz v0.0.0-20170612174753-24818f796faf/go.mod h1:HP5RmnzzSNb993RKQDq4+1A4ia9nllfqcQFTQJedwGI=
 github.com/google/gofuzz v1.0.0 h1:A8PeW59pxE9IoFRqBp37U+mSNaQoZ46F1f0f863XSXw=
 github.com/google/gofuzz v1.0.0/go.mod h1:dBl0BpW6vV/+mYPU4Po3pmUjxk6FQPldtuIdl/M65Eg=
-github.com/google/martian v2.1.0+incompatible h1:/CP5g8u/VJHijgedC/Legn3BAbAaWPgecwXBIDzw5no=
 github.com/google/martian v2.1.0+incompatible/go.mod h1:9I4somxYTbIHy5NJKHRl3wXiIaQGbYVAs8BPL6v8lEs=
 github.com/google/martian/v3 v3.0.0/go.mod h1:y5Zk1BBys9G+gd6Jrk0W3cC1+ELVxBWuIGO+w/tUAp0=
 github.com/google/martian/v3 v3.1.0/go.mod h1:y5Zk1BBys9G+gd6Jrk0W3cC1+ELVxBWuIGO+w/tUAp0=
