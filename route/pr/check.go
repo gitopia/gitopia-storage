@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/gitopia/git-server/utils"
-	"github.com/gitopia/gitopia/x/gitopia/types"
+	"github.com/gitopia/gitopia/v2/x/gitopia/types"
 )
 
 type pullRequestCheckResponseData struct {
