@@ -44,6 +44,8 @@ type SaveToArweavePostBody struct {
 	PrevRemoteRefSha string `json:"prev_remote_ref_sha"`
 }
 
+var env []string
+
 func newWriteFlusher(w http.ResponseWriter) io.Writer {
 	return writeFlusher{w.(interface {
 		io.Writer
@@ -242,9 +244,10 @@ func (c *Config) Setup() error {
 		}
 	}
 
-	if c.AutoHooks == true {
-		return c.setupHooks()
-	}
+	// NOTE: do not rewrite/create hooks for all existing repos
+	// if c.AutoHooks == true {
+	// 	return c.setupHooks()
+	// }
 
 	return nil
 }
@@ -475,14 +478,20 @@ func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
 		}
 	}
 
-	cmd, pipe := gitCommand(s.config.GitPath, subCommand(rpc), "--stateless-rpc", r.RepoPath)
-	defer pipe.Close()
+	cmd, outPipe := gitCommand(s.config.GitPath, subCommand(rpc), "--stateless-rpc", r.RepoPath)
+	//defer pipe.Close()
+
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		fail500(w, context, err)
 		return
 	}
 	defer stdin.Close()
+	errPipe, err := cmd.StderrPipe()
+	if err != nil {
+		fail500(w, context, err)
+		return
+	}
 
 	if err := cmd.Start(); err != nil {
 		fail500(w, context, err)
@@ -500,10 +509,16 @@ func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
 	w.Header().Add("Cache-Control", "no-cache")
 	w.WriteHeader(200)
 
-	if _, err := io.Copy(newWriteFlusher(w), pipe); err != nil {
+	if _, err := io.Copy(log.Writer(), errPipe); err != nil {
 		logError(context, err)
 		return
 	}
+
+	if _, err := io.Copy(newWriteFlusher(w), outPipe); err != nil {
+		logError(context, err)
+		return
+	}
+
 	if err := cmd.Wait(); err != nil {
 		logError(context, err)
 		return
@@ -537,9 +552,10 @@ func gitCommand(name string, args ...string) (*exec.Cmd, io.ReadCloser) {
 	cmd := exec.Command(name, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Env = os.Environ()
+	cmd.Env = append(cmd.Env, env...)
 
 	r, _ := cmd.StdoutPipe()
-	cmd.Stderr = cmd.Stdout
+	//cmd.Stderr = cmd.Stdout
 
 	return cmd, r
 }
@@ -561,6 +577,9 @@ func main() {
 
 	logInfo("ENV", os.Getenv("ENV"))
 	fmt.Println(viper.AllSettings())
+	for _, key := range viper.AllKeys() {
+		env = append(env, strings.ToUpper(key)+"="+viper.GetString(key))
+	}
 
 	conf := sdk.GetConfig()
 	conf.SetBech32PrefixForAccount(AccountAddressPrefix, AccountPubKeyPrefix)
@@ -573,6 +592,11 @@ func main() {
 		Dir:        viper.GetString("GIT_DIR"),
 		AutoCreate: true,
 		Auth:       true,
+		AutoHooks:  true,
+		Hooks: &HookScripts{
+			PreReceive:  "gitopia-pre-receive",
+			PostReceive: "gitopia-post-receive",
+		},
 	})
 
 	// Configure git server. Will create git repos path if it does not exist.

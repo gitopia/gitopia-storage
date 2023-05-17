@@ -11,6 +11,7 @@ import (
 
 	"github.com/buger/jsonparser"
 	"github.com/cosmos/cosmos-sdk/codec"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/query"
 	"github.com/cosmos/cosmos-sdk/types/tx"
 	"github.com/gitopia/git-server/app"
@@ -24,23 +25,26 @@ import (
 )
 
 type InvokeForkRepositoryEvent struct {
-	Creator         string
-	RepoId          uint64
-	RepoName        string
-	RepoOwnerId     string
-	ForkRepoOwnerId string
-	TaskId          uint64
-	TxHeight        uint64
+	Creator             string
+	RepoId              uint64
+	RepoName            string
+	RepoOwnerId         string
+	ForkRepoName        string
+	ForkRepoDescription string
+	ForkRepoBranch      string
+	ForkRepoOwnerId     string
+	TaskId              uint64
+	TxHeight            uint64
 }
 
 // tm event codec
 func (e *InvokeForkRepositoryEvent) UnMarshal(eventBuf []byte) error {
-	creator, err := jsonparser.GetString(eventBuf, "events", "message.Creator", "[0]")
+	creator, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+types.EventAttributeCreatorKey, "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing creator")
 	}
 
-	repoIdStr, err := jsonparser.GetString(eventBuf, "events", "message.RepositoryId", "[0]")
+	repoIdStr, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+types.EventAttributeRepoIdKey, "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing repository id")
 	}
@@ -49,22 +53,37 @@ func (e *InvokeForkRepositoryEvent) UnMarshal(eventBuf []byte) error {
 		return errors.Wrap(err, "error parsing repository id")
 	}
 
-	repoName, err := jsonparser.GetString(eventBuf, "events", "message.RepositoryName", "[0]")
+	repoName, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+types.EventAttributeRepoNameKey, "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing repository name")
 	}
 
-	repoOwnerId, err := jsonparser.GetString(eventBuf, "events", "message.RepositoryOwnerId", "[0]")
+	repoOwnerId, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+types.EventAttributeRepoOwnerIdKey, "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing repository owner id")
 	}
 
-	forkRepoOwnerId, err := jsonparser.GetString(eventBuf, "events", "message.ForkRepositoryOwnerId", "[0]")
+	forkRepoName, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+types.EventAttributeForkRepoNameKey, "[0]")
+	if err != nil {
+		return errors.Wrap(err, "error parsing fork repository name")
+	}
+
+	forkRepoDescription, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+types.EventAttributeForkRepoDescriptionKey, "[0]")
+	if err != nil {
+		return errors.Wrap(err, "error parsing fork repository description")
+	}
+
+	forkRepoBranch, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+types.EventAttributeForkRepoBranchKey, "[0]")
+	if err != nil {
+		return errors.Wrap(err, "error parsing fork repository branch")
+	}
+
+	forkRepoOwnerId, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+types.EventAttributeForkRepoOwnerIdKey, "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing fork repository owner id")
 	}
 
-	taskIdStr, err := jsonparser.GetString(eventBuf, "events", "message.TaskId", "[0]")
+	taskIdStr, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+types.EventAttributeTaskIdKey, "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing task id")
 	}
@@ -86,6 +105,9 @@ func (e *InvokeForkRepositoryEvent) UnMarshal(eventBuf []byte) error {
 	e.RepoId = repoId
 	e.RepoName = repoName
 	e.RepoOwnerId = repoOwnerId
+	e.ForkRepoName = forkRepoName
+	e.ForkRepoDescription = forkRepoDescription
+	e.ForkRepoBranch = forkRepoBranch
 	e.ForkRepoOwnerId = forkRepoOwnerId
 	e.TaskId = taskId
 	e.TxHeight = height
@@ -178,6 +200,9 @@ func (h *InvokeForkRepositoryEventHandler) Process(ctx context.Context, event In
 			Id:   event.RepoOwnerId,
 			Name: event.RepoName,
 		},
+		event.ForkRepoName,
+		event.ForkRepoDescription,
+		event.ForkRepoBranch,
 		event.ForkRepoOwnerId,
 		event.TaskId)
 	if err != nil {
@@ -189,7 +214,7 @@ func (h *InvokeForkRepositoryEventHandler) Process(ctx context.Context, event In
 		return err
 	}
 
-	forkedRepoId, err := h.gc.RepositoryId(ctx, event.ForkRepoOwnerId, event.RepoName)
+	forkedRepoId, err := h.gc.RepositoryId(ctx, event.ForkRepoOwnerId, event.ForkRepoName)
 	if err != nil {
 		err = errors.WithMessage(err, "query error")
 		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
@@ -319,26 +344,29 @@ func (h *InvokeForkRepositoryEventHandler) BackfillMissedEvents(ctx context.Cont
 							attributeMap[string(e.Attributes[i].Key)] = string(e.Attributes[i].Value)
 						}
 
-						repoId, err := strconv.ParseUint(attributeMap["RepositoryId"], 10, 64)
+						repoId, err := strconv.ParseUint(attributeMap[types.EventAttributeRepoIdKey], 10, 64)
 						if err != nil {
 							errChan <- errors.WithMessage(err, "error parsing repo id")
 							return
 						}
 
-						taskId, err := strconv.ParseUint(attributeMap["TaskId"], 10, 64)
+						taskId, err := strconv.ParseUint(attributeMap[types.EventAttributeTaskIdKey], 10, 64)
 						if err != nil {
 							errChan <- errors.WithMessage(err, "error parsing task id")
 							return
 						}
 
 						event := InvokeForkRepositoryEvent{
-							Creator:         attributeMap["Creator"],
-							RepoId:          repoId,
-							RepoName:        attributeMap["RepositoryName"],
-							RepoOwnerId:     attributeMap["RepositoryOwnerId"],
-							ForkRepoOwnerId: attributeMap["ForkRepositoryOwnerId"],
-							TaskId:          taskId,
-							TxHeight:        uint64(r.Height),
+							Creator:             attributeMap[types.EventAttributeCreatorKey],
+							RepoId:              repoId,
+							RepoName:            attributeMap[types.EventAttributeRepoNameKey],
+							RepoOwnerId:         attributeMap[types.EventAttributeRepoOwnerIdKey],
+							ForkRepoName:        attributeMap[types.EventAttributeForkRepoNameKey],
+							ForkRepoDescription: attributeMap[types.EventAttributeForkRepoDescriptionKey],
+							ForkRepoBranch:      attributeMap[types.EventAttributeForkRepoBranchKey],
+							ForkRepoOwnerId:     attributeMap[types.EventAttributeForkRepoOwnerIdKey],
+							TaskId:              taskId,
+							TxHeight:            uint64(r.Height),
 						}
 
 						// The missed events will be processed for the current/latest state of the repository, and not the state of the repository when the event was triggered

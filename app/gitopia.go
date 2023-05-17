@@ -23,12 +23,22 @@ func NewGitopiaProxy(g gitopia.Client) GitopiaProxy {
 	return GitopiaProxy{g}
 }
 
-func (g GitopiaProxy) ForkRepository(ctx context.Context, creator string, repositoryId types.RepositoryId, owner string, taskId uint64) error {
+func (g GitopiaProxy) ForkRepository(ctx context.Context,
+	creator string,
+	repositoryId types.RepositoryId,
+	forkRepositoryName string,
+	forkRepositoryDescription string,
+	branch string,
+	owner string,
+	taskId uint64) error {
 	msg := &types.MsgForkRepository{
-		Creator:      creator,
-		RepositoryId: repositoryId,
-		Owner:        owner,
-		TaskId:       taskId,
+		Creator:                   creator,
+		RepositoryId:              repositoryId,
+		ForkRepositoryName:        forkRepositoryName,
+		ForkRepositoryDescription: forkRepositoryDescription,
+		Branch:                    branch,
+		Owner:                     owner,
+		TaskId:                    taskId,
 	}
 
 	err := g.gc.AuthorizedBroadcastTx(ctx, msg)
