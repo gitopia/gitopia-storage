@@ -5,7 +5,7 @@ import (
 
 	"cosmossdk.io/errors"
 	"github.com/gitopia/gitopia-go"
-	"github.com/gitopia/gitopia/x/gitopia/types"
+	"github.com/gitopia/gitopia/v2/x/gitopia/types"
 	"github.com/spf13/viper"
 )
 
@@ -15,14 +15,14 @@ func IsForcePushAllowedForBranch(repo uint64, branch string) (bool, error) {
 		return false, errors.Wrap(err, "error connecting to gitopia")
 	}
 
-	res, err := qc.Repository(context.Background(), &types.QueryGetRepositoryRequest{
+	res, err := qc.Gitopia.Repository(context.Background(), &types.QueryGetRepositoryRequest{
 		Id: repo,
 	})
 	if err != nil {
 		return false, errors.Wrap(err, "error querying repo")
 	}
 
-	branchRes, err := qc.RepositoryBranch(context.Background(), &types.QueryGetRepositoryBranchRequest{
+	branchRes, err := qc.Gitopia.RepositoryBranch(context.Background(), &types.QueryGetRepositoryBranchRequest{
 		Id:             res.Repository.Owner.Id,
 		RepositoryName: res.Repository.Name,
 		BranchName:     branch,
