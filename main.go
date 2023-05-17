@@ -2,7 +2,7 @@ package main
 
 import (
 	"compress/gzip"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -16,22 +16,14 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/cosmos/cosmos-sdk/simapp"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	lfsutil "github.com/gitopia/git-server/lfs"
+	"github.com/gitopia/git-server/route"
+	"github.com/gitopia/git-server/route/lfs"
+	"github.com/gitopia/git-server/route/pr"
 	"github.com/gitopia/git-server/utils"
+	gitopia "github.com/gitopia/gitopia/v2/app"
 	offchaintypes "github.com/gitopia/gitopia/v2/x/offchain/types"
-	git "github.com/gitopia/go-git/v5"
-	"github.com/gitopia/go-git/v5/plumbing"
-	"github.com/gitopia/go-git/v5/plumbing/cache"
-	"github.com/gitopia/go-git/v5/plumbing/format/objfile"
-	"github.com/gitopia/go-git/v5/plumbing/format/pktline"
-	"github.com/gitopia/go-git/v5/plumbing/object"
-	"github.com/gitopia/go-git/v5/plumbing/transport"
-	gogittransporthttp "github.com/gitopia/go-git/v5/plumbing/transport/http"
-
-	"github.com/gitopia/go-git/v5/plumbing/transport/server"
-	"github.com/gitopia/go-git/v5/storage/filesystem"
-	"github.com/go-git/go-billy/v5/osfs"
 	"github.com/rs/cors"
 	"github.com/spf13/viper"
 )
@@ -73,33 +65,20 @@ func (w writeFlusher) Write(p []byte) (int, error) {
 	return w.wf.Write(p)
 }
 
-func getCredential(req *http.Request) (gogittransporthttp.TokenAuth, error) {
-	cred := gogittransporthttp.TokenAuth{}
-
-	reqToken := req.Header.Get("Authorization")
-	splitToken := strings.Split(reqToken, "Bearer ")
-	if len(splitToken) != 2 {
-		return cred, fmt.Errorf("authentication failed")
-	}
-	cred.Token = splitToken[1]
-
-	return cred, nil
-}
-
-func AuthFunc(cred gogittransporthttp.TokenAuth, req *Request) (bool, error) {
-	repoId, err := ParseRepositoryIdfromURI(req.URL.Path)
+func AuthFunc(token string, req *Request) (bool, error) {
+	repoId, err := utils.ParseRepositoryIdfromURI(req.URL.Path)
 	if err != nil {
 		return false, err
 	}
 
-	encConf := simapp.MakeTestEncodingConfig()
+	encConf := gitopia.MakeEncodingConfig()
 	offchaintypes.RegisterInterfaces(encConf.InterfaceRegistry)
 	offchaintypes.RegisterLegacyAminoCodec(encConf.Amino)
 
 	verifier := offchaintypes.NewVerifier(encConf.TxConfig.SignModeHandler())
 	txDecoder := encConf.TxConfig.TxJSONDecoder()
 
-	tx, err := txDecoder([]byte(cred.Token))
+	tx, err := txDecoder([]byte(token))
 	if err != nil {
 		return false, fmt.Errorf("error decoding")
 	}
@@ -111,7 +90,7 @@ func AuthFunc(cred gogittransporthttp.TokenAuth, req *Request) (bool, error) {
 	}
 
 	address := msgs[0].GetSigners()[0].String()
-	havePushPermission, err := HavePushPermission(repoId, address)
+	havePushPermission, err := utils.HavePushPermission(repoId, address)
 	if err != nil {
 		return false, fmt.Errorf("error checking push permission: %s", err.Error())
 	}
@@ -126,7 +105,7 @@ func AuthFunc(cred gogittransporthttp.TokenAuth, req *Request) (bool, error) {
 		return false, err
 	}
 
-	return true, err
+	return true, nil
 }
 
 var reSlashDedup = regexp.MustCompile(`\/{2,}`)
@@ -301,10 +280,17 @@ type service struct {
 	rpc     string
 }
 
+type lfsService struct {
+	method  string
+	suffix  string
+	handler http.HandlerFunc
+}
+
 type Server struct {
-	config   Config
-	services []service
-	AuthFunc func(gogittransporthttp.TokenAuth, *Request) (bool, error)
+	config      Config
+	services    []service
+	lfsServices []lfsService
+	AuthFunc    func(string, *Request) (bool, error)
 }
 
 type Request struct {
@@ -315,10 +301,23 @@ type Request struct {
 
 func New(cfg Config) *Server {
 	s := Server{config: cfg}
+	basic := &lfs.BasicHandler{
+		DefaultStorage: lfsutil.Storage(lfsutil.StorageLocal),
+		Storagers: map[lfsutil.Storage]lfsutil.Storager{
+			lfsutil.StorageLocal: &lfsutil.LocalStorage{Root: viper.GetString("LFS_OBJECTS_DIR")},
+		},
+	}
 	s.services = []service{
 		{"GET", "/info/refs", s.getInfoRefs, ""},
 		{"POST", "/git-upload-pack", s.postRPC, "git-upload-pack"},
 		{"POST", "/git-receive-pack", s.postRPC, "git-receive-pack"},
+	}
+
+	s.lfsServices = []lfsService{
+		{"POST", "/objects/batch", lfs.Authenticate(basic.ServeBatchHandler)},
+		{"GET", "/objects/basic", basic.ServeDownloadHandler},
+		{"PUT", "/objects/basic", lfs.Authenticate(basic.ServeUploadHandler)},
+		{"POST", "/objects/basic/verify", basic.ServeVerifyHandler},
 	}
 
 	// Use PATH if full path is not specified
@@ -345,597 +344,19 @@ func (s *Server) findService(req *http.Request) (*service, string) {
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	logInfo("request", r.Method+" "+r.Host+r.URL.String())
 
-	// Serve loose git objects
-	if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/objects") {
-		defer r.Body.Close()
-
-		blocks := strings.Split(r.URL.Path, "/")
-
-		if len(blocks) != 4 {
-			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
-			return
-		}
-
-		repositoryId := blocks[2]
-		objectHash := blocks[3]
-
-		RepoPath := path.Join(s.config.Dir, fmt.Sprintf("%s.git", repositoryId))
-		repo, err := git.PlainOpen(RepoPath)
-		if err != nil {
-			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
-			return
-		}
-
-		hash := plumbing.NewHash(objectHash)
-		var obj plumbing.EncodedObject
-		obj, err = repo.Storer.EncodedObject(plumbing.AnyObject, hash)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-
-		readCloser, err := obj.Reader()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		defer readCloser.Close()
-
-		objWriter := objfile.NewWriter(w)
-		defer objWriter.Close()
-
-		err = objWriter.WriteHeader(obj.Type(), obj.Size())
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		_, err = io.Copy(objWriter, readCloser)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		return
-	}
-
-	// Repository Commits
-	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/commits") {
-		defer r.Body.Close()
-
-		decoder := json.NewDecoder(r.Body)
-		var body utils.CommitsRequestBody
-		err := decoder.Decode(&body)
-		if err != nil {
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-
-		blocks := strings.Split(r.URL.Path, "/")
-
-		if len(blocks) == 3 {
-			RepoPath := path.Join(s.config.Dir, fmt.Sprintf("%d.git", body.RepositoryID))
-			repo, err := git.PlainOpen(RepoPath)
-			if err != nil {
-				http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
-				return
-			}
-
-			commitHash := plumbing.NewHash(blocks[2])
-			commitObject, err := object.GetCommit(repo.Storer, commitHash)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusNotFound)
-				return
-			}
-
-			commit, err := utils.GrabCommit(*commitObject)
-			commitResponseJson, err := json.Marshal(commit)
-			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Write(commitResponseJson)
-			return
-		}
-
-		if len(blocks) != 2 {
-			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
-			return
-		}
-
-		if body.InitCommitId == "" {
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-
-		RepoPath := path.Join(s.config.Dir, fmt.Sprintf("%d.git", body.RepositoryID))
-		repo, err := git.PlainOpen(RepoPath)
-		if err != nil {
-			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-
-		var commits []*utils.Commit
-		var pageRes *utils.PageResponse
-
-		if body.Path != "" {
-			commitHash := plumbing.NewHash(body.InitCommitId)
-			commit, err := object.GetCommit(repo.Storer, commitHash)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusNotFound)
-				return
-			}
-			commitTree, err := commit.Tree()
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusNotFound)
-				return
-			}
-			_, err = commitTree.FindEntry(body.Path)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusNotFound)
-				return
-			}
-		}
-
-		pageRes, err = utils.PaginateCommitHistoryResponse(RepoPath, repo, body.Pagination, 100, &body, func(commit utils.Commit) error {
-			commits = append(commits, &commit)
-			return nil
-		})
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
-
-		commitsResponse := utils.CommitsResponse{
-			Commits:    commits,
-			Pagination: pageRes,
-		}
-		commitsResponseJson, err := json.Marshal(commitsResponse)
-		w.Write(commitsResponseJson)
-		return
-	}
-
-	// Repository Content
-	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/content") {
-		defer r.Body.Close()
-
-		decoder := json.NewDecoder(r.Body)
-		var body utils.ContentRequestBody
-		err := decoder.Decode(&body)
-		if err != nil {
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-
-		blocks := strings.Split(r.URL.Path, "/")
-
-		if len(blocks) != 2 {
-			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
-			return
-		}
-
-		RepoPath := path.Join(s.config.Dir, fmt.Sprintf("%d.git", body.RepositoryID))
-		repo, err := git.PlainOpen(RepoPath)
-		if err != nil {
-			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
-			return
-		}
-
-		if body.RefId == "" {
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-
-		CommitHash := plumbing.NewHash(body.RefId)
-
-		commit, err := object.GetCommit(repo.Storer, CommitHash)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-
-		tree, err := object.GetTree(repo.Storer, commit.TreeHash)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-
-		if body.Path != "" {
-			treeEntry, err := tree.FindEntry(body.Path)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusNotFound)
-				return
-			}
-			if treeEntry.Mode.IsFile() {
-				var fileContent []*utils.Content
-				blob, err := object.GetBlob(repo.Storer, treeEntry.Hash)
-				if err != nil {
-					http.Error(w, err.Error(), http.StatusNotFound)
-					return
-				}
-				fc, err := utils.GrabFileContent(*blob, *treeEntry, body.Path, body.NoRestriction)
-				if err != nil {
-					http.Error(w, err.Error(), http.StatusNotFound)
-					return
-				}
-				fileContent = append(fileContent, fc)
-
-				if body.IncludeLastCommit {
-					pathCommitId, err := utils.LastCommitForPath(RepoPath, body.RefId, fileContent[0].Path)
-					if err != nil {
-						http.Error(w, err.Error(), http.StatusBadRequest)
-						return
-					}
-					pathCommitHash := plumbing.NewHash(pathCommitId)
-					pathCommitObject, err := object.GetCommit(repo.Storer, pathCommitHash)
-					if err != nil {
-						http.Error(w, err.Error(), http.StatusNotFound)
-						return
-					}
-					fileContent[0].LastCommit, err = utils.GrabCommit(*pathCommitObject)
-					if err != nil {
-						http.Error(w, err.Error(), http.StatusBadRequest)
-						return
-					}
-				}
-
-				contentResponse := utils.ContentResponse{
-					Content: fileContent,
-				}
-				contentResponseJson, err := json.Marshal(contentResponse)
-				if err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-				}
-				w.Write(contentResponseJson)
-				return
-			}
-			tree, err = object.GetTree(repo.Storer, treeEntry.Hash)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusNotFound)
-				return
-			}
-		}
-
-		var treeContents []*utils.Content
-		pageRes, err := utils.PaginateTreeContentResponse(tree, body.Pagination, 100, body.Path, func(treeContent utils.Content) error {
-			treeContents = append(treeContents, &treeContent)
-			return nil
-		})
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		if body.IncludeLastCommit {
-			for i := range treeContents {
-				pathCommitId, err := utils.LastCommitForPath(RepoPath, body.RefId, treeContents[i].Path)
-				if err != nil {
-					http.Error(w, err.Error(), http.StatusBadRequest)
-					return
-				}
-				pathCommitHash := plumbing.NewHash(pathCommitId)
-				pathCommitObject, err := object.GetCommit(repo.Storer, pathCommitHash)
-				if err != nil {
-					http.Error(w, err.Error(), http.StatusNotFound)
-					return
-				}
-				treeContents[i].LastCommit, err = utils.GrabCommit(*pathCommitObject)
-				if err != nil {
-					http.Error(w, err.Error(), http.StatusBadRequest)
-					return
-				}
-			}
-		}
-
-		var sortedTREEContents []*utils.Content
-		var sortedBLOBContents []*utils.Content
-		for _, tc := range treeContents {
-			if tc.Type == "TREE" {
-				sortedTREEContents = append(sortedTREEContents, tc)
-			} else {
-				sortedBLOBContents = append(sortedBLOBContents, tc)
-			}
-		}
-		sortedTreeContents := append(sortedTREEContents, sortedBLOBContents...)
-
-		contentResponse := utils.ContentResponse{
-			Content:    sortedTreeContents,
-			Pagination: pageRes,
-		}
-		contentResponseJson, err := json.Marshal(contentResponse)
-		w.Write(contentResponseJson)
-		return
-	}
-
-	// Calculate commit diff
-	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/diff") {
-		defer r.Body.Close()
-
-		decoder := json.NewDecoder(r.Body)
-		var body utils.DiffRequestBody
-		err := decoder.Decode(&body)
-		if err != nil {
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-
-		RepoPath := path.Join(s.config.Dir, fmt.Sprintf("%d.git", body.RepositoryID))
-		repo, err := git.PlainOpen(RepoPath)
-		if err != nil {
-			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
-			return
-		}
-
-		if body.CommitSha == "" {
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-
-		PreviousCommitHash := plumbing.NewHash(body.PreviousCommitSha)
-		CommitHash := plumbing.NewHash(body.CommitSha)
-
-		var previousCommit, commit *object.Commit
-
-		if body.PreviousCommitSha == "" {
-			previousCommit = nil
-		} else {
-			previousCommit, err = object.GetCommit(repo.Storer, PreviousCommitHash)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusNotFound)
-				return
-			}
-		}
-
-		commit, err = object.GetCommit(repo.Storer, CommitHash)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-
-		var previousTree, tree *object.Tree
-
-		if previousCommit == nil {
-			previousCommit, err = commit.Parent(0)
-			if err != nil {
-				previousTree = nil
-			} else {
-				previousTree, err = object.GetTree(repo.Storer, previousCommit.TreeHash)
-				if err != nil {
-					http.Error(w, err.Error(), http.StatusNotFound)
-					return
-				}
-			}
-		} else {
-			previousTree, err = object.GetTree(repo.Storer, previousCommit.TreeHash)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusNotFound)
-				return
-			}
-		}
-
-		tree, err = object.GetTree(repo.Storer, commit.TreeHash)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-
-		var changes object.Changes
-		changes, err = previousTree.Diff(tree)
-		if err != nil {
-			logError("commit-diff", fmt.Errorf("can't generate diff"))
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-
-		if body.OnlyStat {
-			patch, err := changes.Patch()
-			if err != nil {
-				logError("commit-diff", fmt.Errorf("can't generate diff stats"))
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-			addition := 0
-			deletion := 0
-			stats := patch.Stats()
-			for _, l := range stats {
-				addition += l.Addition
-				deletion += l.Deletion
-			}
-			diffStat := utils.DiffStat{
-				Addition: uint64(addition),
-				Deletion: uint64(deletion),
-			}
-			DiffStatResponse := utils.DiffStatResponse{
-				Stat:         diffStat,
-				FilesChanged: uint64(changes.Len()),
-			}
-			DiffStatResponseJson, err := json.Marshal(DiffStatResponse)
-			w.Write(DiffStatResponseJson)
-			return
-		}
-
-		var diffs []*utils.Diff
-		pageRes, err := utils.PaginateDiffResponse(changes, body.Pagination, 10, func(diff utils.Diff) error {
-			diffs = append(diffs, &diff)
-			return nil
-		})
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
-
-		diffResponse := utils.DiffResponse{
-			Diff:       diffs,
-			Pagination: pageRes,
-		}
-		diffResponseJson, err := json.Marshal(diffResponse)
-		w.Write(diffResponseJson)
-		return
-	}
-
-	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/pull/diff") {
-		defer r.Body.Close()
-
-		decoder := json.NewDecoder(r.Body)
-		var body utils.PullDiffRequestBody
-		err := decoder.Decode(&body)
-		if err != nil {
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-
-		headRepositoryPath := path.Join(s.config.Dir, fmt.Sprintf("%d.git", body.HeadRepositoryID))
-		headRepository, err := git.PlainOpen(headRepositoryPath)
-		if err != nil {
-			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
-			return
-		}
-
-		baseRepositoryPath := path.Join(s.config.Dir, fmt.Sprintf("%d.git", body.BaseRepositoryID))
-		baseRepository, err := git.PlainOpen(baseRepositoryPath)
-		if err != nil {
-			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
-			return
-		}
-
-		if body.HeadCommitSha == "" || body.BaseCommitSha == "" {
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-
-		headCommitHash := plumbing.NewHash(body.HeadCommitSha)
-		baseCommitHash := plumbing.NewHash(body.BaseCommitSha)
-
-		var headCommit, baseCommit *object.Commit
-
-		headCommit, err = object.GetCommit(headRepository.Storer, headCommitHash)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-
-		baseCommit, err = object.GetCommit(baseRepository.Storer, baseCommitHash)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-
-		var headTree, baseTree *object.Tree
-
-		headTree, err = object.GetTree(headRepository.Storer, headCommit.TreeHash)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-
-		baseTree, err = object.GetTree(baseRepository.Storer, baseCommit.TreeHash)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-
-		var changes object.Changes
-		changes, err = baseTree.Diff(headTree)
-		if err != nil {
-			logError("commit-diff", fmt.Errorf("can't generate diff"))
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-
-		if body.OnlyStat {
-			patch, err := changes.Patch()
-			if err != nil {
-				logError("commit-diff", fmt.Errorf("can't generate diff stats"))
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-			addition := 0
-			deletion := 0
-			stats := patch.Stats()
-			for _, l := range stats {
-				addition += l.Addition
-				deletion += l.Deletion
-			}
-			diffStat := utils.DiffStat{
-				Addition: uint64(addition),
-				Deletion: uint64(deletion),
-			}
-			DiffStatResponse := utils.DiffStatResponse{
-				Stat:         diffStat,
-				FilesChanged: uint64(changes.Len()),
-			}
-			DiffStatResponseJson, err := json.Marshal(DiffStatResponse)
-			w.Write(DiffStatResponseJson)
-			return
-		}
-
-		var diffs []*utils.Diff
-		pageRes, err := utils.PaginateDiffResponse(changes, body.Pagination, 10, func(diff utils.Diff) error {
-			diffs = append(diffs, &diff)
-			return nil
-		})
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
-
-		diffResponse := utils.DiffResponse{
-			Diff:       diffs,
-			Pagination: pageRes,
-		}
-		diffResponseJson, err := json.Marshal(diffResponse)
-		w.Write(diffResponseJson)
-		return
-	}
-
-	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/upload") {
-		defer r.Body.Close()
-
-		uploadAttachmentHandler(w, r)
-		return
-	}
-
-	if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/releases") {
-		defer r.Body.Close()
-
-		getAttachmentHandler(w, r)
-		return
-	}
-
-	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/pull/commits") {
-		defer r.Body.Close()
-
-		s.pullRequestCommitsHandler(w, r)
-		return
-	}
-
-	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/pull/check") {
-		defer r.Body.Close()
-
-		s.pullRequestCheckHandler(w, r)
-		return
-	}
-
-	if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/raw") {
-		defer r.Body.Close()
-
-		s.getRawFileHandler(w, r)
-		return
-	}
-
 	// Find the git subservice to handle the request
 	svc, repoUrlPath := s.findService(r)
 	if svc == nil {
+		// Find git lfs service
+		for _, lfsService := range s.lfsServices {
+			if lfsService.method == r.Method &&
+				(strings.HasSuffix(r.URL.Path, lfsService.suffix) ||
+					(len(r.URL.Path) > 65 && strings.HasSuffix(r.URL.Path[:len(r.URL.Path)-65], lfsService.suffix))) {
+				lfsService.handler(w, r)
+				return
+			}
+		}
+
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
@@ -968,14 +389,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		cred, err := getCredential(r)
-		if err != nil {
-			logError("auth", err)
+		_, token := utils.DecodeBasic(r.Header)
+		if token == "" {
+			logError("auth", errors.New("basic auth credentials missing"))
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 
-		allow, err := s.AuthFunc(cred, req)
+		allow, err := s.AuthFunc(token, req)
 		if !allow || err != nil {
 			if err != nil {
 				logError("auth", err)
@@ -1015,87 +436,34 @@ func (s *Server) getInfoRefs(_ string, w http.ResponseWriter, r *Request) {
 		http.Error(w, "Not Found", 404)
 		return
 	}
-	fs := osfs.New(r.RepoPath)
-	_, err := fs.Stat(".git")
-	if err == nil {
-		fs, err = fs.Chroot(".git")
-		if err != nil {
-			return
-		}
+
+	cmd, pipe := gitCommand(s.config.GitPath, subCommand(rpc), "--stateless-rpc", "--advertise-refs", r.RepoPath)
+	if err := cmd.Start(); err != nil {
+		fail500(w, context, err)
+		return
 	}
-	storage := filesystem.NewStorageWithOptions(fs, cache.NewObjectLRUDefault(), filesystem.Options{KeepDescriptors: true, LargeObjectThreshold: LARGE_OBJECT_THRESHOLD})
-	ep, _ := transport.NewEndpoint(r.RepoPath)
-	loader := server.MapLoader{}
-	loader[ep.String()] = storage
-	session := server.NewServer(loader)
+	defer cleanUpProcessGroup(cmd)
 
-	switch rpc {
-	case "git-receive-pack":
-		ts, err := session.NewReceivePackSession(ep, nil)
-		if err != nil {
-			logError(context, err)
-		}
-		defer ts.Close()
-		adv, err := ts.AdvertisedReferences()
-		if err != nil {
-			logError(context, err)
-		}
-
-		// Enable smart protocol for http
-		enc := pktline.NewEncoder(w)
-		enc.Encode([]byte(fmt.Sprintf("# service=%s\n", rpc)))
-		enc.Encode(nil)
-
-		if err := adv.Encode(w); err != nil {
-			logError(context, err)
-			return
-		}
-
-	case "git-upload-pack":
-		ts, err := session.NewReceivePackSession(ep, nil)
-		if err != nil {
-			logError(context, err)
-		}
-		defer ts.Close()
-		adv, err := ts.AdvertisedReferences()
-		if err != nil {
-			logError(context, err)
-		}
-
-		// Enable smart protocol for http
-		enc := pktline.NewEncoder(w)
-		enc.Encode([]byte(fmt.Sprintf("# service=%s\n", rpc)))
-		enc.Encode(nil)
-
-		if err := adv.Encode(w); err != nil {
-			logError(context, err)
-			return
-		}
+	if err := packLine(w, fmt.Sprintf("# service=%s\n", rpc)); err != nil {
+		logError(context, err)
+		return
 	}
 
-	// cmd, pipe := gitCommand(s.config.GitPath, subCommand(rpc), "--stateless-rpc", "--advertise-refs", r.RepoPath)
-	// if err := cmd.Start(); err != nil {
-	// 	fail500(w, context, err)
-	// 	return
-	// }
-	// defer cleanUpProcessGroup(cmd)
+	if err := packFlush(w); err != nil {
+		logError(context, err)
+		return
+	}
 
-	// if err := packLine(w, fmt.Sprintf("# service=%s\n", rpc)); err != nil {
-	// 	logError(context, err)
-	// 	return
-	// }
+	if _, err := io.Copy(w, pipe); err != nil {
+		logError(context, err)
+		return
+	}
 
-	// if err := packFlush(w); err != nil {
-	// 	logError(context, err)
-	// 	return
-	// }
-
+	if err := cmd.Wait(); err != nil {
+		logError(context, err)
+		return
+	}
 }
-
-// if err := cmd.Wait(); err != nil {
-// 	logError(context, err)
-// 	return
-// }
 
 func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
 	context := "post-rpc"
@@ -1155,7 +523,6 @@ func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
 		logError(context, err)
 		return
 	}
-
 }
 
 func (s *Server) Setup() error {
@@ -1181,7 +548,7 @@ func repoExists(p string) bool {
 	return err == nil
 }
 
-func gitCommand(name string, args ...string) (*exec.Cmd, io.Reader) {
+func gitCommand(name string, args ...string) (*exec.Cmd, io.ReadCloser) {
 	cmd := exec.Command(name, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Env = os.Environ()
@@ -1227,7 +594,7 @@ func main() {
 		Auth:       true,
 		AutoHooks:  true,
 		Hooks: &HookScripts{
-			PreReceive: "gitopia-pre-receive",
+			PreReceive:  "gitopia-pre-receive",
 			PostReceive: "gitopia-post-receive",
 		},
 	})
@@ -1241,6 +608,18 @@ func main() {
 	mux := http.NewServeMux()
 
 	mux.Handle("/", service)
+	mux.Handle("/objects/", http.HandlerFunc(route.ObjectsHandler))
+	mux.Handle("/commits", http.HandlerFunc(route.CommitsHandler))
+	mux.Handle("/commits/", http.HandlerFunc(route.CommitsHandler))
+	mux.Handle("/content", http.HandlerFunc(route.ContentHandler))
+	mux.Handle("/diff", http.HandlerFunc(route.CommitDiffHandler))
+	mux.Handle("/pull/diff", http.HandlerFunc(pr.PullDiffHandler))
+	mux.Handle("/upload", http.HandlerFunc(route.UploadAttachmentHandler))
+	mux.Handle("/releases/", http.HandlerFunc(route.GetAttachmentHandler))
+	mux.Handle("/pull/commits", http.HandlerFunc(pr.PullRequestCommitsHandler))
+	mux.Handle("/pull/check", http.HandlerFunc(pr.PullRequestCheckHandler))
+	mux.Handle("/raw/", http.HandlerFunc(route.GetRawFileHandler))
+
 	handler := cors.Default().Handler(mux)
 
 	// Start HTTP server
