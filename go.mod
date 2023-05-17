@@ -6,10 +6,9 @@ require (
 	cosmossdk.io/errors v1.0.0-beta.7
 	github.com/buger/jsonparser v1.1.1
 	github.com/cosmos/cosmos-sdk v0.46.12
-	github.com/gitopia/gitopia-go v0.3.1
+	github.com/gitopia/gitopia-go v0.3.2
 	github.com/gitopia/gitopia/v2 v2.0.1
 	github.com/gitopia/go-git/v5 v5.4.3-0.20221011074003-f70479dc646c
-	github.com/go-git/go-billy/v5 v5.3.1
 	github.com/libgit2/git2go/v33 v33.0.4
 	github.com/pkg/errors v0.9.1
 	github.com/rs/cors v1.8.2
@@ -65,6 +64,7 @@ require (
 	github.com/fsnotify/fsnotify v1.5.4 // indirect
 	github.com/gitopia/go-diff v0.0.0-20221011073329-132b1aebc86c // indirect
 	github.com/go-git/gcfg v1.5.0 // indirect
+	github.com/go-git/go-billy/v5 v5.3.1 // indirect
 	github.com/go-kit/kit v0.12.0 // indirect
 	github.com/go-kit/log v0.2.1 // indirect
 	github.com/go-logfmt/logfmt v0.5.1 // indirect
