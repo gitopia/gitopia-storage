@@ -35,7 +35,7 @@ func (h *BasicHandler) Storager(storage lfsutil.Storage) lfsutil.Storager {
 	return h.Storagers[storage]
 }
 
-// GET /{owner}/{repo}.git/info/lfs/object/basic/{oid}
+// GET /{repo-id}.git/info/lfs/object/basic/{oid}
 func (h *BasicHandler) ServeDownloadHandler(w http.ResponseWriter, r *http.Request) {
 	repoId, err := utils.ParseRepositoryIdfromURI(r.URL.Path)
 	if err != nil {
@@ -176,7 +176,7 @@ func Authenticate(h http.HandlerFunc) http.HandlerFunc {
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		username, password := utils.DecodeBasic(r.Header)
-		if username == "" {
+		if password == "" {
 			askCredentials(w)
 			return
 		}

@@ -73,6 +73,12 @@ func ValidateBasicAuth(req *http.Request, username, password string) (bool, erro
 		return false, fmt.Errorf("error decoding")
 	}
 
+	// Verify signature
+	err = verifier.Verify(tx)
+	if err != nil {
+		return false, err
+	}
+
 	// Verify push permission
 	msgs := tx.GetMsgs()
 	if len(msgs) != 1 || len(msgs[0].GetSigners()) != 1 {
@@ -87,12 +93,6 @@ func ValidateBasicAuth(req *http.Request, username, password string) (bool, erro
 
 	if !havePushPermission {
 		return false, fmt.Errorf("user does not have push permission")
-	}
-
-	// Verify signature
-	err = verifier.Verify(tx)
-	if err != nil {
-		return false, err
 	}
 
 	return true, nil
