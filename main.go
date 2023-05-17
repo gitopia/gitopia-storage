@@ -22,8 +22,8 @@ import (
 	"github.com/gitopia/git-server/route/lfs"
 	"github.com/gitopia/git-server/route/pr"
 	"github.com/gitopia/git-server/utils"
-	gitopia "github.com/gitopia/gitopia/app"
-	offchaintypes "github.com/gitopia/gitopia/x/offchain/types"
+	gitopia "github.com/gitopia/gitopia/v2/app"
+	offchaintypes "github.com/gitopia/gitopia/v2/x/offchain/types"
 	"github.com/rs/cors"
 	"github.com/spf13/viper"
 )

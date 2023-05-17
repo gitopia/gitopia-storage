@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/gitopia/gitopia-go"
-	"github.com/gitopia/gitopia/x/gitopia/types"
+	"github.com/gitopia/gitopia/v2/x/gitopia/types"
 	"github.com/pkg/errors"
 )
 
@@ -99,7 +99,7 @@ func (g GitopiaProxy) SetPullRequestState(ctx context.Context, creator string, r
 }
 
 func (g GitopiaProxy) RepositoryName(ctx context.Context, id uint64) (string, error) {
-	resp, err := g.gc.QueryClient().Repository(ctx, &types.QueryGetRepositoryRequest{
+	resp, err := g.gc.QueryClient().Gitopia.Repository(ctx, &types.QueryGetRepositoryRequest{
 		Id: id,
 	})
 	if err != nil {
@@ -110,7 +110,7 @@ func (g GitopiaProxy) RepositoryName(ctx context.Context, id uint64) (string, er
 }
 
 func (g GitopiaProxy) CheckGitServerAuthorization(ctx context.Context, userAddress string) (bool, error) {
-	resp, err := g.gc.QueryClient().CheckGitServerAuthorization(ctx, &types.QueryCheckGitServerAuthorizationRequest{
+	resp, err := g.gc.QueryClient().Gitopia.CheckGitServerAuthorization(ctx, &types.QueryCheckGitServerAuthorizationRequest{
 		UserAddress:     userAddress,
 		ProviderAddress: g.gc.Address().String(),
 	})
@@ -122,7 +122,7 @@ func (g GitopiaProxy) CheckGitServerAuthorization(ctx context.Context, userAddre
 }
 
 func (g GitopiaProxy) RepositoryId(ctx context.Context, address string, repoName string) (uint64, error) {
-	resp, err := g.gc.QueryClient().AnyRepository(ctx, &types.QueryGetAnyRepositoryRequest{
+	resp, err := g.gc.QueryClient().Gitopia.AnyRepository(ctx, &types.QueryGetAnyRepositoryRequest{
 		Id:             address,
 		RepositoryName: repoName,
 	})
@@ -134,14 +134,14 @@ func (g GitopiaProxy) RepositoryId(ctx context.Context, address string, repoName
 }
 
 func (g GitopiaProxy) PullRequest(ctx context.Context, repositoryId uint64, pullRequestIid uint64) (types.PullRequest, error) {
-	repoResp, err := g.gc.QueryClient().Repository(ctx, &types.QueryGetRepositoryRequest{
+	repoResp, err := g.gc.QueryClient().Gitopia.Repository(ctx, &types.QueryGetRepositoryRequest{
 		Id: repositoryId,
 	})
 	if err != nil {
 		return types.PullRequest{}, errors.WithMessage(err, "query error")
 	}
 
-	prResp, err := g.gc.QueryClient().RepositoryPullRequest(ctx, &types.QueryGetRepositoryPullRequestRequest{
+	prResp, err := g.gc.QueryClient().Gitopia.RepositoryPullRequest(ctx, &types.QueryGetRepositoryPullRequestRequest{
 		Id:             repoResp.Repository.Owner.Id,
 		RepositoryName: repoResp.Repository.Name,
 		PullIid:        pullRequestIid,
@@ -154,7 +154,7 @@ func (g GitopiaProxy) PullRequest(ctx context.Context, repositoryId uint64, pull
 }
 
 func (g GitopiaProxy) Task(ctx context.Context, id uint64) (types.Task, error) {
-	res, err := g.gc.QueryClient().Task(ctx, &types.QueryGetTaskRequest{
+	res, err := g.gc.QueryClient().Gitopia.Task(ctx, &types.QueryGetTaskRequest{
 		Id: id,
 	})
 	if err != nil {

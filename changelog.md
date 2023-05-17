@@ -1,11 +1,13 @@
 # Changelog
 
-## [v1.9.0] - UNRELEASED
+## [v2.0.0] - 2023-05-17
 
 - Added support for git lfs
 - Use git cli instead of go-git for pack-protocol
 - Changed http auth from Bearer to Basic
 - Refactored routes
+- Upgrade gitopia go lib to use fee grants for tx
+- Upgrade go version to 1.19
 
 ## [v1.8.0] - 2023-02-22
 
