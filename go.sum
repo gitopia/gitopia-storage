@@ -207,8 +207,6 @@ github.com/fsnotify/fsnotify v1.4.9/go.mod h1:znqG4EE+3YCdAaPaxE2ZRY/06pZUdp0tY4
 github.com/fsnotify/fsnotify v1.5.4 h1:jRbGcIw6P2Meqdwuo0H1p6JVLbL5DHKAKlYndzMwVZI=
 github.com/fsnotify/fsnotify v1.5.4/go.mod h1:OVB6XrOHzAwXMpEM7uPOzcehqUV2UqJxmVXmkdnm1bU=
 github.com/ghodss/yaml v1.0.0/go.mod h1:4dBDuWmgqj2HViK6kFavaiC9ZROes6MMH2rRYeMEF04=
-github.com/gitopia/gitopia v1.4.0-rc h1:4URcobY/ictaeIZv6P5sHil86sCyf5prxjWEDShACr0=
-github.com/gitopia/gitopia v1.4.0-rc/go.mod h1:+pyTaehQtXtw+iuZ964GEeyxRxGwbpubtAj4lRlzbZA=
 github.com/gitopia/gitopia-go v0.3.1 h1:78hT4gXUlgluiOj5pORiNjGdzQEBMd6W28//03LAhkw=
 github.com/gitopia/gitopia-go v0.3.1/go.mod h1:1in+bQqP/CFduTIvJbB8WowPGRBhvyFkp+ZhBddutt0=
 github.com/gitopia/gitopia/v2 v2.0.1 h1:SeHwKkUkA+bqEzsgVimsOb5v6A1wL6O0zqQg/PSSl5c=

@@ -19,7 +19,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/simapp"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/gitopia/git-server/utils"
-	offchaintypes "github.com/gitopia/gitopia/x/offchain/types"
+	offchaintypes "github.com/gitopia/gitopia/v2/x/offchain/types"
 	git "github.com/gitopia/go-git/v5"
 	"github.com/gitopia/go-git/v5/plumbing"
 	"github.com/gitopia/go-git/v5/plumbing/cache"
