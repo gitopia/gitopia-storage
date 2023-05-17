@@ -1,6 +1,8 @@
 WEB_SERVER_PORT = 5001
 GITOPIA_ADDR = "localhost:9090"
 GIT_DIR = "/var/repos"
+LFS_OBJECTS_DIR = "/var/lfs-objects"
+GIT_SERVER_EXTERNAL_ADDR = "http://localhost:5001"
 ATTACHMENT_DIR = "/var/attachments"
 TM_ADDR = "http://localhost:26657"
 WORKING_DIR = "/tmp/git-server/"
