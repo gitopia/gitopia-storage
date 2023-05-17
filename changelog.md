@@ -1,5 +1,10 @@
 # Changelog
 
+## [v2.0.0] - 2023-05-17
+
+- upgrade gitopia go lib to use fee grants for tx
+- upgrade go version
+
 ## [v1.8.0] - 2023-02-22
 
 - Upgrade gitopia version to v1.3.0
