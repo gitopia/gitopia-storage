@@ -4,6 +4,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/gitopia/git-server/hooks/utils"
 	"github.com/pkg/errors"
@@ -19,8 +20,12 @@ func receive(reader io.Reader) error {
 	}
 
 	allowForcePush, err := IsForcePushAllowedForBranch(input.RepoId, input.RefName)
-	if err != nil {
+	// no branch present for the first commit
+	if err != nil && !strings.Contains(err.Error(), "branch not found") {
 		return errors.Wrap(err, "error fetching force push config")
+	} else if err != nil && strings.Contains(err.Error(), "branch not found") {
+		// no branch found. allow push
+		return nil
 	}
 
 	if allowForcePush {

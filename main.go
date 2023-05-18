@@ -514,7 +514,21 @@ func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
 		return
 	}
 
-	if _, err := io.Copy(newWriteFlusher(w), outPipe); err != nil {
+	o, err := io.ReadAll(outPipe)
+	if err == nil {
+		logError(context, err)
+		return 
+	}
+
+	// log output
+	_, err = log.Writer().Write(o)
+	if err == nil {
+		logError(context, err)
+		return 
+	}
+
+	_, err = w.Write(o)
+	if err != nil {
 		logError(context, err)
 		return
 	}
