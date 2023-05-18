@@ -29,6 +29,7 @@ func receive(reader io.Reader) error {
 		if err != nil {
 			return errors.Wrap(err, "error getting update ref err stream")
 		}
+		defer errPipe.Close()
 
 		err = cmd.Start()
 		if err != nil {

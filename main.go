@@ -479,7 +479,7 @@ func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
 	}
 
 	cmd, outPipe := gitCommand(s.config.GitPath, subCommand(rpc), "--stateless-rpc", r.RepoPath)
-	//defer pipe.Close()
+	defer outPipe.Close()
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -487,11 +487,6 @@ func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
 		return
 	}
 	defer stdin.Close()
-	errPipe, err := cmd.StderrPipe()
-	if err != nil {
-		fail500(w, context, err)
-		return
-	}
 
 	if err := cmd.Start(); err != nil {
 		fail500(w, context, err)
@@ -509,26 +504,7 @@ func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
 	w.Header().Add("Cache-Control", "no-cache")
 	w.WriteHeader(200)
 
-	if _, err := io.Copy(log.Writer(), errPipe); err != nil {
-		logError(context, err)
-		return
-	}
-
-	o, err := io.ReadAll(outPipe)
-	if err == nil {
-		logError(context, err)
-		return 
-	}
-
-	// log output
-	_, err = log.Writer().Write(o)
-	if err == nil {
-		logError(context, err)
-		return 
-	}
-
-	_, err = w.Write(o)
-	if err != nil {
+	if _, err := io.Copy(newWriteFlusher(w), outPipe); err != nil {
 		logError(context, err)
 		return
 	}
@@ -569,7 +545,7 @@ func gitCommand(name string, args ...string) (*exec.Cmd, io.ReadCloser) {
 	cmd.Env = append(cmd.Env, env...)
 
 	r, _ := cmd.StdoutPipe()
-	//cmd.Stderr = cmd.Stdout
+	cmd.Stderr = cmd.Stdout
 
 	return cmd, r
 }
