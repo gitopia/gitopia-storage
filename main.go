@@ -16,6 +16,7 @@ import (
 	"strings"
 	"syscall"
 
+	errs "github.com/pkg/errors"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	lfsutil "github.com/gitopia/git-server/lfs"
 	"github.com/gitopia/git-server/route"
@@ -504,13 +505,19 @@ func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
 	w.Header().Add("Cache-Control", "no-cache")
 	w.WriteHeader(200)
 
-	if _, err := io.Copy(newWriteFlusher(w), outPipe); err != nil {
+	op, err := io.ReadAll(outPipe)
+	if err != nil {
+		logError(context, err)
+		return
+	}
+	_, err = newWriteFlusher(w).Write(op)
+	if err != nil {
 		logError(context, err)
 		return
 	}
 
 	if err := cmd.Wait(); err != nil {
-		logError(context, err)
+		logError(context, errs.Wrap(err, string(op)))
 		return
 	}
 }
