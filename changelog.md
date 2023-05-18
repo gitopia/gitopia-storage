@@ -1,5 +1,10 @@
 # Changelog
 
+## [v2.0.1] - 2023-05-18
+
+- fix pre receive hook for empty branch
+- close reponse writer for POST rpc calls
+
 ## [v2.0.0] - 2023-05-17
 
 - Added support for git lfs
