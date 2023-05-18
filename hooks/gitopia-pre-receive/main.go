@@ -20,12 +20,12 @@ func receive(reader io.Reader) error {
 	}
 
 	allowForcePush, err := IsForcePushAllowedForBranch(input.RepoId, input.RefName)
-	// no branch present for the first commit
-	if err != nil && !strings.Contains(err.Error(), "branch not found") {
-		return errors.Wrap(err, "error fetching force push config")
-	} else if err != nil && strings.Contains(err.Error(), "branch not found") {
-		// no branch found. allow push
-		return nil
+	if err != nil {
+		if strings.Contains(err.Error(), "branch not found") { // no branch found. allow push
+			return nil
+		} else { // no branch present for the first commit
+			return errors.Wrap(err, "error fetching force push config")
+		}
 	}
 
 	if allowForcePush {
