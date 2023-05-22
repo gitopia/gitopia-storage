@@ -16,13 +16,14 @@ func main() {
 
 	for _, f := range files {
 		if f.IsDir() {
-			preReceiveHookf, err := os.Create(repoPath + "/" + f.Name() + "/hooks/pre-receive")
+			preReceiveHookf, err := os.OpenFile(repoPath+"/"+f.Name()+"/hooks/pre-receive",
+				os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0777)
 			if err != nil {
 				fmt.Println("file open error:" + err.Error() + ":" + f.Name())
 				continue
 			}
 
-			_, err = fmt.Fprintf(preReceiveHookf,"#!%s\n%s\n", "/bin/sh","gitopia-pre-receive")
+			_, err = fmt.Fprintf(preReceiveHookf, "#!%s\n%s\n", "/bin/sh", "gitopia-pre-receive")
 			if err != nil {
 				fmt.Println("file write error:" + err.Error() + ":" + f.Name())
 				continue
