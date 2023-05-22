@@ -24,6 +24,15 @@
             "cwd": "${workspaceFolder}",
             "program": "${workspaceFolder}/cmd/git-server-events",
             "args": ["run", "--from", "git-server", "--keyring-backend", "test"]
+        },
+        {
+            "name": "Launch migration",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "cwd": "${workspaceFolder}",
+            "program": "${workspaceFolder}/hooks/migration/",
+            "args": ["/var/repos"]
         }
     ]
 }
