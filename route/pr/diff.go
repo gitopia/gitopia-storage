@@ -2,9 +2,9 @@ package pr
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
 
 	"github.com/gitopia/git-server/utils"
@@ -39,7 +39,7 @@ func PullDiffHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
 		}
-		fmt.Println("created quarantine repo " + qpath)
+		defer os.RemoveAll(qpath)
 
 		cmd := exec.Command("git", "-C", qpath,"merge-base", "--",  "head_repo/"+headBranch, "origin/"+originBranch)
 		out, err := cmd.Output()
