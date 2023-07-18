@@ -27,21 +27,19 @@ func PullDiffHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if body.HeadCommitSha == "" || body.BaseCommitSha == "" {
+		if body.HeadBranch == "" || body.BaseBranch == "" {
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
 		}
 
-		headBranch := "master"
-		originBranch := "master"
-		qpath, err := utils.CreateQuarantineRepo(body.BaseRepositoryID, body.HeadRepositoryID, headBranch, originBranch)
+		qpath, err := utils.CreateQuarantineRepo(body.BaseRepositoryID, body.HeadRepositoryID, body.HeadBranch, body.BaseBranch)
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
 		}
 		defer os.RemoveAll(qpath)
 
-		cmd := exec.Command("git", "-C", qpath,"merge-base", "--",  "head_repo/"+headBranch, "origin/"+originBranch)
+		cmd := exec.Command("git", "-C", qpath, "merge-base", "--", "head_repo/"+body.HeadBranch, "origin/"+body.BaseBranch)
 		out, err := cmd.Output()
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
@@ -49,13 +47,21 @@ func PullDiffHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		mergeBase := string(out)
 
+		cmd = exec.Command("git", "-C", qpath, "rev-parse", "head_repo/"+body.HeadBranch)
+		out, err = cmd.Output()
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+		headCommitSha := string(out)
+
 		repo, err := git.PlainOpen(qpath)
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 			return
 		}
 
-		headCommitHash := plumbing.NewHash(body.HeadCommitSha)
+		headCommitHash := plumbing.NewHash(headCommitSha)
 		baseCommitHash := plumbing.NewHash(mergeBase)
 
 		var headCommit, baseCommit *object.Commit
