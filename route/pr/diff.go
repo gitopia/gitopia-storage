@@ -32,7 +32,7 @@ func PullDiffHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		qpath, err := utils.CreateQuarantineRepo(body.BaseRepositoryID, body.HeadRepositoryID, body.HeadBranch, body.BaseBranch)
+		qpath, err := utils.CreateQuarantineRepo(body.BaseRepositoryID, body.HeadRepositoryID, body.BaseBranch, body.HeadBranch)
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
