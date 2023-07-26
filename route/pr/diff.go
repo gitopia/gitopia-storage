@@ -47,6 +47,11 @@ func PullDiffHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		mergeBase := string(out)
+		if mergeBase == "" {
+			log.Print("merge base not found")
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
 
 		repo, err := git.PlainOpen(qpath)
 		if err != nil {
