@@ -13,7 +13,7 @@
             "cwd": "${workspaceFolder}",
             "program": "${workspaceFolder}",
             "env":{
-                "ENV":"local",
+                "ENV":"",
                 "PATH":"$PATH:/opt/homebrew/bin:/usr/bin",
                 "LIBRARY_PATH":"/opt/homebrew/lib/",
                 "CGO_ENABLED": "1"
