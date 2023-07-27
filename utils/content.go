@@ -24,6 +24,8 @@ type ContentRequestBody struct {
 	RefId             string       `json:"ref_id"`
 	Path              string       `json:"path"`
 	IncludeLastCommit bool         `json:"include_last_commit"`
+	From              uint64       `json:"from"`
+	To                uint64       `json:"to"`
 	Pagination        *PageRequest `json:"pagination"`
 	NoRestriction     bool         `json:"no_restriction"`
 }

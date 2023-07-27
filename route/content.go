@@ -1,6 +1,7 @@
 package route
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -26,6 +27,12 @@ func ContentHandler(w http.ResponseWriter, r *http.Request) {
 		var body utils.ContentRequestBody
 		err := decoder.Decode(&body)
 		if err != nil {
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+
+		if body.From > body.To {
+			log.Println("from > to")
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
 		}
@@ -84,6 +91,23 @@ func ContentHandler(w http.ResponseWriter, r *http.Request) {
 					http.Error(w, err.Error(), http.StatusNotFound)
 					return
 				}
+
+				if body.From != 0 && body.To != 0 {
+					decodedFc, err := base64.StdEncoding.DecodeString(fc.Content)
+					if err != nil {
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+						return
+					}
+
+					splits := strings.Split(string(decodedFc), "\n")
+					if body.To > uint64(len(splits)) {
+						body.To = (uint64)(len(splits))
+					}
+					rangeFc := strings.Join(splits[body.From-1:body.To-1], "\n")
+					fc.Content = base64.StdEncoding.EncodeToString([]byte(rangeFc))
+					fc.Size = (int64)(len(rangeFc))
+				}
+
 				fileContent = append(fileContent, fc)
 
 				if body.IncludeLastCommit {

@@ -65,11 +65,28 @@ const (
 	MergeStyleRebaseUpdate MergeStyle = "rebase-update-only"
 )
 
+// Add head repo remote
+func addCacheRepo(staging, cache string) error {
+	p := filepath.Join(staging, ".git", "objects", "info", "alternates")
+	f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		log.Printf("Could not create .git/objects/info/alternates file in %s: %v\n", staging, err)
+		return err
+	}
+	defer f.Close()
+	data := filepath.Join(cache, "objects")
+	if _, err := fmt.Fprintln(f, data); err != nil {
+		log.Printf("Could not write to .git/objects/info/alternates file in %s: %v\n", staging, err)
+		return err
+	}
+	return nil
+}
+
 func CreateQuarantineRepo(baseRepositoryID uint64, headRepositoryID uint64, baseBranch string, headBranch string) (string, error) {
 	// Clone base repo
 	tmpBasePath, err := ioutil.TempDir(os.TempDir(), "merge-")
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal(err) // TODO: fix crash on request specific failure
 	}
 
 	gitDir := viper.GetString("GIT_DIR")
@@ -87,70 +104,52 @@ func CreateQuarantineRepo(baseRepositoryID uint64, headRepositoryID uint64, base
 	baseBranchName := "base"
 
 	// Add head repo remote.
-	addCacheRepo := func(staging, cache string) error {
-		p := filepath.Join(staging, ".git", "objects", "info", "alternates")
-		f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
-		if err != nil {
-			log.Printf("Could not create .git/objects/info/alternates file in %s: %v\n", staging, err)
-			os.RemoveAll(tmpBasePath)
-			return err
-		}
-		defer f.Close()
-		data := filepath.Join(cache, "objects")
-		if _, err := fmt.Fprintln(f, data); err != nil {
-			log.Printf("Could not write to .git/objects/info/alternates file in %s: %v\n", staging, err)
-			os.RemoveAll(tmpBasePath)
-			return err
-		}
-		return nil
-	}
-
 	if err := addCacheRepo(tmpBasePath, baseRepoPath); err != nil {
-		log.Printf("Unable to add base repository to temporary repo [%s -> %s]: %v\n", baseRepoPath, tmpBasePath, err)
+		log.Printf("unable to add base repository to temporary repo [%s -> %s]: %v\n", baseRepoPath, tmpBasePath, err)
 		os.RemoveAll(tmpBasePath)
-		return "", fmt.Errorf("Unable to add base repository to temporary repo [%s -> tmpBasePath]: %v", baseRepoPath, err)
+		return "", fmt.Errorf("unable to add base repository to temporary repo [%s -> tmpBasePath]: %v", baseRepoPath, err)
 	}
 
 	cmd := exec.Command("git", "remote", "add", "-t", baseBranch, "-m", baseBranch, "origin", baseRepoPath)
 	cmd.Dir = tmpBasePath
 	out, err := cmd.Output()
 	if err != nil {
-		log.Printf("Unable to add base repository as origin [%s -> %s]: %v\n%s\n", baseRepoPath, tmpBasePath, err, string(out))
+		log.Printf("unable to add base repository as origin [%s -> %s]: %v\n%s\n", baseRepoPath, tmpBasePath, err, string(out))
 		os.RemoveAll(tmpBasePath)
-		return "", fmt.Errorf("Unable to add base repository as origin [%s -> tmpBasePath]: %v\n%s", baseRepoPath, err, out)
+		return "", fmt.Errorf("unable to add base repository as origin [%s -> tmpBasePath]: %v\n%s", baseRepoPath, err, out)
 	}
 
 	cmd = exec.Command("git", "fetch", "origin", "--no-tags", "--", baseBranch+":"+baseBranchName, baseBranch+":original_"+baseBranchName)
 	cmd.Dir = tmpBasePath
 	out, err = cmd.Output()
 	if err != nil {
-		log.Printf("Unable to fetch origin base branch [%s:%s -> base, original_base in %s]: %v:\n%s\n", baseRepoPath, baseBranch, tmpBasePath, err, string(out))
+		log.Printf("unable to fetch origin base branch [%s:%s -> base, original_base in %s]: %v:\n%s\n", baseRepoPath, baseBranch, tmpBasePath, err, string(out))
 		os.RemoveAll(tmpBasePath)
-		return "", fmt.Errorf("Unable to fetch origin base branch [%s:%s -> base, original_base in tmpBasePath]: %v\n%s", baseRepoPath, baseBranch, err, string(out))
+		return "", fmt.Errorf("unable to fetch origin base branch [%s:%s -> base, original_base in tmpBasePath]: %v\n%s", baseRepoPath, baseBranch, err, string(out))
 	}
 
 	cmd = exec.Command("git", "symbolic-ref", "HEAD", BranchPrefix+baseBranchName)
 	cmd.Dir = tmpBasePath
 	out, err = cmd.Output()
 	if err != nil {
-		log.Printf("Unable to set HEAD as base branch [%s]: %v\n%s\n", tmpBasePath, err, string(out))
+		log.Printf("unable to set HEAD as base branch [%s]: %v\n%s\n", tmpBasePath, err, string(out))
 		os.RemoveAll(tmpBasePath)
-		return "", fmt.Errorf("Unable to set HEAD as base branch [tmpBasePath]: %v\n%s", err, string(out))
+		return "", fmt.Errorf("unable to set HEAD as base branch [tmpBasePath]: %v\n%s", err, string(out))
 	}
 
 	if err := addCacheRepo(tmpBasePath, headRepoPath); err != nil {
-		log.Printf("Unable to add head repository to temporary repo [%s -> %s]: %v\n", headRepoPath, tmpBasePath, err)
+		log.Printf("unable to add head repository to temporary repo [%s -> %s]: %v\n", headRepoPath, tmpBasePath, err)
 		os.RemoveAll(tmpBasePath)
-		return "", fmt.Errorf("Unable to head base repository to temporary repo [%s -> tmpBasePath]: %v", headRepoPath, err)
+		return "", fmt.Errorf("unable to head base repository to temporary repo [%s -> tmpBasePath]: %v", headRepoPath, err)
 	}
 
 	cmd = exec.Command("git", "remote", "add", remoteRepoName, headRepoPath)
 	cmd.Dir = tmpBasePath
 	out, err = cmd.Output()
 	if err != nil {
-		log.Printf("Unable to add head repository as head_repo [%s -> %s]: %v\n%s\n", headRepoPath, tmpBasePath, err, string(out))
+		log.Printf("unable to add head repository as head_repo [%s -> %s]: %v\n%s\n", headRepoPath, tmpBasePath, err, string(out))
 		os.RemoveAll(tmpBasePath)
-		return "", fmt.Errorf("Unable to add head repository as head_repo [%s -> tmpBasePath]: %v\n%s", headRepoPath, err, string(out))
+		return "", fmt.Errorf("unable to add head repository as head_repo [%s -> tmpBasePath]: %v\n%s", headRepoPath, err, string(out))
 	}
 
 	trackingBranch := "tracking"
@@ -160,9 +159,42 @@ func CreateQuarantineRepo(baseRepositoryID uint64, headRepositoryID uint64, base
 	cmd.Dir = tmpBasePath
 	out, err = cmd.Output()
 	if err != nil {
+		log.Printf("unable to fetch head_repo head branch [%s:%s -> tracking in %s]: %v:\n%s\n", headRepoPath, headBranch, tmpBasePath, err, string(out))
 		os.RemoveAll(tmpBasePath)
-		log.Printf("Unable to fetch head_repo head branch [%s:%s -> tracking in %s]: %v:\n%s\n", headRepoPath, headBranch, tmpBasePath, err, string(out))
-		return "", fmt.Errorf("Unable to fetch head_repo head branch [%s:%s -> tracking in tmpBasePath]: %v\n%s", headRepoPath, headBranch, err, string(out))
+		return "", fmt.Errorf("unable to fetch head_repo head branch [%s:%s -> tracking in tmpBasePath]: %v\n%s", headRepoPath, headBranch, err, string(out))
+	}
+
+	return tmpBasePath, nil
+}
+
+func CreateReadOnlyQuarantineRepo(baseRepositoryID uint64, headRepositoryID uint64) (string, error) {
+	// Clone base repo
+	tmpBasePath, err := ioutil.TempDir(os.TempDir(), "merge-")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	gitDir := viper.GetString("GIT_DIR")
+	baseRepoPath := path.Join(gitDir, fmt.Sprintf("%v.git", baseRepositoryID))
+	headRepoPath := path.Join(gitDir, fmt.Sprintf("%v.git", headRepositoryID))
+
+	_, err = git.InitRepository(tmpBasePath, false)
+	if err != nil {
+		log.Printf("git init tmpBasePath: %v\n", err)
+		os.RemoveAll(tmpBasePath)
+		return "", err
+	}
+
+	if err := addCacheRepo(tmpBasePath, baseRepoPath); err != nil {
+		log.Printf("unable to add base repository to temporary repo [%s -> %s]: %v\n", baseRepoPath, tmpBasePath, err)
+		os.RemoveAll(tmpBasePath)
+		return "", fmt.Errorf("unable to add base repository to temporary repo [%s -> tmpBasePath]: %v", baseRepoPath, err)
+	}
+
+	if err := addCacheRepo(tmpBasePath, headRepoPath); err != nil {
+		log.Printf("unable to add head repository to temporary repo [%s -> %s]: %v\n", headRepoPath, tmpBasePath, err)
+		os.RemoveAll(tmpBasePath)
+		return "", fmt.Errorf("unable to head base repository to temporary repo [%s -> tmpBasePath]: %v", headRepoPath, err)
 	}
 
 	return tmpBasePath, nil

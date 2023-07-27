@@ -2,16 +2,15 @@ package pr
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
-	"path"
+	"os"
+	"os/exec"
 
 	"github.com/gitopia/git-server/utils"
 	git "github.com/gitopia/go-git/v5"
 	"github.com/gitopia/go-git/v5/plumbing"
 	"github.com/gitopia/go-git/v5/plumbing/object"
-	"github.com/spf13/viper"
 )
 
 func PullDiffHandler(w http.ResponseWriter, r *http.Request) {
@@ -28,37 +27,50 @@ func PullDiffHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		headRepositoryPath := path.Join(viper.GetString("GIT_DIR"), fmt.Sprintf("%d.git", body.HeadRepositoryID))
-		headRepository, err := git.PlainOpen(headRepositoryPath)
-		if err != nil {
-			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
-			return
-		}
-
-		baseRepositoryPath := path.Join(viper.GetString("GIT_DIR"), fmt.Sprintf("%d.git", body.BaseRepositoryID))
-		baseRepository, err := git.PlainOpen(baseRepositoryPath)
-		if err != nil {
-			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
-			return
-		}
-
 		if body.HeadCommitSha == "" || body.BaseCommitSha == "" {
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
 		}
 
+		qpath, err := utils.CreateReadOnlyQuarantineRepo(body.BaseRepositoryID, body.HeadRepositoryID)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+		defer os.RemoveAll(qpath)
+
+		cmd := exec.Command("git", "-C", qpath, "merge-base", "--", body.HeadCommitSha, body.BaseCommitSha)
+		out, err := cmd.Output()
+		if err != nil {
+			log.Print("err finding merge base " + err.Error())
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+		mergeBase := string(out)
+		if mergeBase == "" {
+			log.Print("merge base not found")
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+
+		repo, err := git.PlainOpen(qpath)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+			return
+		}
+
 		headCommitHash := plumbing.NewHash(body.HeadCommitSha)
-		baseCommitHash := plumbing.NewHash(body.BaseCommitSha)
+		baseCommitHash := plumbing.NewHash(mergeBase)
 
 		var headCommit, baseCommit *object.Commit
 
-		headCommit, err = object.GetCommit(headRepository.Storer, headCommitHash)
+		headCommit, err = object.GetCommit(repo.Storer, headCommitHash)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
 
-		baseCommit, err = object.GetCommit(baseRepository.Storer, baseCommitHash)
+		baseCommit, err = object.GetCommit(repo.Storer, baseCommitHash)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
@@ -66,13 +78,13 @@ func PullDiffHandler(w http.ResponseWriter, r *http.Request) {
 
 		var headTree, baseTree *object.Tree
 
-		headTree, err = object.GetTree(headRepository.Storer, headCommit.TreeHash)
+		headTree, err = object.GetTree(repo.Storer, headCommit.TreeHash)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
 
-		baseTree, err = object.GetTree(baseRepository.Storer, baseCommit.TreeHash)
+		baseTree, err = object.GetTree(repo.Storer, baseCommit.TreeHash)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
