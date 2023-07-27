@@ -1,5 +1,10 @@
 # Changelog
 
+## [v2.1.0] - 2023-07-27
+
+- fix pr diff api to return git triple dot diff
+- add line filter to content API
+
 ## [v2.0.1] - 2023-05-18
 
 - fix pre receive hook for empty branch
