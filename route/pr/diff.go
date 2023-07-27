@@ -27,7 +27,7 @@ func PullDiffHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if body.HeadSha == "" || body.BaseSha == "" {
+		if body.HeadCommitSha == "" || body.BaseCommitSha == "" {
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
 		}
@@ -39,7 +39,7 @@ func PullDiffHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		defer os.RemoveAll(qpath)
 
-		cmd := exec.Command("git", "-C", qpath, "merge-base", "--", body.HeadSha, body.BaseSha)
+		cmd := exec.Command("git", "-C", qpath, "merge-base", "--", body.HeadCommitSha, body.BaseCommitSha)
 		out, err := cmd.Output()
 		if err != nil {
 			log.Print("err finding merge base " + err.Error())
@@ -59,7 +59,7 @@ func PullDiffHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		headCommitHash := plumbing.NewHash(body.HeadSha)
+		headCommitHash := plumbing.NewHash(body.HeadCommitSha)
 		baseCommitHash := plumbing.NewHash(mergeBase)
 
 		var headCommit, baseCommit *object.Commit
