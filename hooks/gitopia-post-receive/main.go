@@ -8,7 +8,6 @@ import (
 
 	"github.com/gitopia/git-server/hooks/utils"
 	"github.com/pkg/errors"
-	"github.com/spf13/viper"
 )
 
 func receive(reader io.Reader) error {
@@ -23,7 +22,7 @@ func receive(reader io.Reader) error {
 	}
 
 	// create dangling ref
-	if force || input.Action == utils.DeleteAction{
+	if force || input.Action == utils.DeleteAction {
 		cmd := exec.Command("git", "update-ref", "refs/dangling/"+input.OldRev, input.OldRev)
 		errPipe, err := cmd.StderrPipe()
 		if err != nil {
@@ -51,7 +50,6 @@ func receive(reader io.Reader) error {
 }
 
 func main() {
-	viper.AutomaticEnv()
 	// Git hook data is provided via STDIN
 	if err := receive(os.Stdin); err != nil {
 		log.Println(err)
