@@ -1,5 +1,8 @@
 # Changelog
 
+## [v2.2.0] - 2023-09-22
+- Configure grpc host during build
+
 ## [v2.1.0] - 2023-07-27
 
 - fix pr diff api to return git triple dot diff

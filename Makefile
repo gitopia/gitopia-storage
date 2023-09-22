@@ -1,3 +1,6 @@
+GITOPIA_ENV ?= prod
+BUILD_FLAGS := -tags "$(GITOPIA_ENV)"
+
 all: install
 
 .PHONY: build
@@ -11,7 +14,7 @@ build:
 install: go.sum
 		@echo "--> Installing gitopia services"
 		@go install -mod=readonly .
-		@go install ./hooks/gitopia-pre-receive 
+		@go install $(BUILD_FLAGS) ./hooks/gitopia-pre-receive 
 		@go install ./hooks/gitopia-post-receive 
 		
 go.sum: go.mod

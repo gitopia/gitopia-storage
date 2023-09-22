@@ -4,13 +4,13 @@ import (
 	"context"
 
 	"cosmossdk.io/errors"
+	"github.com/gitopia/git-server/hooks/gitopia-pre-receive/config"
 	"github.com/gitopia/gitopia-go"
 	"github.com/gitopia/gitopia/v2/x/gitopia/types"
-	"github.com/spf13/viper"
 )
 
 func IsForcePushAllowedForBranch(repo uint64, branch string) (bool, error) {
-	qc, err := gitopia.GetQueryClient(viper.GetString("GITOPIA_ADDR"))
+	qc, err := gitopia.GetQueryClient(config.GRPCHost)
 	if err != nil {
 		return false, errors.Wrap(err, "error connecting to gitopia")
 	}

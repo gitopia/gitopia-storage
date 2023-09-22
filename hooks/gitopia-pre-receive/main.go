@@ -8,7 +8,6 @@ import (
 
 	"github.com/gitopia/git-server/hooks/utils"
 	"github.com/pkg/errors"
-	"github.com/spf13/viper"
 )
 
 var NonFFErr = errors.New("non fast-forward pushes are not allowed")
@@ -47,7 +46,6 @@ func receive(reader io.Reader) error {
 }
 
 func main() {
-	viper.AutomaticEnv()
 	// Git hook data is provided via STDIN
 	if err := receive(os.Stdin); err != nil {
 		log.Println(err)
