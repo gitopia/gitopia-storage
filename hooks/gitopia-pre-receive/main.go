@@ -31,7 +31,7 @@ func receive(reader io.Reader) error {
 		return nil
 	}
 
-	// Check if push is non fast-forward (force)\
+	// Check if push is non fast-forward (force)
 	force, err := input.IsForcePush()
 	if err != nil {
 		return errors.Wrap(err, "error checking force push")
