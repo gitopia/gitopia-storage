@@ -8,7 +8,7 @@ all: install
 build:
 		@go build -o build/ .
 		@go build -o build/ ./cmd/git-server-events
-		@go build -o build/ ./hooks/gitopia-pre-receive 
+		@go build $(BUILD_FLAGS) -o build/ ./hooks/gitopia-pre-receive 
 		@go build -o build/ ./hooks/gitopia-post-receive 
 		
 install: go.sum
