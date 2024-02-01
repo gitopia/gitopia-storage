@@ -6,7 +6,7 @@ import (
 	"cosmossdk.io/errors"
 	"github.com/gitopia/git-server/hooks/gitopia-pre-receive/config"
 	"github.com/gitopia/gitopia-go"
-	"github.com/gitopia/gitopia/v2/x/gitopia/types"
+	"github.com/gitopia/gitopia/v4/x/gitopia/types"
 )
 
 func IsForcePushAllowedForBranch(repo uint64, branch string) (bool, error) {

@@ -1,29 +1,41 @@
 package main
 
 import (
+	"bytes"
 	"compress/gzip"
+	c "context"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
+	"math"
+	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"syscall"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/types/query"
 	lfsutil "github.com/gitopia/git-server/lfs"
 	"github.com/gitopia/git-server/route"
 	"github.com/gitopia/git-server/route/lfs"
 	"github.com/gitopia/git-server/route/pr"
 	"github.com/gitopia/git-server/utils"
-	gitopia "github.com/gitopia/gitopia/v2/app"
-	offchaintypes "github.com/gitopia/gitopia/v2/x/offchain/types"
+	gc "github.com/gitopia/gitopia-go"
+	gitopia "github.com/gitopia/gitopia/v4/app"
+	gitopiatypes "github.com/gitopia/gitopia/v4/x/gitopia/types"
+	offchaintypes "github.com/gitopia/gitopia/v4/x/offchain/types"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/rs/cors"
 	"github.com/spf13/viper"
 )
@@ -44,7 +56,11 @@ type SaveToArweavePostBody struct {
 	PrevRemoteRefSha string `json:"prev_remote_ref_sha"`
 }
 
-var env []string
+var (
+	env        []string
+	db         *sql.DB
+	cacheMutex sync.RWMutex // Mutex to synchronize cache access
+)
 
 func newWriteFlusher(w http.ResponseWriter) io.Writer {
 	return writeFlusher{w.(interface {
@@ -407,6 +423,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// TODO
+	// create empty bare repo only if it's an empty repo
 	if !repoExists(req.RepoPath) && s.config.AutoCreate == true {
 		err := initRepo(req.RepoName, &s.config)
 		if err != nil {
@@ -437,6 +455,146 @@ func (s *Server) getInfoRefs(_ string, w http.ResponseWriter, r *Request) {
 		return
 	}
 
+	// check cache
+	repoId, err := utils.ParseRepositoryIdfromURI(r.URL.Path)
+	if err != nil {
+		fail500(w, context, err)
+		return
+	}
+
+	queryClient, err := gc.GetQueryClient(viper.GetString("GITOPIA_ADDR"))
+	if err != nil {
+		fail500(w, context, err)
+		return
+	}
+
+	res, err := queryClient.Gitopia.Repository(c.Background(), &gitopiatypes.QueryGetRepositoryRequest{
+		Id: repoId,
+	})
+	if err != nil {
+		fail500(w, context, err)
+		return
+	}
+
+	var backup *gitopiatypes.RepositoryBackup
+	for i := range res.Repository.Backups {
+		if res.Repository.Backups[i].Store == gitopiatypes.RepositoryBackup_IPFS {
+			backup = res.Repository.Backups[i]
+			break
+		}
+	}
+
+	// check mutex before accessing cache
+	cacheMutex.Lock()
+
+	if backup != nil {
+		if !utils.IsCached(db, backup.Refs[1], backup.Refs[2]) {
+			if err := utils.DownloadRepo(db, repoId, r.RepoPath); err != nil {
+				fail500(w, context, err)
+				return
+			}
+		}
+	}
+
+	// TODO
+	// download single repo packfile
+	if err := utils.DownloadPackfile("bafybeifb26lywpeuvjudt3q3wah3botyhjlf4uigc3apgmrvo7unfqxxjq", "pack-3450c3bc1d1f1bc9a8002ea41b56ff87ec1a099b.pack", r.RepoPath); err != nil {
+		fail500(w, context, err)
+		return
+	}
+
+	// TODO
+	// run index-pack
+	packfilePath := fmt.Sprintf("objects/pack/%s", "pack-3450c3bc1d1f1bc9a8002ea41b56ff87ec1a099b.pack")
+	cmd, outPipe := gitCommand(s.config.GitPath, "index-pack", packfilePath)
+	cmd.Dir = r.RepoPath
+	if err := cmd.Start(); err != nil {
+		fail500(w, context, err)
+		return
+	}
+	defer cleanUpProcessGroup(cmd)
+
+	_, err = io.Copy(io.Discard, outPipe)
+	if err != nil {
+		fail500(w, context, err)
+		return
+	}
+
+	if err := cmd.Wait(); err != nil {
+		logError(context, err)
+		return
+	}
+
+	// create git branches and tags
+	// query branches and tags
+	// handle pagination
+	branchAllRes, err := queryClient.Gitopia.RepositoryBranchAll(c.Background(), &gitopiatypes.QueryAllRepositoryBranchRequest{
+		Id:             res.Repository.Owner.Id,
+		RepositoryName: res.Repository.Name,
+		Pagination: &query.PageRequest{
+			Limit: math.MaxUint64,
+		},
+	})
+	if err != nil {
+		fail500(w, context, err)
+		return
+	}
+	for _, branch := range branchAllRes.Branch {
+		var stdoutBuf, stderrBuf bytes.Buffer
+		cmd, outPipe := gitCommand(s.config.GitPath, "branch", branch.Name, branch.Sha)
+		cmd.Dir = r.RepoPath
+		cmd.Stdout = &stdoutBuf
+		cmd.Stderr = &stderrBuf
+		if err := cmd.Start(); err != nil {
+			fail500(w, context, err)
+			return
+		}
+		defer cleanUpProcessGroup(cmd)
+
+		_, err = io.Copy(io.Discard, outPipe)
+		if err != nil {
+			fail500(w, context, err)
+			return
+		}
+
+		if err := cmd.Wait(); err != nil {
+			logError(context, err)
+			return
+		}
+	}
+
+	tagAllRes, err := queryClient.Gitopia.RepositoryTagAll(c.Background(), &gitopiatypes.QueryAllRepositoryTagRequest{
+		Id:             res.Repository.Owner.Id,
+		RepositoryName: res.Repository.Name,
+		Pagination: &query.PageRequest{
+			Limit: math.MaxUint64,
+		},
+	})
+	if err != nil {
+		fail500(w, context, err)
+		return
+	}
+	for _, tag := range tagAllRes.Tag {
+		cmd, outPipe := gitCommand(s.config.GitPath, "tag", tag.Name, tag.Sha)
+		cmd.Dir = r.RepoPath
+		if err := cmd.Start(); err != nil {
+			fail500(w, context, err)
+			return
+		}
+		defer cleanUpProcessGroup(cmd)
+
+		_, err = io.Copy(io.Discard, outPipe)
+		if err != nil {
+			fail500(w, context, err)
+			return
+		}
+
+		if err := cmd.Wait(); err != nil {
+			logError(context, err)
+			return
+		}
+	}
+
 	cmd, pipe := gitCommand(s.config.GitPath, subCommand(rpc), "--stateless-rpc", "--advertise-refs", r.RepoPath)
 	if err := cmd.Start(); err != nil {
 		fail500(w, context, err)
@@ -463,6 +621,10 @@ func (s *Server) getInfoRefs(_ string, w http.ResponseWriter, r *Request) {
 		logError(context, err)
 		return
 	}
+
+	// blocking
+	// ideally just make sure no cleanup is scheduled during
+	cacheMutex.Unlock()
 }
 
 func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
@@ -513,6 +675,143 @@ func (s *Server) postRPC(rpc string, w http.ResponseWriter, r *Request) {
 		logError(context, err)
 		return
 	}
+
+	// if receive pack
+	// upload to ipfs
+	// non-blocking
+	// make single packfile
+	// some lock to prevent concurrent
+	if rpc == "git-receive-pack" {
+		cmd, outPipe := gitCommand(s.config.GitPath, "gc")
+		cmd.Dir = r.RepoPath
+		if err := cmd.Start(); err != nil {
+			fail500(w, context, err)
+			return
+		}
+		defer cleanUpProcessGroup(cmd)
+
+		_, err = io.Copy(io.Discard, outPipe)
+		if err != nil {
+			fail500(w, context, err)
+			return
+		}
+
+		if err := cmd.Wait(); err != nil {
+			logError(context, err)
+			return
+		}
+
+		// Walk the directory and get the packfile name
+		var packfileName string
+		packfileDir := path.Join(r.RepoPath, "objects", "pack")
+		err := filepath.Walk(packfileDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+
+			// Check if the file has a .pack extension
+			if !info.IsDir() && strings.HasSuffix(info.Name(), ".pack") {
+				packfileName = path
+				return nil // Found the file, no need to continue walking
+			}
+
+			return nil
+		})
+
+		if err != nil {
+			fail500(w, context, err)
+			return
+		}
+
+		// Check if a .pack file was found
+		if packfileName == "" {
+			err := errors.New("No .pack file found")
+			fail500(w, context, err)
+			return
+		}
+
+		file, err := os.Open(packfileName)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer file.Close()
+
+		// Create a buffer to store the multipart form data
+		var requestBody bytes.Buffer
+
+		// Create a multipart writer for the buffer
+		writer := multipart.NewWriter(&requestBody)
+
+		// Create a form field writer for the file
+		basePackFileName := filepath.Base(packfileName)
+		part, err := writer.CreateFormFile("filekey", basePackFileName)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// Copy the file into the form field writer
+		_, err = io.Copy(part, file)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// Close the writer to finalize the multipart form data
+		err = writer.Close()
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// Prepare the base URL
+		baseURL := "https://api-v2.spheron.network/v1/upload"
+
+		// Parse the base URL
+		parsedURL, err := url.Parse(baseURL)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// Add query parameters
+		params := url.Values{}
+		params.Add("organization", "6527ac3e2a996c00124fc2f4")
+		params.Add("bucket", "git-server-test")
+		params.Add("protocol", "ipfs")
+		parsedURL.RawQuery = params.Encode()
+
+		// Create a POST request with the multipart form data
+		request, err := http.NewRequest("POST", parsedURL.String(), &requestBody)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// Set the content type, this must be done after writer.Close()
+		request.Header.Set("Content-Type", writer.FormDataContentType())
+
+		// Set the Authorization header for Bearer token
+		request.Header.Set("Authorization", "Bearer "+viper.GetString("SPHERON_API_TOKEN"))
+
+		// Send the request
+		client := &http.Client{}
+		resp, err := client.Do(request)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		// Read the response body
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			panic(err)
+		}
+
+		// Unmarshal the JSON data into the struct
+		var apiResponse utils.ApiResponse
+		if err := json.Unmarshal(body, &apiResponse); err != nil {
+			panic(err)
+		}
+
+		// update cid and packname on gitopia
+
+	}
 }
 
 func (s *Server) Setup() error {
@@ -542,7 +841,7 @@ func gitCommand(name string, args ...string) (*exec.Cmd, io.ReadCloser) {
 	cmd := exec.Command(name, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Env = os.Environ()
-	cmd.Env = append(cmd.Env, env...)
+	// cmd.Env = append(cmd.Env, env...)
 
 	r, _ := cmd.StdoutPipe()
 	cmd.Stderr = cmd.Stdout
@@ -570,6 +869,22 @@ func main() {
 	for _, key := range viper.AllKeys() {
 		env = append(env, strings.ToUpper(key)+"="+viper.GetString(key))
 	}
+
+	// load cache information
+	dbPath := "./cache.db"
+
+	if !utils.DbExists(dbPath) {
+		db = utils.InitializeDB(dbPath)
+		log.Println("Cache database initialized")
+	} else {
+		var err error
+		db, err = sql.Open("sqlite3", dbPath)
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Println("Cache database opened")
+	}
+	defer db.Close()
 
 	conf := sdk.GetConfig()
 	conf.SetBech32PrefixForAccount(AccountAddressPrefix, AccountPubKeyPrefix)

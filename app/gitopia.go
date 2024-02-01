@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/gitopia/gitopia-go"
-	"github.com/gitopia/gitopia/v2/x/gitopia/types"
+	"github.com/gitopia/gitopia/v4/x/gitopia/types"
 	"github.com/pkg/errors"
 )
 
