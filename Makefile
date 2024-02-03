@@ -1,4 +1,4 @@
-GITOPIA_ENV ?= prod
+GITOPIA_ENV ?= testing
 BUILD_FLAGS := -tags "$(GITOPIA_ENV)"
 
 all: install
@@ -6,7 +6,7 @@ all: install
 .PHONY: build
 
 build:
-		@go build -o build/ .
+		@go build -o build/ ./cmd/git-server
 		@go build -o build/ ./cmd/git-server-events
 		@go build $(BUILD_FLAGS) -o build/ ./hooks/gitopia-pre-receive 
 		@go build -o build/ ./hooks/gitopia-post-receive 

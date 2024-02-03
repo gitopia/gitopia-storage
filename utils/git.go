@@ -3,9 +3,12 @@ package utils
 import (
 	"bufio"
 	"bytes"
+	"io"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 // GetFullCommitID returns full length (40) of commit ID by given short SHA in a repository.
@@ -67,4 +70,29 @@ func CountCommits(repoPath, revision string, path string) (string, error) {
 	}
 	count := string(out)
 	return strings.TrimSpace(count), nil
+}
+
+func GitCommand(name string, args ...string) (*exec.Cmd, io.ReadCloser) {
+	cmd := exec.Command(name, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Env = os.Environ()
+	// cmd.Env = append(cmd.Env, env...)
+
+	r, _ := cmd.StdoutPipe()
+	cmd.Stderr = cmd.Stdout
+
+	return cmd, r
+}
+
+func CleanUpProcessGroup(cmd *exec.Cmd) {
+	if cmd == nil {
+		return
+	}
+
+	process := cmd.Process
+	if process != nil && process.Pid > 0 {
+		syscall.Kill(-process.Pid, syscall.SIGTERM)
+	}
+
+	go cmd.Wait()
 }

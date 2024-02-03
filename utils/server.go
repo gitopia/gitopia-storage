@@ -1,0 +1,111 @@
+package utils
+
+import (
+	"io/ioutil"
+	"log"
+	"os"
+	"path/filepath"
+)
+
+type Config struct {
+	KeyDir     string       // Directory for server ssh keys. Only used in SSH strategy.
+	Dir        string       // Directory that contains repositories
+	GitPath    string       // Path to git binary
+	GitUser    string       // User for ssh connections
+	AutoCreate bool         // Automatically create repostories
+	AutoHooks  bool         // Automatically setup git hooks
+	Hooks      *HookScripts // Scripts for hooks/* directory
+	Auth       bool         // Require authentication
+}
+
+// HookScripts represents all repository server-size git hooks
+type HookScripts struct {
+	PreReceive  string
+	Update      string
+	PostReceive string
+}
+
+func LogInfo(context string, message string) {
+	log.Printf("%s: %s\n", context, message)
+}
+
+func LogError(context string, err error) {
+	log.Printf("%s: %v\n", context, err)
+}
+
+// Configure hook scripts in the repo base directory
+func (c *HookScripts) SetupInDir(path string) error {
+	basePath := filepath.Join(path, "hooks")
+	scripts := map[string]string{
+		"pre-receive":  c.PreReceive,
+		"update":       c.Update,
+		"post-receive": c.PostReceive,
+	}
+
+	// Cleanup any existing hooks first
+	hookFiles, err := ioutil.ReadDir(basePath)
+	if err == nil {
+		for _, file := range hookFiles {
+			if err := os.Remove(filepath.Join(basePath, file.Name())); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Write new hook files
+	for name, script := range scripts {
+		fullPath := filepath.Join(basePath, name)
+
+		// Dont create hook if there's no script content
+		if script == "" {
+			continue
+		}
+
+		if err := ioutil.WriteFile(fullPath, []byte(script), 0755); err != nil {
+			LogError("hook-update", err)
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (c *Config) KeyPath() string {
+	return filepath.Join(c.KeyDir, "gitkit.rsa")
+}
+
+func (c *Config) Setup() error {
+	if _, err := os.Stat(c.Dir); err != nil {
+		if err = os.Mkdir(c.Dir, 0755); err != nil {
+			return err
+		}
+	}
+
+	// NOTE: do not rewrite/create hooks for all existing repos
+	// if c.AutoHooks == true {
+	// 	return c.setupHooks()
+	// }
+
+	return nil
+}
+
+func (c *Config) setupHooks() error {
+	files, err := ioutil.ReadDir(c.Dir)
+	if err != nil {
+		return err
+	}
+
+	for _, file := range files {
+		if !file.IsDir() {
+			continue
+		}
+
+		path := filepath.Join(c.Dir, file.Name())
+
+		if err := c.Hooks.SetupInDir(path); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}

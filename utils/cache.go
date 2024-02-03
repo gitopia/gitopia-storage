@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"time"
 
+	"github.com/cosmos/cosmos-sdk/types/query"
 	"github.com/gitopia/gitopia-go"
 	gitopiatypes "github.com/gitopia/gitopia/v4/x/gitopia/types"
 	_ "github.com/mattn/go-sqlite3"
@@ -27,10 +29,9 @@ func InitializeDB(dbPath string) *sql.DB {
 	createTableSQL := `CREATE TABLE IF NOT EXISTS cache (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
 		repo_id INTEGER NOT NULL UNIQUE,
-		parent_repo_id INTEGER NOT NULL UNIQUE,
+		parent_repo_id INTEGER,
         cid TEXT NOT NULL UNIQUE,
 		packfile_name TEXT NOT NULL UNIQUE,
-		parent_id INTEGER,
 		creation_time DATETIME NOT NULL,
         last_accessed_time DATETIME NOT NULL,
         expiry_time DATETIME NOT NULL
@@ -60,10 +61,8 @@ func InsertCacheData(db *sql.DB, repoId uint64, parentRepoId uint64, cid string,
 	}
 }
 
-func IsCached(db *sql.DB, cid, packfileName string) bool {
-	return false
-
-	query := `SELECT COUNT(*) FROM cache WHERE packfile_name = ?`
+func IsCached(db *sql.DB, repoId uint64, cid string, packfileName string) bool {
+	query := `SELECT COUNT(*) FROM cache WHERE repo_id = ? AND cid = ? AND packfile_name = ?`
 	stmt, err := db.Prepare(query)
 	if err != nil {
 		log.Fatal(err)
@@ -71,7 +70,7 @@ func IsCached(db *sql.DB, cid, packfileName string) bool {
 	defer stmt.Close()
 
 	var count int
-	err = stmt.QueryRow(packfileName).Scan(&count)
+	err = stmt.QueryRow(repoId, cid, packfileName).Scan(&count)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -94,7 +93,7 @@ func ReadCacheData(db *sql.DB) {
 	}
 }
 
-func DownloadRepo(db *sql.DB, id uint64, cacheDir string) error {
+func DownloadRepo(db *sql.DB, id uint64, cacheDir string, config *Config) error {
 	queryClient, err := gitopia.GetQueryClient(viper.GetString("GITOPIA_ADDR"))
 	if err != nil {
 		return errors.Wrap(err, "error connecting to gitopia")
@@ -109,36 +108,33 @@ func DownloadRepo(db *sql.DB, id uint64, cacheDir string) error {
 
 	// download parent repos first
 	if res.Repository.Parent != 0 {
-		err := DownloadRepo(db, res.Repository.Parent, cacheDir)
+		err := DownloadRepo(db, res.Repository.Parent, cacheDir, config)
 		if err != nil {
 			return errors.Wrap(err, "error downloading parent repo")
 		}
 	}
 
-	var backup *gitopiatypes.RepositoryBackup
-	for i := range res.Repository.Backups {
-		if res.Repository.Backups[i].Store == gitopiatypes.RepositoryBackup_IPFS {
-			backup = res.Repository.Backups[i]
-			break
-		}
-	}
-
-	if backup == nil {
-		return errors.Wrap(err, "backup ref not found")
+	storageResp, err := queryClient.Gitopia.RepositoryStorage(context.Background(), &gitopiatypes.QueryGetRepositoryStorageRequest{
+		RepositoryId: id,
+	})
+	if err != nil {
+		return errors.Wrap(err, "storage not found")
 	}
 
 	// make sure dependent parent repos are there
-
-	if err := DownloadPackfile(backup.Refs[1], backup.Refs[2], cacheDir); err != nil {
+	if err := downloadPackfile(storageResp.Storage.Latest.Id, storageResp.Storage.Latest.Name, cacheDir, config); err != nil {
 		return errors.Wrap(err, "error downloading packfile")
 	}
 
-	InsertCacheData(db, id, res.Repository.Parent, backup.Refs[1], backup.Refs[2], time.Now(), time.Now(), time.Now().Add(time.Hour*24))
+	// create refs on the server
+	createBranchesAndTags(queryClient, res.Repository.Owner.Id, res.Repository.Name, cacheDir, config)
+
+	InsertCacheData(db, id, res.Repository.Parent, storageResp.Storage.Latest.Id, storageResp.Storage.Latest.Name, time.Now(), time.Now(), time.Now().Add(time.Hour*24))
 
 	return nil
 }
 
-func DownloadPackfile(cid string, packfileName string, cacheDir string) error {
+func downloadPackfile(cid string, packfileName string, cacheDir string, config *Config) error {
 	ipfsUrl := fmt.Sprintf("https://%s.%s/%s", cid, viper.GetString("IPFS_GATEWAY"), packfileName)
 
 	resp, err := http.Get(ipfsUrl)
@@ -159,6 +155,83 @@ func DownloadPackfile(cid string, packfileName string, cacheDir string) error {
 		return err
 	}
 
+	// Build pack index file
+	packfilePath := fmt.Sprintf("objects/pack/%s", packfileName)
+	cmd, outPipe := GitCommand(config.GitPath, "index-pack", packfilePath)
+	cmd.Dir = cacheDir
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	defer CleanUpProcessGroup(cmd)
+
+	_, err = io.Copy(io.Discard, outPipe)
+	if err != nil {
+		return err
+	}
+
+	if err := cmd.Wait(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func createBranchesAndTags(queryClient gitopia.Query, repoOwner string, repoName string, cacheDir string, config *Config) error {
+	branchAllRes, err := queryClient.Gitopia.RepositoryBranchAll(context.Background(), &gitopiatypes.QueryAllRepositoryBranchRequest{
+		Id:             repoOwner,
+		RepositoryName: repoName,
+		Pagination: &query.PageRequest{
+			Limit: math.MaxUint64,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	for _, branch := range branchAllRes.Branch {
+		cmd, outPipe := GitCommand(config.GitPath, "branch", branch.Name, branch.Sha)
+		cmd.Dir = cacheDir
+		if err := cmd.Start(); err != nil {
+			return err
+		}
+		defer CleanUpProcessGroup(cmd)
+
+		_, err = io.Copy(io.Discard, outPipe)
+		if err != nil {
+			return err
+		}
+
+		if err := cmd.Wait(); err != nil {
+			return err
+		}
+	}
+
+	tagAllRes, err := queryClient.Gitopia.RepositoryTagAll(context.Background(), &gitopiatypes.QueryAllRepositoryTagRequest{
+		Id:             repoOwner,
+		RepositoryName: repoName,
+		Pagination: &query.PageRequest{
+			Limit: math.MaxUint64,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	for _, tag := range tagAllRes.Tag {
+		cmd, outPipe := GitCommand(config.GitPath, "tag", tag.Name, tag.Sha)
+		cmd.Dir = cacheDir
+		if err := cmd.Start(); err != nil {
+			return err
+		}
+		defer CleanUpProcessGroup(cmd)
+
+		_, err = io.Copy(io.Discard, outPipe)
+		if err != nil {
+			return err
+		}
+
+		if err := cmd.Wait(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
