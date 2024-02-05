@@ -37,7 +37,7 @@ const (
 )
 
 var (
-	cacheMutex sync.RWMutex // Mutex to synchronize cache access
+	CacheMutex sync.RWMutex // Mutex to synchronize cache access
 )
 
 type SaveToArweavePostBody struct {
@@ -289,25 +289,25 @@ func (s *Server) GetInfoRefs(_ string, w http.ResponseWriter, r *Request) {
 	}
 
 	if !utils.IsCached(db.CacheDb, repoId, res.Storage.Latest.Id, res.Storage.Latest.Name) {
-		cacheMutex.Lock()
-		defer cacheMutex.Unlock()
+		CacheMutex.Lock()
+		defer CacheMutex.Unlock()
 		if err := utils.DownloadRepo(db.CacheDb, repoId, r.RepoPath, &s.Config); err != nil {
 			utils.LogError(context, err)
 			return
 		}
 	} else { // Repository is already available in file system cache
-		cacheMutex.Lock()
+		CacheMutex.Lock()
 		// Increase cache expiry time for this repository
 		if err := utils.UpdateCacheEntry(db.CacheDb, repoId, res.Storage.Latest.Id, res.Storage.Latest.Name); err != nil {
 			utils.LogError(context, err)
 			return
 		}
-		cacheMutex.Unlock()
+		CacheMutex.Unlock()
 
 		// Acquire mutex for reading
 		// This is to make sure that no cache updates happen
-		cacheMutex.RLock()
-		defer cacheMutex.RUnlock()
+		CacheMutex.RLock()
+		defer CacheMutex.RUnlock()
 	}
 
 	cmd, pipe := utils.GitCommand(s.Config.GitPath, subCommand(rpc), "--stateless-rpc", "--advertise-refs", r.RepoPath)

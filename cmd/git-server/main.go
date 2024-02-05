@@ -137,11 +137,13 @@ func main() {
 
 		// clear old cached repos every time the ticker ticks
 		for range ticker.C {
+			app.CacheMutex.Lock()
 			if err := utils.CleanupExpiredRepoCache(db.CacheDb, viper.GetString("GIT_DIR")); err != nil {
 				log.Printf("Error cleaning up cache entry: %s", err)
 			} else {
 				log.Printf("Cleaned up older cached repos")
 			}
+			app.CacheMutex.Unlock()
 		}
 	}()
 
