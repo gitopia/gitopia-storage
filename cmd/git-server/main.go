@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync"
+	"time"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/gitopia/git-server/internal/app"
@@ -24,11 +24,11 @@ import (
 const (
 	AccountAddressPrefix = "gitopia"
 	AccountPubKeyPrefix  = AccountAddressPrefix + sdk.PrefixPublic
+	cacheCleanupPeriod   = 6 * time.Hour
 )
 
 var (
-	env        []string
-	cacheMutex sync.RWMutex // Mutex to synchronize cache access
+	env []string
 )
 
 func New(cfg utils.Config) *app.Server {
@@ -63,7 +63,6 @@ func New(cfg utils.Config) *app.Server {
 }
 
 func main() {
-
 	viper.AddConfigPath(".")
 	if os.Getenv("ENV") == "PRODUCTION" {
 		viper.SetConfigName("config_prod")
@@ -106,6 +105,9 @@ func main() {
 		},
 	})
 
+	// Ensure cache directory exists
+	os.MkdirAll(viper.GetString("GIT_DIR"), os.ModePerm)
+
 	// Configure git server. Will create git repos path if it does not exist.
 	// If hooks are set, it will also update all repos with new version of hook scripts.
 	if err = service.Setup(); err != nil {
@@ -128,6 +130,20 @@ func main() {
 	mux.Handle("/raw/", http.HandlerFunc(route.GetRawFileHandler))
 
 	handler := cors.Default().Handler(mux)
+
+	go func() {
+		ticker := time.NewTicker(cacheCleanupPeriod)
+		defer ticker.Stop()
+
+		// clear old cached repos every time the ticker ticks
+		for range ticker.C {
+			if err := utils.CleanupExpiredRepoCache(db.CacheDb, viper.GetString("GIT_DIR")); err != nil {
+				log.Printf("Error cleaning up cache entry: %s", err)
+			} else {
+				log.Printf("Cleaned up older cached repos")
+			}
+		}
+	}()
 
 	// Start HTTP server
 	if err := http.ListenAndServe(fmt.Sprintf(":%v", viper.GetString("WEB_SERVER_PORT")), handler); err != nil {

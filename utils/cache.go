@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"path"
 	"time"
 
 	"github.com/cosmos/cosmos-sdk/types/query"
@@ -17,6 +18,10 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
+)
+
+const (
+	cacheExpiryTime = 24 * time.Hour
 )
 
 func InitializeDB(dbPath string) *sql.DB {
@@ -129,7 +134,7 @@ func DownloadRepo(db *sql.DB, id uint64, cacheDir string, config *Config) error 
 	// create refs on the server
 	createBranchesAndTags(queryClient, res.Repository.Owner.Id, res.Repository.Name, cacheDir, config)
 
-	InsertCacheData(db, id, res.Repository.Parent, storageResp.Storage.Latest.Id, storageResp.Storage.Latest.Name, time.Now(), time.Now(), time.Now().Add(time.Hour*24))
+	InsertCacheData(db, id, res.Repository.Parent, storageResp.Storage.Latest.Id, storageResp.Storage.Latest.Name, time.Now(), time.Now(), time.Now().Add(cacheExpiryTime))
 
 	return nil
 }
@@ -235,47 +240,70 @@ func createBranchesAndTags(queryClient gitopia.Query, repoOwner string, repoName
 	return nil
 }
 
-// UpdateCache updates the cache duration based on file access
-func UpdateCache(db *sql.DB, cid string, packfileName string, additionalDuration time.Duration) {
-	// if item, exists := CacheMap[fileName]; exists {
-	// 	item.LastAccessed = time.Now()
-	// 	item.Duration += additionalDuration
-	// 	CacheMap[fileName] = item
-	// }
+// UpdateCacheEntry updates the last_accessed_time and expiry_time for a cache entry.
+func UpdateCacheEntry(db *sql.DB, repoID uint64, cid, packfileName string) error {
+	newExpiryTime := time.Now().Add(cacheExpiryTime)
+
+	updateSQL := `UPDATE cache
+                  SET last_accessed_time = CURRENT_TIMESTAMP,
+                      expiry_time = ?
+                  WHERE repo_id = ? AND cid = ? AND packfile_name = ?;`
+
+	_, err := db.Exec(updateSQL, newExpiryTime, repoID, cid, packfileName)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
-// CleanUpCache removes expired files from the cache
-func CleanUpCache(cacheDir string) {
-	// for fileName, item := range CacheMap {
-	// 	if time.Since(item.LastAccessed) > item.Duration {
-	// 		os.Remove(fileName)
-	// 		delete(CacheMap, fileName)
-	// 	}
-	// }
+// CleanupCacheEntry deletes a cache entry matching the repo_id, cid, and packfile_name.
+func CleanupCacheEntry(db *sql.DB, repoID uint64, cid, packfileName string) error {
+	deleteSQL := `DELETE FROM cache WHERE repo_id = ? AND cid = ? AND packfile_name = ?;`
+
+	_, err := db.Exec(deleteSQL, repoID, cid, packfileName)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
-// // main function to test the cache system
-// func main() {
-// 	cacheDir := "./cache"                // Define your cache directory here
-// 	url := "http://example.com/file.txt" // URL of the file to download
+// CleanupExpiredRepoCache cleans up expired cache entries for a specific repo_id and deletes.
+func CleanupExpiredRepoCache(db *sql.DB, cacheDir string) error {
+	selectSQL := `SELECT repo_id, cid, packfile_name FROM cache WHERE expiry_time < CURRENT_TIMESTAMP;`
 
-// 	// Ensure cache directory exists
-// 	os.MkdirAll(cacheDir, os.ModePerm)
+	rows, err := db.Query(selectSQL)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
 
-// 	// Download and cache the file
-// 	fileName, err := DownloadFile(url, cacheDir)
-// 	if err != nil {
-// 		panic(err)
-// 	}
+	for rows.Next() {
+		var repoID uint64
+		var cid, packfileName string
+		err = rows.Scan(&repoID, &cid, &packfileName)
+		if err != nil {
+			continue
+		}
 
-// 	// Update cache on file access
-// 	UpdateCache(fileName, 30*time.Minute) // Increase cache duration by 30 minutes
+		// Delete repository from the file system
+		err := os.RemoveAll(path.Join(cacheDir, fmt.Sprintf("%v.git", repoID)))
+		if err != nil {
+			return err
+		}
 
-// 	// Periodically clean up the cache
-// 	ticker := time.NewTicker(1 * time.Hour)
-// 	go func() {
-// 		for range ticker.C {
-// 			CleanUpCache(cacheDir)
-// 		}
-// 	}()
-// }
+		// Delete the cache entry
+		err = CleanupCacheEntry(db, repoID, cid, packfileName)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Check for errors from iterating over rows
+	if err = rows.Err(); err != nil {
+		return err
+	}
+
+	return nil
+}

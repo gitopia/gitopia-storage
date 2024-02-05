@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/gitopia/git-server/internal/db"
 	"github.com/gitopia/git-server/utils"
@@ -30,11 +31,14 @@ import (
 )
 
 const (
-	branchPrefix = "refs/heads/"
-	tagPrefix    = "refs/tags/"
+	branchPrefix                 = "refs/heads/"
+	tagPrefix                    = "refs/tags/"
+	LARGE_OBJECT_THRESHOLD int64 = 1024 * 1024
 )
 
-const LARGE_OBJECT_THRESHOLD int64 = 1024 * 1024
+var (
+	cacheMutex sync.RWMutex // Mutex to synchronize cache access
+)
 
 type SaveToArweavePostBody struct {
 	RepositoryID     uint64 `json:"repository_id"`
@@ -266,13 +270,13 @@ func (s *Server) GetInfoRefs(_ string, w http.ResponseWriter, r *Request) {
 	// check cache
 	repoId, err := utils.ParseRepositoryIdfromURI(r.URL.Path)
 	if err != nil {
-		fail500(w, context, err)
+		utils.LogError(context, err)
 		return
 	}
 
 	queryClient, err := gc.GetQueryClient(viper.GetString("GITOPIA_ADDR"))
 	if err != nil {
-		fail500(w, context, err)
+		utils.LogError(context, err)
 		return
 	}
 
@@ -280,23 +284,35 @@ func (s *Server) GetInfoRefs(_ string, w http.ResponseWriter, r *Request) {
 		RepositoryId: repoId,
 	})
 	if err != nil {
-		fail500(w, context, err)
+		utils.LogError(context, err)
 		return
 	}
 
-	// check mutex before accessing cache
-	// cacheMutex.Lock()
-
 	if !utils.IsCached(db.CacheDb, repoId, res.Storage.Latest.Id, res.Storage.Latest.Name) {
+		cacheMutex.Lock()
+		defer cacheMutex.Unlock()
 		if err := utils.DownloadRepo(db.CacheDb, repoId, r.RepoPath, &s.Config); err != nil {
-			fail500(w, context, err)
+			utils.LogError(context, err)
 			return
 		}
+	} else { // Repository is already available in file system cache
+		cacheMutex.Lock()
+		// Increase cache expiry time for this repository
+		if err := utils.UpdateCacheEntry(db.CacheDb, repoId, res.Storage.Latest.Id, res.Storage.Latest.Name); err != nil {
+			utils.LogError(context, err)
+			return
+		}
+		cacheMutex.Unlock()
+
+		// Acquire mutex for reading
+		// This is to make sure that no cache updates happen
+		cacheMutex.RLock()
+		defer cacheMutex.RUnlock()
 	}
 
 	cmd, pipe := utils.GitCommand(s.Config.GitPath, subCommand(rpc), "--stateless-rpc", "--advertise-refs", r.RepoPath)
 	if err := cmd.Start(); err != nil {
-		fail500(w, context, err)
+		utils.LogError(context, err)
 		return
 	}
 	defer utils.CleanUpProcessGroup(cmd)
