@@ -1,17 +1,13 @@
 package app
 
 import (
-	"bytes"
 	"compress/gzip"
+	"context"
 	c "context"
-	"encoding/json"
-	"errors"
 	"fmt"
+	"github.com/pkg/errors"
 	"io"
-	"log"
-	"mime/multipart"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path"
@@ -21,6 +17,9 @@ import (
 	"sync"
 
 	"github.com/gitopia/git-server/internal/db"
+	lfsutil "github.com/gitopia/git-server/lfs"
+	"github.com/gitopia/git-server/pkg/spheron"
+	"github.com/gitopia/git-server/route/lfs"
 	"github.com/gitopia/git-server/utils"
 	gc "github.com/gitopia/gitopia-go"
 	gitopia "github.com/gitopia/gitopia/v4/app"
@@ -40,12 +39,26 @@ var (
 	CacheMutex sync.RWMutex // Mutex to synchronize cache access
 )
 
+type QueryService interface {
+	GitopiaRepositoryStorage(ctx context.Context, req *gitopiatypes.QueryGetRepositoryStorageRequest) (*gitopiatypes.QueryGetRepositoryStorageResponse, error)
+}
+
+type QueryServiceImpl struct {
+	Query *gc.Query
+}
+
+func (qs *QueryServiceImpl) GitopiaRepositoryStorage(ctx context.Context, req *gitopiatypes.QueryGetRepositoryStorageRequest) (*gitopiatypes.QueryGetRepositoryStorageResponse, error) {
+	return qs.Query.Gitopia.RepositoryStorage(ctx, req)
+}
+
 type SaveToArweavePostBody struct {
 	RepositoryID     uint64 `json:"repository_id"`
 	RemoteRefName    string `json:"remote_ref_name"`
 	NewRemoteRefSha  string `json:"new_remote_ref_sha"`
 	PrevRemoteRefSha string `json:"prev_remote_ref_sha"`
 }
+
+type QueryClient interface{}
 
 func newWriteFlusher(w http.ResponseWriter) io.Writer {
 	return writeFlusher{w.(interface {
@@ -156,6 +169,54 @@ func getNamespaceAndRepo(input string) (string, string) {
 	}
 
 	return strings.Join(blocks[0:num-1], "/"), blocks[num-1]
+}
+
+func New(cfg utils.Config) (*Server, error) {
+	s := Server{Config: cfg}
+	basic := &lfs.BasicHandler{
+		DefaultStorage: lfsutil.Storage(lfsutil.StorageLocal),
+		Storagers: map[lfsutil.Storage]lfsutil.Storager{
+			lfsutil.StorageLocal: &lfsutil.LocalStorage{Root: viper.GetString("LFS_OBJECTS_DIR")},
+		},
+	}
+	s.Services = []Service{
+		{"GET", "/info/refs", s.GetInfoRefs, ""},
+		{"POST", "/git-upload-pack", s.PostRPC, "git-upload-pack"},
+		{"POST", "/git-receive-pack", s.PostRPC, "git-receive-pack"},
+	}
+
+	s.LfsServices = []LfsService{
+		{"POST", "/objects/batch", lfs.Authenticate(basic.ServeBatchHandler)},
+		{"GET", "/objects/basic", basic.ServeDownloadHandler},
+		{"PUT", "/objects/basic", lfs.Authenticate(basic.ServeUploadHandler)},
+		{"POST", "/objects/basic/verify", basic.ServeVerifyHandler},
+	}
+
+	// Use PATH if full path is not specified
+	if s.Config.GitPath == "" {
+		s.Config.GitPath = "git"
+	}
+
+	s.AuthFunc = AuthFunc
+
+	queryClient, err := gc.GetQueryClient(viper.GetString("GITOPIA_ADDR"))
+	if err != nil {
+		return nil, err
+	}
+
+	s.QueryService = &QueryServiceImpl{&queryClient}
+
+	client := spheron.SpheronClient{
+		HttpClient:   &http.Client{},
+		ApiToken:     viper.GetString("SPHERON_API_TOKEN"),
+		BaseURL:      "https://api-v2.spheron.network",
+		Organization: viper.GetString("SPHERON_ORG_ID"),
+		Bucket:       viper.GetString("SPHERON_BUCKET_NAME"),
+		Protocol:     viper.GetString("SPHERON_PROTOCOL"),
+	}
+	s.SpheronClient = &client
+
+	return &s, nil
 }
 
 // findService returns a matching git subservice and parsed repository name
@@ -274,13 +335,7 @@ func (s *Server) GetInfoRefs(_ string, w http.ResponseWriter, r *Request) {
 		return
 	}
 
-	queryClient, err := gc.GetQueryClient(viper.GetString("GITOPIA_ADDR"))
-	if err != nil {
-		utils.LogError(context, err)
-		return
-	}
-
-	res, err := queryClient.Gitopia.RepositoryStorage(c.Background(), &gitopiatypes.QueryGetRepositoryStorageRequest{
+	res, err := s.QueryService.GitopiaRepositoryStorage(c.Background(), &gitopiatypes.QueryGetRepositoryStorageRequest{
 		RepositoryId: repoId,
 	})
 	if err != nil {
@@ -375,10 +430,12 @@ type LfsService struct {
 }
 
 type Server struct {
-	Config      utils.Config
-	Services    []Service
-	LfsServices []LfsService
-	AuthFunc    func(string, *Request) (bool, error)
+	Config        utils.Config
+	Services      []Service
+	LfsServices   []LfsService
+	AuthFunc      func(string, *Request) (bool, error)
+	QueryService  QueryService
+	SpheronClient spheron.SpheronClientInterface
 }
 
 type Request struct {
@@ -490,83 +547,11 @@ func (s *Server) PostRPC(rpc string, w http.ResponseWriter, r *Request) {
 			return
 		}
 
-		file, err := os.Open(packfileName)
+		_, err = s.SpheronClient.UploadFileInChunks(packfileName)
 		if err != nil {
-			log.Fatal(err)
-		}
-		defer file.Close()
-
-		// Create a buffer to store the multipart form data
-		var requestBody bytes.Buffer
-
-		// Create a multipart writer for the buffer
-		writer := multipart.NewWriter(&requestBody)
-
-		// Create a form field writer for the file
-		basePackFileName := filepath.Base(packfileName)
-		part, err := writer.CreateFormFile("filekey", basePackFileName)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		// Copy the file into the form field writer
-		_, err = io.Copy(part, file)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		// Close the writer to finalize the multipart form data
-		err = writer.Close()
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		// Prepare the base URL
-		baseURL := "https://api-v2.spheron.network/v1/upload"
-
-		// Parse the base URL
-		parsedURL, err := url.Parse(baseURL)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		// Add query parameters
-		params := url.Values{}
-		params.Add("organization", "6527ac3e2a996c00124fc2f4")
-		params.Add("bucket", "git-server-test")
-		params.Add("protocol", "ipfs")
-		parsedURL.RawQuery = params.Encode()
-
-		// Create a POST request with the multipart form data
-		request, err := http.NewRequest("POST", parsedURL.String(), &requestBody)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		// Set the content type, this must be done after writer.Close()
-		request.Header.Set("Content-Type", writer.FormDataContentType())
-
-		// Set the Authorization header for Bearer token
-		request.Header.Set("Authorization", "Bearer "+viper.GetString("SPHERON_API_TOKEN"))
-
-		// Send the request
-		client := &http.Client{}
-		resp, err := client.Do(request)
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer resp.Body.Close()
-
-		// Read the response body
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			panic(err)
-		}
-
-		// Unmarshal the JSON data into the struct
-		var apiResponse utils.ApiResponse
-		if err := json.Unmarshal(body, &apiResponse); err != nil {
-			panic(err)
+			err := errors.Wrap(err, "spheron upload failed")
+			fail500(w, context, err)
+			return
 		}
 
 		// update cid and packname on gitopia

@@ -11,9 +11,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/gitopia/git-server/internal/app"
 	"github.com/gitopia/git-server/internal/db"
-	lfsutil "github.com/gitopia/git-server/lfs"
 	"github.com/gitopia/git-server/route"
-	"github.com/gitopia/git-server/route/lfs"
 	"github.com/gitopia/git-server/route/pr"
 	"github.com/gitopia/git-server/utils"
 	_ "github.com/mattn/go-sqlite3"
@@ -30,37 +28,6 @@ const (
 var (
 	env []string
 )
-
-func New(cfg utils.Config) *app.Server {
-	s := app.Server{Config: cfg}
-	basic := &lfs.BasicHandler{
-		DefaultStorage: lfsutil.Storage(lfsutil.StorageLocal),
-		Storagers: map[lfsutil.Storage]lfsutil.Storager{
-			lfsutil.StorageLocal: &lfsutil.LocalStorage{Root: viper.GetString("LFS_OBJECTS_DIR")},
-		},
-	}
-	s.Services = []app.Service{
-		{"GET", "/info/refs", s.GetInfoRefs, ""},
-		{"POST", "/git-upload-pack", s.PostRPC, "git-upload-pack"},
-		{"POST", "/git-receive-pack", s.PostRPC, "git-receive-pack"},
-	}
-
-	s.LfsServices = []app.LfsService{
-		{"POST", "/objects/batch", lfs.Authenticate(basic.ServeBatchHandler)},
-		{"GET", "/objects/basic", basic.ServeDownloadHandler},
-		{"PUT", "/objects/basic", lfs.Authenticate(basic.ServeUploadHandler)},
-		{"POST", "/objects/basic/verify", basic.ServeVerifyHandler},
-	}
-
-	// Use PATH if full path is not specified
-	if s.Config.GitPath == "" {
-		s.Config.GitPath = "git"
-	}
-
-	s.AuthFunc = app.AuthFunc
-
-	return &s
-}
 
 func main() {
 	viper.AddConfigPath(".")
@@ -94,7 +61,7 @@ func main() {
 	// conf.Seal()
 
 	// Configure git service
-	service := New(utils.Config{
+	service, err := app.New(utils.Config{
 		Dir:        viper.GetString("GIT_DIR"),
 		AutoCreate: true,
 		Auth:       true,
@@ -104,6 +71,9 @@ func main() {
 			PostReceive: "gitopia-post-receive",
 		},
 	})
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// Ensure cache directory exists
 	os.MkdirAll(viper.GetString("GIT_DIR"), os.ModePerm)
