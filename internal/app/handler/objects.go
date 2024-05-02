@@ -1,4 +1,4 @@
-package route
+package app
 
 import (
 	"fmt"
@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 
 	git "github.com/gitopia/go-git/v5"
@@ -15,7 +16,7 @@ import (
 )
 
 // Serve loose git objects
-func ObjectsHandler(w http.ResponseWriter, r *http.Request) {
+func (s *Server) ObjectsHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("request: %s\n", r.Method+" "+r.Host+r.URL.String())
 
 	if r.Method == "GET" {
@@ -30,6 +31,17 @@ func ObjectsHandler(w http.ResponseWriter, r *http.Request) {
 
 		repositoryId := blocks[2]
 		objectHash := blocks[3]
+
+		repoId, err := strconv.ParseUint(repositoryId, 10, 64)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+			return
+		}
+
+		if err := s.CacheRepository(repoId); err != nil {
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
 
 		RepoPath := path.Join(viper.GetString("GIT_DIR"), fmt.Sprintf("%s.git", repositoryId))
 		repo, err := git.PlainOpen(RepoPath)

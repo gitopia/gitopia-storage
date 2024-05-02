@@ -87,7 +87,7 @@ func main() {
 	mux := http.NewServeMux()
 
 	mux.Handle("/", service)
-	mux.Handle("/objects/", http.HandlerFunc(route.ObjectsHandler))
+	mux.Handle("/objects/", http.HandlerFunc(service.ObjectsHandler))
 	mux.Handle("/commits", http.HandlerFunc(route.CommitsHandler))
 	mux.Handle("/commits/", http.HandlerFunc(route.CommitsHandler))
 	mux.Handle("/content", http.HandlerFunc(route.ContentHandler))

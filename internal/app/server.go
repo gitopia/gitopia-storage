@@ -219,6 +219,12 @@ func New(cfg utils.Config) (*Server, error) {
 	return &s, nil
 }
 
+func NewServerWrapper(server *Server) *ServerWrapper {
+	return &ServerWrapper{
+		Server: server,
+	}
+}
+
 // findService returns a matching git subservice and parsed repository name
 func (s *Server) findService(req *http.Request) (*Service, string) {
 	for _, svc := range s.Services {
@@ -230,7 +236,7 @@ func (s *Server) findService(req *http.Request) (*Service, string) {
 	return nil, ""
 }
 
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (s *ServerWrapper) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	utils.LogInfo("request", r.Method+" "+r.Host+r.URL.String())
 
 	// Find the git subservice to handle the request
@@ -328,41 +334,15 @@ func (s *Server) GetInfoRefs(_ string, w http.ResponseWriter, r *Request) {
 		return
 	}
 
-	// check cache
 	repoId, err := utils.ParseRepositoryIdfromURI(r.URL.Path)
 	if err != nil {
 		utils.LogError(context, err)
 		return
 	}
 
-	res, err := s.QueryService.GitopiaRepositoryStorage(c.Background(), &gitopiatypes.QueryGetRepositoryStorageRequest{
-		RepositoryId: repoId,
-	})
-	if err != nil {
+	if err := s.CacheRepository(repoId); err != nil {
 		utils.LogError(context, err)
 		return
-	}
-
-	if !utils.IsCached(db.CacheDb, repoId, res.Storage.Latest.Id, res.Storage.Latest.Name) {
-		CacheMutex.Lock()
-		defer CacheMutex.Unlock()
-		if err := utils.DownloadRepo(db.CacheDb, repoId, r.RepoPath, &s.Config); err != nil {
-			utils.LogError(context, err)
-			return
-		}
-	} else { // Repository is already available in file system cache
-		CacheMutex.Lock()
-		// Increase cache expiry time for this repository
-		if err := utils.UpdateCacheEntry(db.CacheDb, repoId, res.Storage.Latest.Id, res.Storage.Latest.Name); err != nil {
-			utils.LogError(context, err)
-			return
-		}
-		CacheMutex.Unlock()
-
-		// Acquire mutex for reading
-		// This is to make sure that no cache updates happen
-		CacheMutex.RLock()
-		defer CacheMutex.RUnlock()
 	}
 
 	cmd, pipe := utils.GitCommand(s.Config.GitPath, subCommand(rpc), "--stateless-rpc", "--advertise-refs", r.RepoPath)
@@ -436,6 +416,10 @@ type Server struct {
 	AuthFunc      func(string, *Request) (bool, error)
 	QueryService  QueryService
 	SpheronClient spheron.SpheronClientInterface
+}
+
+type ServerWrapper struct {
+	Server *Server
 }
 
 type Request struct {
