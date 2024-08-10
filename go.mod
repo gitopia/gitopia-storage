@@ -9,7 +9,6 @@ require (
 	github.com/gitopia/gitopia-go v0.3.2
 	github.com/gitopia/gitopia/v2 v2.0.1
 	github.com/gitopia/go-git/v5 v5.4.3-0.20221011074003-f70479dc646c
-	github.com/libgit2/git2go/v33 v33.0.4
 	github.com/pkg/errors v0.9.1
 	github.com/rs/cors v1.8.2
 	github.com/sirupsen/logrus v1.9.0
