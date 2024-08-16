@@ -4,13 +4,13 @@ import (
 	"context"
 
 	"github.com/gitopia/gitopia-go"
-	"github.com/gitopia/gitopia/v2/x/gitopia/types"
+	"github.com/gitopia/gitopia/v4/x/gitopia/types"
 	"github.com/pkg/errors"
 )
 
 const (
 	GITOPIA_ACC_ADDRESS_PREFIX = "gitopia"
-	GAS_ADJUSTMENT             = 1.5
+	GAS_ADJUSTMENT             = 1.7
 	MAX_TRIES                  = 5
 	MAX_WAIT_BLOCKS            = 10
 )

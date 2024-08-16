@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/cosmos/cosmos-sdk/client"
+	"github.com/gitopia/gitopia-go"
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/spf13/viper"
 )
@@ -31,9 +32,17 @@ func main() {
 	ctx := logger.InitLogger(context.Background(), AppName)
 	ctx = context.WithValue(ctx, client.ClientContextKey, &client.Context{})
 
+	gitopia.WithAppName(viper.GetString("APP_NAME"))
+	gitopia.WithChainId(viper.GetString("CHAIN_ID"))
+	gitopia.WithFeeGranter(viper.GetString("FEE_GRANTER"))
+	gitopia.WithGasPrices(viper.GetString("GAS_PRICES"))
+	gitopia.WithGitopiaAddr(viper.GetString("GITOPIA_ADDR"))
+	gitopia.WithTmAddr(viper.GetString("TM_ADDR"))
+	gitopia.WithWorkingDir(viper.GetString("WORKING_DIR"))
+
 	rc := NewRootCmd()
 	err = rc.ExecuteContext(ctx)
-		if err != nil {
+	if err != nil {
 		logger.FromContext(ctx).WithError(err).Error("app error")
 	}
 }

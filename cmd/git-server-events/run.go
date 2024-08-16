@@ -4,6 +4,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
+	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/tx"
 	"github.com/gitopia/git-server/app"
 	"github.com/gitopia/git-server/app/consumer"
@@ -34,11 +35,12 @@ func NewRunCmd() *cobra.Command {
 func run(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
-	clientCtx, err := gitopia.GetClientContext(cmd)
+	clientCtx := client.GetClientContextFromCmd(cmd)
+	txf, err := tx.NewFactoryCLI(clientCtx, cmd.Flags())
 	if err != nil {
-		return errors.Wrap(err, "error initializing client context")
+		return errors.Wrap(err, "error initializing tx factory")
 	}
-	txf := tx.NewFactoryCLI(clientCtx, cmd.Flags())
+	txf = txf.WithGasAdjustment(app.GAS_ADJUSTMENT)
 
 	gc, err := gitopia.NewClient(ctx, clientCtx, txf)
 	if err != nil {

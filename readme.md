@@ -4,6 +4,10 @@ gitopia services for [gitopia](https://gitopia.org/)
 
 ## Web server
 
+## Dependencies
+
+- [git](https://git-scm.com/)
+
 ### Build
 
 By default, git-server is built with local configurations. If you want to build with `PRODUCTION` or `DEVELOPMENT` configurations, pass a build arg `ENV` with respective value.

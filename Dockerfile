@@ -10,13 +10,13 @@ COPY go.mod go.sum* ./
 RUN go mod download
 
 COPY . .
-RUN LINK_STATICALLY=true make build
+RUN LINK_STATICALLY=true GITOPIA_ENV=testing make build
 RUN echo "Ensuring binary is statically linked ..."  \
     && file /src/app/build/git-server | grep "statically linked"
 
 FROM alpine:$IMG_TAG
 WORKDIR /src/app/
-RUN apk add --no-cache build-base supervisor
+RUN apk add --no-cache build-base supervisor git
 ARG IMG_TAG
 COPY --from=git-server-builder /src/app/build/git-server /usr/local/bin/
 COPY --from=git-server-builder /src/app/build/git-server-events /usr/local/bin/
