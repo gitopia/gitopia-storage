@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gitopia/gitopia/v2/x/gitopia/types"
-	git "github.com/libgit2/git2go/v33"
+	"github.com/gitopia/gitopia/v4/x/gitopia/types"
+	git "github.com/gitopia/go-git/v5"
 	"github.com/spf13/viper"
 )
 
@@ -93,7 +93,7 @@ func CreateQuarantineRepo(baseRepositoryID uint64, headRepositoryID uint64, base
 	baseRepoPath := path.Join(gitDir, fmt.Sprintf("%v.git", baseRepositoryID))
 	headRepoPath := path.Join(gitDir, fmt.Sprintf("%v.git", headRepositoryID))
 
-	_, err = git.InitRepository(tmpBasePath, false)
+	_, err = git.PlainInit(tmpBasePath, false)
 	if err != nil {
 		log.Printf("git init tmpBasePath: %v\n", err)
 		os.RemoveAll(tmpBasePath)
@@ -178,7 +178,7 @@ func CreateReadOnlyQuarantineRepo(baseRepositoryID uint64, headRepositoryID uint
 	baseRepoPath := path.Join(gitDir, fmt.Sprintf("%v.git", baseRepositoryID))
 	headRepoPath := path.Join(gitDir, fmt.Sprintf("%v.git", headRepositoryID))
 
-	_, err = git.InitRepository(tmpBasePath, false)
+	_, err = git.PlainInit(tmpBasePath, false)
 	if err != nil {
 		log.Printf("git init tmpBasePath: %v\n", err)
 		os.RemoveAll(tmpBasePath)
