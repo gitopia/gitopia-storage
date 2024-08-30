@@ -1,5 +1,9 @@
 # Changelog
 
+## [v3.0.1] - 2024-08-31
+
+- upgrade gitopia to v4.0.1 (fix offchain proto warning)
+
 ## [v3.0.0] - 2024-08-20
 - upgrade gitopia, gitopia-go and cosmos-sdk dependencies
 - improve the dockerfile for localnet testing
