@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/gitopia/gitopia-go"
-	"github.com/gitopia/gitopia/v4/x/gitopia/types"
+	"github.com/gitopia/gitopia/v5/x/gitopia/types"
 	"github.com/pkg/errors"
 )
 
@@ -162,4 +162,15 @@ func (g GitopiaProxy) Task(ctx context.Context, id uint64) (types.Task, error) {
 	}
 
 	return res.Task, nil
+}
+
+func (g GitopiaProxy) Repository(ctx context.Context, repositoryId uint64) (types.Repository, error) {
+	resp, err := g.gc.QueryClient().Gitopia.Repository(ctx, &types.QueryGetRepositoryRequest{
+		Id: repositoryId,
+	})
+	if err != nil {
+		return types.Repository{}, errors.WithMessage(err, "query error")
+	}
+
+	return *resp.Repository, nil
 }
