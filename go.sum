@@ -452,10 +452,10 @@ github.com/gin-contrib/sse v0.1.0/go.mod h1:RHrZQHXnP2xjPF+u1gW/2HnVO7nvIa9PG3Gm
 github.com/gin-gonic/gin v1.6.3/go.mod h1:75u5sXoLsGZoRN5Sgbi1eraJ4GU3++wFwWzhwvtwp4M=
 github.com/gin-gonic/gin v1.8.1 h1:4+fr/el88TOO3ewCmQr8cx/CtZ/umlIRIs5M4NTNjf8=
 github.com/gin-gonic/gin v1.8.1/go.mod h1:ji8BvRH1azfM+SYow9zQ6SZMvR8qOMZHmsCuWR9tTTk=
-github.com/gitopia/gitopia-go v0.6.1 h1:AINALBdUcn1VYzw+so7nrKgIW5+0juhIP2hG5sHfwLY=
-github.com/gitopia/gitopia-go v0.6.1/go.mod h1:1gNKxYitlxt5gVknvgzqHO/3cCkNI0VlCQKfF8vYEUs=
-github.com/gitopia/gitopia/v4 v4.0.1 h1:PPLYC6X9+dMYVaa/hTJaQyv/X0Tz3DqL1/cwTujm5TI=
-github.com/gitopia/gitopia/v4 v4.0.1/go.mod h1:Z0PIKA/0xwsR3VDoLTILrMnhzqsXKaHfMyGT2ajjqPE=
+github.com/gitopia/gitopia-go v0.6.2-rc h1:mZlQORsUUXVp6TwVxuSQ2f1ShcKPSZ8G/IuNeZ+iTpA=
+github.com/gitopia/gitopia-go v0.6.2-rc/go.mod h1:XtxBXW1O0MwzzjFfIXmoL//D+iZZ+geKerfumNfO2Dk=
+github.com/gitopia/gitopia/v5 v5.0.1 h1:a8I8rq2oZ04NkUJH/pF237WhfAImNeOcREkPnOPwOtM=
+github.com/gitopia/gitopia/v5 v5.0.1/go.mod h1:t1FjB6j0LlGB2Ka1+Hu+XiARQ4NHhoVx9uKiR8+yhwc=
 github.com/gitopia/go-diff v0.0.0-20221011073329-132b1aebc86c h1:rALNQejs3vSoEGgtT+jyB5svZ7JOUbaP2HpzHmVWhmU=
 github.com/gitopia/go-diff v0.0.0-20221011073329-132b1aebc86c/go.mod h1:/1GKA+kU8l5Wx8iXv16a7JLB1ddvhuqcxlDodtKCQF8=
 github.com/gitopia/go-git/v5 v5.4.3-0.20221011074003-f70479dc646c h1:CqqdMQIequFDI6w9JKccH7D8RhXuIVesCcqtCIUlzZA=
