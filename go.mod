@@ -8,8 +8,8 @@ require (
 	cosmossdk.io/errors v1.0.1
 	github.com/buger/jsonparser v1.1.1
 	github.com/cosmos/cosmos-sdk v0.47.13
-	github.com/gitopia/gitopia-go v0.6.2-rc
-	github.com/gitopia/gitopia/v5 v5.0.1
+	github.com/gitopia/gitopia-go v0.6.2
+	github.com/gitopia/gitopia/v5 v5.1.0
 	github.com/gitopia/go-git/v5 v5.4.3-0.20221011074003-f70479dc646c
 	github.com/pkg/errors v0.9.1
 	github.com/rs/cors v1.8.3

@@ -1,5 +1,11 @@
 # Changelog
 
+## [v3.1.0] - 2024-12-02
+
+- upgrade gitopia version to v5.1.0
+- upgrade gitopia-go version to v0.6.2
+- implement event handler for InvokeDaoMergePullRequest
+
 ## [v3.0.1] - 2024-08-31
 
 - upgrade gitopia to v4.0.1 (fix offchain proto warning)
