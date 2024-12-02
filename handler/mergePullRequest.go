@@ -20,7 +20,7 @@ import (
 	"github.com/gitopia/git-server/app/consumer"
 	"github.com/gitopia/git-server/utils"
 	"github.com/gitopia/gitopia-go/logger"
-	"github.com/gitopia/gitopia/v4/x/gitopia/types"
+	"github.com/gitopia/gitopia/v5/x/gitopia/types"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
@@ -249,6 +249,10 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 
 		if err := utils.CommitAndSignNoAuthor(resp, message, "", quarantineRepoPath, env); err != nil {
 			err = errors.WithMessage(err, "merge commit error")
+			// truncate error message to less than 255 characters
+			if len(err.Error()) > 255 {
+				err = errors.New(err.Error()[:255])
+			}
 			err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
 			if err2 != nil {
 				return errors.WithMessage(err2, "update task error")
@@ -442,6 +446,10 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 	err = h.gc.SetPullRequestState(ctx, event.Creator, event.RepositoryId, event.PullRequestIid, "MERGED", mergeCommitSha, event.TaskId)
 	if err != nil {
 		err = errors.WithMessage(err, "set pull request state error")
+		// truncate error message to less than 255 characters
+		if len(err.Error()) > 255 {
+			err = errors.New(err.Error()[:255])
+		}
 		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
 		if err2 != nil {
 			return errors.WithMessage(err2, "update task error")

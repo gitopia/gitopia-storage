@@ -14,8 +14,9 @@ import (
 )
 
 const (
-	invokeForkRepositoryQuery   = "tm.event='Tx' AND message.action='InvokeForkRepository'"
-	InvokeMergePullRequestQuery = "tm.event='Tx' AND message.action='InvokeMergePullRequest'"
+	invokeForkRepositoryQuery      = "tm.event='Tx' AND message.action='InvokeForkRepository'"
+	InvokeMergePullRequestQuery    = "tm.event='Tx' AND message.action='InvokeMergePullRequest'"
+	InvokeDaoMergePullRequestQuery = "tm.event='Tx' AND message.action='InvokeDaoMergePullRequest'"
 )
 
 func NewRunCmd() *cobra.Command {
@@ -61,6 +62,11 @@ func run(cmd *cobra.Command, args []string) error {
 		return errors.WithMessage(err, "tm error")
 	}
 
+	dmtmc, err := gitopia.NewWSEvents(ctx, InvokeDaoMergePullRequestQuery)
+	if err != nil {
+		return errors.WithMessage(err, "tm error")
+	}
+
 	fcc, err := consumer.NewClient("invokeForkRepositoryEvent")
 	if err != nil {
 		return errors.WithMessage(err, "error creating consumer client")
@@ -71,14 +77,21 @@ func run(cmd *cobra.Command, args []string) error {
 		return errors.WithMessage(err, "error creating consumer client")
 	}
 
+	dmcc, err := consumer.NewClient("invokeDaoMergePullRequestEvent")
+	if err != nil {
+		return errors.WithMessage(err, "error creating consumer client")
+	}
+
 	forkHandler := handler.NewInvokeForkRepositoryEventHandler(gp, fcc)
 	mergeHandler := handler.NewInvokeMergePullRequestEventHandler(gp, mcc)
+	daoMergeHandler := handler.NewInvokeDaoMergePullRequestEventHandler(gp, dmcc)
 
 	// _, forkBackfillErr := forkHandler.BackfillMissedEvents(ctx)
 	// _, mergeBackfillErr := mergeHandler.BackfillMissedEvents(ctx)
 
 	forkDone, forkSubscribeErr := ftmc.Subscribe(ctx, forkHandler.Handle)
 	mergeDone, mergeSubscribeErr := mtmc.Subscribe(ctx, mergeHandler.Handle)
+	daoMergeDone, daoMergeSubscribeErr := dmtmc.Subscribe(ctx, daoMergeHandler.Handle)
 
 	// wait for error from all the concurrent event processors
 	select {
@@ -94,6 +107,10 @@ func run(cmd *cobra.Command, args []string) error {
 		return errors.WithMessage(err, "merge tm subscribe error")
 	case <-mergeDone:
 		logger.FromContext(ctx).Info("merge done")
+	case err = <-daoMergeSubscribeErr:
+		return errors.WithMessage(err, "dao merge tm subscribe error")
+	case <-daoMergeDone:
+		logger.FromContext(ctx).Info("dao merge done")
 	}
 
 	return nil

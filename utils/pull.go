@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gitopia/gitopia/v4/x/gitopia/types"
+	"github.com/gitopia/gitopia/v5/x/gitopia/types"
 	git "github.com/gitopia/go-git/v5"
 	"github.com/spf13/viper"
 )
