@@ -609,7 +609,6 @@ func main() {
 	mux.Handle("/pull/commits", http.HandlerFunc(pr.PullRequestCommitsHandler))
 	mux.Handle("/pull/check", http.HandlerFunc(pr.PullRequestCheckHandler))
 	mux.Handle("/raw/", http.HandlerFunc(route.GetRawFileHandler))
-	mux.Handle("/avatar/", http.HandlerFunc(route.GetUserAvatarHandler))
 
 	handler := cors.Default().Handler(mux)
 
