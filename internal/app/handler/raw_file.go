@@ -1,4 +1,4 @@
-package route
+package handler
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/cosmos/cosmos-sdk/codec"
-	"github.com/gitopia/gitopia/v4/x/gitopia/types"
+	"github.com/gitopia/gitopia/v5/x/gitopia/types"
 	git "github.com/gitopia/go-git/v5"
 	"github.com/gitopia/go-git/v5/plumbing"
 	"github.com/gitopia/go-git/v5/plumbing/object"

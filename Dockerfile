@@ -1,23 +1,31 @@
-FROM golang:1.16-buster
+ARG IMG_TAG=latest
 
-ARG USER
-ARG PERSONAL_ACCESS_TOKEN
-ARG ENV
+# Compile the git-server binary
+FROM golang:1.22-alpine AS git-server-builder
+WORKDIR /src/app/
+ENV PACKAGES="curl make git libc-dev bash file gcc linux-headers eudev-dev"
+RUN apk add --no-cache $PACKAGES
 
-WORKDIR /app
+COPY go.mod go.sum* ./
+RUN go mod download
 
-ADD scripts/install_libgit2.sh /app
+COPY . .
+RUN LINK_STATICALLY=true GITOPIA_ENV=testing make build
+RUN echo "Ensuring binary is statically linked ..."  \
+    && file /src/app/build/git-server | grep "statically linked"
 
-RUN apt-get update && apt-get -y install cmake libssl-dev
-RUN ./install_libgit2.sh
-RUN git config --global url."https://${USER}:${PERSONAL_ACCESS_TOKEN}@github.com".insteadOf "https://github.com"
-RUN git config --global gc.auto 0
-
-ADD . /app
-
-RUN make build
-
+FROM alpine:$IMG_TAG
+WORKDIR /src/app/
+RUN apk add --no-cache build-base supervisor git
+ARG IMG_TAG
+COPY --from=git-server-builder /src/app/build/git-server /usr/local/bin/
+COPY --from=git-server-builder /src/app/build/git-server-events /usr/local/bin/
+COPY --from=git-server-builder /src/app/build/gitopia-pre-receive /usr/local/bin/
+COPY --from=git-server-builder /src/app/build/gitopia-post-receive /usr/local/bin/
 EXPOSE 5000
 
-ENTRYPOINT ["./scripts/startup.sh"]
-CMD ["${ENV}"]
+COPY config_local.toml /src/app/config_local.toml
+COPY scripts/startup.sh /usr/local/bin/startup.sh
+COPY scripts/supervisord.conf /etc/supervisord.conf
+
+ENTRYPOINT ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]

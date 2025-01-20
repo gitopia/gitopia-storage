@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/gitopia/git-server/internal/app"
-	"github.com/gitopia/git-server/mocks/gi"
+	mocks "github.com/gitopia/git-server/mocks/github.com/gitopia/git-server/internal_/app"
 	"github.com/gitopia/git-server/utils"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"

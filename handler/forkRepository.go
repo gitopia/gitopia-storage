@@ -17,8 +17,9 @@ import (
 	"github.com/gitopia/git-server/app"
 	"github.com/gitopia/git-server/app/consumer"
 	"github.com/gitopia/gitopia-go/logger"
-	"github.com/gitopia/gitopia/v4/x/gitopia/types"
+	"github.com/gitopia/gitopia/v5/x/gitopia/types"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -171,7 +172,14 @@ func (h *InvokeForkRepositoryEventHandler) Handle(ctx context.Context, eventBuf 
 }
 
 func (h *InvokeForkRepositoryEventHandler) Process(ctx context.Context, event InvokeForkRepositoryEvent) error {
-	logger.FromContext(ctx).Info("process fork repository event")
+	logger.FromContext(ctx).WithFields(logrus.Fields{
+		"creator":         event.Creator,
+		"taskId":          event.TaskId,
+		"forkRepoOwner":   event.ForkRepoOwnerId,
+		"forkRepoName":    event.ForkRepoName,
+		"parentRepoOwner": event.RepoOwnerId,
+		"parentRepoName":  event.RepoName,
+	}).Info("Processing fork repository event")
 
 	res, err := h.gc.Task(ctx, event.TaskId)
 	if err != nil {
@@ -187,9 +195,16 @@ func (h *InvokeForkRepositoryEventHandler) Process(ctx context.Context, event In
 	}
 	if !haveAuthorization {
 		logger.FromContext(ctx).
-			WithField("creator", event.Creator).
-			WithField("parent-repo-id", event.RepoId).
-			Info("skipping fork repository, not authorized")
+			WithFields(logrus.Fields{
+				"creator":         event.Creator,
+				"taskId":          event.TaskId,
+				"forkRepoOwner":   event.ForkRepoOwnerId,
+				"forkRepoName":    event.ForkRepoName,
+				"parentRepoOwner": event.RepoOwnerId,
+				"parentRepoName":  event.RepoName,
+			}).
+			Warn("Skipping fork repository due to lack of authorization")
+
 		return nil
 	}
 
@@ -206,35 +221,66 @@ func (h *InvokeForkRepositoryEventHandler) Process(ctx context.Context, event In
 		event.ForkRepoOwnerId,
 		event.TaskId)
 	if err != nil {
-		err = errors.WithMessage(err, "gitopia fork repository error")
-		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
-		if err2 != nil {
-			return errors.WithMessage(err2, "update task error")
+		logger := logger.FromContext(ctx).WithFields(logrus.Fields{
+			"creator":         event.Creator,
+			"taskId":          event.TaskId,
+			"forkRepoOwner":   event.ForkRepoOwnerId,
+			"forkRepoName":    event.ForkRepoName,
+			"parentRepoOwner": event.RepoOwnerId,
+			"parentRepoName":  event.RepoName,
+		})
+		logger.WithError(err).Error("Failed to fork repository")
+
+		err = errors.Wrap(err, "gitopia fork repository error")
+		updateErr := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
+		if updateErr != nil {
+			logger.WithError(updateErr).Error("Failed to update task status")
+			return nil
 		}
-		return err
+		return nil
 	}
 
 	forkedRepoId, err := h.gc.RepositoryId(ctx, event.ForkRepoOwnerId, event.ForkRepoName)
 	if err != nil {
-		err = errors.WithMessage(err, "query error")
-		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
-		if err2 != nil {
-			return errors.WithMessage(err2, "update task error")
+		logger := logger.FromContext(ctx).WithFields(logrus.Fields{
+			"creator":       event.Creator,
+			"taskId":        event.TaskId,
+			"forkRepoOwner": event.ForkRepoOwnerId,
+			"forkRepoName":  event.ForkRepoName,
+		})
+		logger.WithError(err).Error("Failed to get repository ID")
+
+		err = errors.Wrap(err, "failed to get repository ID")
+		updateErr := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
+		if updateErr != nil {
+			logger.WithError(updateErr).Error("Failed to update task status")
+			return nil
 		}
-		return err
+		return nil
 	}
 
 	sourceRepoPath := path.Join(viper.GetString("GIT_DIR"), fmt.Sprintf("%v.git", event.RepoId))
 	targetRepoPath := path.Join(viper.GetString("GIT_DIR"), fmt.Sprintf("%v.git", forkedRepoId))
 	cmd := exec.Command("git", "clone", "--shared", "--bare", sourceRepoPath, targetRepoPath)
-	out, err := cmd.Output()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		err = errors.WithMessage(err, "fork error")
-		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, string(out))
-		if err2 != nil {
-			return errors.WithMessage(err2, "update task error")
+		logger := logger.FromContext(ctx).WithFields(logrus.Fields{
+			"creator":        event.Creator,
+			"taskId":         event.TaskId,
+			"forkRepoOwner":  event.ForkRepoOwnerId,
+			"forkRepoName":   event.ForkRepoName,
+			"sourceRepoPath": sourceRepoPath,
+			"targetRepoPath": targetRepoPath,
+		})
+		logger.WithError(err).WithField("output", string(out)).Error("Failed to clone repository")
+
+		wrappedErr := errors.Wrap(err, "fork error")
+		updateErr := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, fmt.Sprintf("Error: %v\nOutput: %s", wrappedErr, out))
+		if updateErr != nil {
+			logger.WithError(updateErr).Error("Failed to update task status")
+			return nil
 		}
-		return err
+		return nil
 	}
 
 	err = h.gc.ForkRepositorySuccess(
@@ -246,19 +292,34 @@ func (h *InvokeForkRepositoryEventHandler) Process(ctx context.Context, event In
 		},
 		event.TaskId)
 	if err != nil {
-		err = errors.WithMessage(err, "fork repository success error")
-		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
-		if err2 != nil {
-			return errors.WithMessage(err2, "update task error")
+		logger := logger.FromContext(ctx).WithFields(logrus.Fields{
+			"creator":         event.Creator,
+			"taskId":          event.TaskId,
+			"forkRepoOwner":   event.ForkRepoOwnerId,
+			"forkRepoName":    event.ForkRepoName,
+			"parentRepoOwner": event.RepoOwnerId,
+			"parentRepoName":  event.RepoName,
+		})
+		logger.WithError(err).Error("Failed to fork repository successfully")
+
+		wrappedErr := errors.WithMessage(err, "fork repository success error")
+		updateErr := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, wrappedErr.Error())
+		if updateErr != nil {
+			logger.WithError(updateErr).Error("Failed to update task status")
+			return nil
 		}
-		return err
+		return nil
 	}
 
-	logger.FromContext(ctx).
-		WithField("creator", event.Creator).
-		WithField("parent-repo-id", event.RepoId).
-		WithField("forked-repo-id", forkedRepoId).
-		Info("forked repository")
+	logger.FromContext(ctx).WithFields(logrus.Fields{
+		"creator":         event.Creator,
+		"taskId":          event.TaskId,
+		"forkRepoOwner":   event.ForkRepoOwnerId,
+		"forkRepoName":    event.ForkRepoName,
+		"parentRepoOwner": event.RepoOwnerId,
+		"parentRepoName":  event.RepoName,
+	}).Info("Repository forked successfully")
+
 	return nil
 }
 

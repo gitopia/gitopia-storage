@@ -10,9 +10,9 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/gitopia/git-server/internal/app"
+	"github.com/gitopia/git-server/internal/app/handler"
+	"github.com/gitopia/git-server/internal/app/handler/pr"
 	"github.com/gitopia/git-server/internal/db"
-	"github.com/gitopia/git-server/route"
-	"github.com/gitopia/git-server/route/pr"
 	"github.com/gitopia/git-server/utils"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/rs/cors"
@@ -61,7 +61,7 @@ func main() {
 	// conf.Seal()
 
 	// Configure git service
-	service, err := app.New(utils.Config{
+	server, err := app.New(utils.Config{
 		Dir:        viper.GetString("GIT_DIR"),
 		AutoCreate: true,
 		Auth:       true,
@@ -80,24 +80,28 @@ func main() {
 
 	// Configure git server. Will create git repos path if it does not exist.
 	// If hooks are set, it will also update all repos with new version of hook scripts.
-	if err = service.Setup(); err != nil {
+	if err = server.Setup(); err != nil {
 		log.Fatal(err)
 	}
 
 	mux := http.NewServeMux()
 
-	mux.Handle("/", service)
-	mux.Handle("/objects/", http.HandlerFunc(service.ObjectsHandler))
-	mux.Handle("/commits", http.HandlerFunc(route.CommitsHandler))
-	mux.Handle("/commits/", http.HandlerFunc(route.CommitsHandler))
-	mux.Handle("/content", http.HandlerFunc(route.ContentHandler))
-	mux.Handle("/diff", http.HandlerFunc(route.CommitDiffHandler))
+	serverWrapper := app.ServerWrapper{
+		Server: server,
+	}
+
+	mux.Handle("/", &serverWrapper)
+	mux.Handle("/objects/", http.HandlerFunc(serverWrapper.Server.ObjectsHandler))
+	mux.Handle("/commits", http.HandlerFunc(handler.CommitsHandler))
+	mux.Handle("/commits/", http.HandlerFunc(handler.CommitsHandler))
+	mux.Handle("/content", http.HandlerFunc(handler.ContentHandler))
+	mux.Handle("/diff", http.HandlerFunc(handler.CommitDiffHandler))
 	mux.Handle("/pull/diff", http.HandlerFunc(pr.PullDiffHandler))
-	mux.Handle("/upload", http.HandlerFunc(route.UploadAttachmentHandler))
-	mux.Handle("/releases/", http.HandlerFunc(route.GetAttachmentHandler))
+	mux.Handle("/upload", http.HandlerFunc(handler.UploadAttachmentHandler))
+	mux.Handle("/releases/", http.HandlerFunc(handler.GetAttachmentHandler))
 	mux.Handle("/pull/commits", http.HandlerFunc(pr.PullRequestCommitsHandler))
 	mux.Handle("/pull/check", http.HandlerFunc(pr.PullRequestCheckHandler))
-	mux.Handle("/raw/", http.HandlerFunc(route.GetRawFileHandler))
+	mux.Handle("/raw/", http.HandlerFunc(handler.GetRawFileHandler))
 
 	handler := cors.Default().Handler(mux)
 

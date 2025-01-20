@@ -14,7 +14,7 @@ import (
 
 	"github.com/cosmos/cosmos-sdk/types/query"
 	"github.com/gitopia/gitopia-go"
-	gitopiatypes "github.com/gitopia/gitopia/v4/x/gitopia/types"
+	gitopiatypes "github.com/gitopia/gitopia/v5/x/gitopia/types"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
@@ -119,22 +119,24 @@ func DownloadRepo(db *sql.DB, id uint64, cacheDir string, config *Config) error 
 		}
 	}
 
-	storageResp, err := queryClient.Gitopia.RepositoryStorage(context.Background(), &gitopiatypes.QueryGetRepositoryStorageRequest{
-		RepositoryId: id,
+	// TODO: use the new packfile query
+	_, err = queryClient.Gitopia.Repository(context.Background(), &gitopiatypes.QueryGetRepositoryRequest{
+		Id: id,
 	})
 	if err != nil {
 		return errors.Wrap(err, "storage not found")
 	}
 
 	// make sure dependent parent repos are there
-	if err := downloadPackfile(storageResp.Storage.Latest.Id, storageResp.Storage.Latest.Name, cacheDir, config); err != nil {
+	// TODO: use the new packfile query
+	if err := downloadPackfile("cid", "name", cacheDir, config); err != nil {
 		return errors.Wrap(err, "error downloading packfile")
 	}
 
 	// create refs on the server
 	createBranchesAndTags(queryClient, res.Repository.Owner.Id, res.Repository.Name, cacheDir, config)
 
-	InsertCacheData(db, id, res.Repository.Parent, storageResp.Storage.Latest.Id, storageResp.Storage.Latest.Name, time.Now(), time.Now(), time.Now().Add(cacheExpiryTime))
+	InsertCacheData(db, id, res.Repository.Parent, "cid", "name", time.Now(), time.Now(), time.Now().Add(cacheExpiryTime))
 
 	return nil
 }

@@ -1,5 +1,22 @@
 # Changelog
 
+## [v3.1.0] - 2024-12-02
+
+- upgrade gitopia version to v5.1.0
+- upgrade gitopia-go version to v0.6.2
+- implement event handler for InvokeDaoMergePullRequest
+
+## [v3.0.1] - 2024-08-31
+
+- upgrade gitopia to v4.0.1 (fix offchain proto warning)
+
+## [v3.0.0] - 2024-08-20
+- upgrade gitopia, gitopia-go and cosmos-sdk dependencies
+- improve the dockerfile for localnet testing
+- add build flags for reducing binary size
+- increase the gas adjustment to 1.8 to prevent out of gas error after the sdk upgrade
+- remove the bash dependency from the git cli calls
+
 ## [v2.2.0] - 2023-09-22
 - Configure grpc host during build
 

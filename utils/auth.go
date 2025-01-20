@@ -10,10 +10,10 @@ import (
 	"strings"
 
 	"github.com/cosmos/cosmos-sdk/codec"
-	gitopia "github.com/gitopia/gitopia/v4/app"
-	"github.com/gitopia/gitopia/v4/x/gitopia/types"
-	"github.com/gitopia/gitopia/v4/x/gitopia/utils"
-	offchaintypes "github.com/gitopia/gitopia/v4/x/offchain/types"
+	gitopia "github.com/gitopia/gitopia/v5/app"
+	"github.com/gitopia/gitopia/v5/x/gitopia/types"
+	"github.com/gitopia/gitopia/v5/x/gitopia/utils"
+	offchaintypes "github.com/gitopia/gitopia/v5/x/offchain/types"
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -145,15 +145,17 @@ func HavePushPermission(repoId uint64, address string) (havePermission bool, err
 			havePermission = true
 		}
 	} else if repo.Owner.Type == types.OwnerType_DAO {
-		member, err := queryClient.DaoMember(context.Background(), &types.QueryGetDaoMemberRequest{
-			DaoId:  repo.Owner.Id,
-			UserId: address,
+		resp, err := queryClient.DaoMemberAll(context.Background(), &types.QueryAllDaoMemberRequest{
+			DaoId: repo.Owner.Id,
 		})
 		if err != nil {
 			return havePermission, err
 		}
-		if member.Member.Role == types.MemberRole_OWNER {
-			havePermission = true
+		for _, member := range resp.Members {
+			if member.Member.Address == address {
+				havePermission = true
+				break
+			}
 		}
 	}
 

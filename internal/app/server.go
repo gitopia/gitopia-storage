@@ -3,9 +3,7 @@ package app
 import (
 	"compress/gzip"
 	"context"
-	c "context"
 	"fmt"
-	"github.com/pkg/errors"
 	"io"
 	"net/http"
 	"os"
@@ -16,15 +14,16 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/gitopia/git-server/internal/db"
+	"github.com/pkg/errors"
+
 	lfsutil "github.com/gitopia/git-server/lfs"
 	"github.com/gitopia/git-server/pkg/spheron"
 	"github.com/gitopia/git-server/route/lfs"
 	"github.com/gitopia/git-server/utils"
 	gc "github.com/gitopia/gitopia-go"
-	gitopia "github.com/gitopia/gitopia/v4/app"
-	gitopiatypes "github.com/gitopia/gitopia/v4/x/gitopia/types"
-	offchaintypes "github.com/gitopia/gitopia/v4/x/offchain/types"
+	gitopia "github.com/gitopia/gitopia/v5/app"
+	gitopiatypes "github.com/gitopia/gitopia/v5/x/gitopia/types"
+	offchaintypes "github.com/gitopia/gitopia/v5/x/offchain/types"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/spf13/viper"
 )
@@ -39,16 +38,17 @@ var (
 	CacheMutex sync.RWMutex // Mutex to synchronize cache access
 )
 
+// TODO: use the new packfile query
 type QueryService interface {
-	GitopiaRepositoryStorage(ctx context.Context, req *gitopiatypes.QueryGetRepositoryStorageRequest) (*gitopiatypes.QueryGetRepositoryStorageResponse, error)
+	GitopiaRepositoryStorage(ctx context.Context, req *gitopiatypes.QueryGetRepositoryRequest) (*gitopiatypes.QueryGetRepositoryResponse, error)
 }
 
 type QueryServiceImpl struct {
 	Query *gc.Query
 }
 
-func (qs *QueryServiceImpl) GitopiaRepositoryStorage(ctx context.Context, req *gitopiatypes.QueryGetRepositoryStorageRequest) (*gitopiatypes.QueryGetRepositoryStorageResponse, error) {
-	return qs.Query.Gitopia.RepositoryStorage(ctx, req)
+func (qs *QueryServiceImpl) GitopiaRepositoryStorage(ctx context.Context, req *gitopiatypes.QueryGetRepositoryRequest) (*gitopiatypes.QueryGetRepositoryResponse, error) {
+	return qs.Query.Gitopia.Repository(ctx, req)
 }
 
 type SaveToArweavePostBody struct {
@@ -226,8 +226,8 @@ func NewServerWrapper(server *Server) *ServerWrapper {
 }
 
 // findService returns a matching git subservice and parsed repository name
-func (s *Server) findService(req *http.Request) (*Service, string) {
-	for _, svc := range s.Services {
+func (s *ServerWrapper) findService(req *http.Request) (*Service, string) {
+	for _, svc := range s.Server.Services {
 		if svc.Method == req.Method && strings.HasSuffix(req.URL.Path, svc.Suffix) {
 			path := strings.Replace(req.URL.Path, svc.Suffix, "", 1)
 			return &svc, path
@@ -243,7 +243,7 @@ func (s *ServerWrapper) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	svc, repoUrlPath := s.findService(r)
 	if svc == nil {
 		// Find git lfs service
-		for _, lfsService := range s.LfsServices {
+		for _, lfsService := range s.Server.LfsServices {
 			if lfsService.Method == r.Method &&
 				(strings.HasSuffix(r.URL.Path, lfsService.Suffix) ||
 					(len(r.URL.Path) > 65 && strings.HasSuffix(r.URL.Path[:len(r.URL.Path)-65], lfsService.Suffix))) {
@@ -267,11 +267,11 @@ func (s *ServerWrapper) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	req := &Request{
 		Request:  r,
 		RepoName: path.Join(repoNamespace, repoName),
-		RepoPath: path.Join(s.Config.Dir, repoNamespace, repoName),
+		RepoPath: path.Join(s.Server.Config.Dir, repoNamespace, repoName),
 	}
 
-	if s.Config.Auth && r.Method == "POST" && strings.HasSuffix(r.RequestURI, "git-receive-pack") { // auth only for git push
-		if s.AuthFunc == nil {
+	if s.Server.Config.Auth && r.Method == "POST" && strings.HasSuffix(r.RequestURI, "git-receive-pack") { // auth only for git push
+		if s.Server.AuthFunc == nil {
 			utils.LogError("auth", fmt.Errorf("no auth backend provided"))
 			w.WriteHeader(http.StatusUnauthorized)
 			return
@@ -291,7 +291,7 @@ func (s *ServerWrapper) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		allow, err := s.AuthFunc(token, req)
+		allow, err := s.Server.AuthFunc(token, req)
 		if !allow || err != nil {
 			if err != nil {
 				utils.LogError("auth", err)
@@ -304,8 +304,8 @@ func (s *ServerWrapper) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// TODO
 	// create empty bare repo only if it's an empty repo
-	if !repoExists(req.RepoPath) && s.Config.AutoCreate == true {
-		err := initRepo(req.RepoName, &s.Config)
+	if !repoExists(req.RepoPath) && s.Server.Config.AutoCreate == true {
+		err := initRepo(req.RepoName, &s.Server.Config)
 		if err != nil {
 			utils.LogError("repo-init", err)
 		}

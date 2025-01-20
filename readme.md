@@ -4,14 +4,15 @@ gitopia services for [gitopia](https://gitopia.org/)
 
 ## Web server
 
+## Dependencies
+
+- [git](https://git-scm.com/)
+
 ### Build
 
 By default, git-server is built with local configurations. If you want to build with `PRODUCTION` or `DEVELOPMENT` configurations, pass a build arg `ENV` with respective value.
 ```
-docker build . --build-arg USER=<USER> \
-  --build-arg PERSONAL_ACCESS_TOKEN=<PERSONAL_ACCESS_TOKEN> \
-  --build-arg ENV=<ENV> \
-  -t git-server
+make docker-build-debug
 ```
 
 ### Usage
@@ -25,7 +26,7 @@ docker run -it \
   --name git-server \
   --mount type=bind,source=/var/attachments,target=/var/attachments \
   --mount type=bind,source=/var/repos,target=/var/repos -p 5000:5000 \
-  git-server
+  gitopia/git-server
 ```
 
 > **Important**  

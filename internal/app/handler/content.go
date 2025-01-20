@@ -1,4 +1,4 @@
-package route
+package handler
 
 import (
 	"encoding/base64"
