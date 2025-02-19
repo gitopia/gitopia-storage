@@ -35,7 +35,7 @@ func TestGETInfoRefs(t *testing.T) {
 		request, _ := http.NewRequest(http.MethodGet, "/0.git/info/refs?service=git-upload-pack", bytes.NewBuffer([]byte{}))
 		response := httptest.NewRecorder()
 
-		s, err := app.New(utils.Config{
+		s, err := app.New(nil, utils.Config{
 			Dir:        "test",
 			AutoCreate: true,
 			Auth:       true,

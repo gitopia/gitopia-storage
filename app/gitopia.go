@@ -5,6 +5,7 @@ import (
 
 	"github.com/gitopia/gitopia-go"
 	"github.com/gitopia/gitopia/v5/x/gitopia/types"
+	storagetypes "github.com/gitopia/gitopia/v5/x/storage/types"
 	"github.com/pkg/errors"
 )
 
@@ -173,4 +174,63 @@ func (g GitopiaProxy) Repository(ctx context.Context, repositoryId uint64) (type
 	}
 
 	return *resp.Repository, nil
+}
+
+func (g GitopiaProxy) UpdateRepositoryPackfile(ctx context.Context, repositoryId uint64, name string, cid string, rootHash string) error {
+	msg := &storagetypes.MsgUpdateRepositoryPackfile{
+		Creator:      g.gc.Address().String(),
+		RepositoryId: repositoryId,
+		Name:         name,
+		Cid:          cid,
+		RootHash:     rootHash,
+	}
+
+	err := g.gc.BroadcastTxAndWait(ctx, msg)
+	if err != nil {
+		return errors.WithMessage(err, "error sending tx")
+	}
+
+	return nil
+}
+
+func (g GitopiaProxy) SubmitChallenge(ctx context.Context, creator string, challengeId uint64, data []byte, proof [][]byte) error {
+	msg := &storagetypes.MsgSubmitChallengeResponse{
+		Creator:     creator,
+		ChallengeId: challengeId,
+		Data:        data,
+		Proof:       proof,
+	}
+
+	err := g.gc.BroadcastTxAndWait(ctx, msg)
+	if err != nil {
+		return errors.WithMessage(err, "error sending tx")
+	}
+
+	return nil
+}
+
+func (g GitopiaProxy) Challenge(ctx context.Context, id uint64) (storagetypes.Challenge, error) {
+	resp, err := g.gc.QueryClient().Storage.Challenge(ctx, &storagetypes.QueryChallengeRequest{
+		Id: id,
+	})
+	if err != nil {
+		return storagetypes.Challenge{}, errors.WithMessage(err, "query error")
+	}
+
+	return resp.Challenge, nil
+}
+
+func (g GitopiaProxy) Packfile(ctx context.Context, id uint64) (storagetypes.Packfile, error) {
+	resp, err := g.gc.QueryClient().Storage.Packfile(ctx, &storagetypes.QueryPackfileRequest{
+		Id: id,
+	})
+	if err != nil {
+		return storagetypes.Packfile{}, errors.WithMessage(err, "query error")
+	}
+
+	return resp.Packfile, nil
+}
+
+func (g GitopiaProxy) IsProviderChallenge(providerAddress string) bool {
+	return providerAddress == g.gc.Address().String()
 }

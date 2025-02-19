@@ -1,7 +1,7 @@
 ARG IMG_TAG=latest
 
 # Compile the git-server binary
-FROM golang:1.22-alpine AS git-server-builder
+FROM golang:1.23-alpine AS git-server-builder
 WORKDIR /src/app/
 ENV PACKAGES="curl make git libc-dev bash file gcc linux-headers eudev-dev"
 RUN apk add --no-cache $PACKAGES

@@ -3,6 +3,7 @@ package app
 import (
 	"compress/gzip"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,18 +14,24 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pkg/errors"
 
+	"github.com/cosmos/cosmos-sdk/client/tx"
+	"github.com/gitopia/git-server/app"
 	lfsutil "github.com/gitopia/git-server/lfs"
-	"github.com/gitopia/git-server/pkg/spheron"
+	"github.com/gitopia/git-server/pkg/merkleproof"
 	"github.com/gitopia/git-server/route/lfs"
 	"github.com/gitopia/git-server/utils"
 	gc "github.com/gitopia/gitopia-go"
 	gitopia "github.com/gitopia/gitopia/v5/app"
-	gitopiatypes "github.com/gitopia/gitopia/v5/x/gitopia/types"
 	offchaintypes "github.com/gitopia/gitopia/v5/x/offchain/types"
+	storagetypes "github.com/gitopia/gitopia/v5/x/storage/types"
+	"github.com/ipfs-cluster/ipfs-cluster/api"
+	"github.com/ipfs-cluster/ipfs-cluster/api/rest/client"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
@@ -38,17 +45,16 @@ var (
 	CacheMutex sync.RWMutex // Mutex to synchronize cache access
 )
 
-// TODO: use the new packfile query
 type QueryService interface {
-	GitopiaRepositoryStorage(ctx context.Context, req *gitopiatypes.QueryGetRepositoryRequest) (*gitopiatypes.QueryGetRepositoryResponse, error)
+	GitopiaRepositoryPackfile(ctx context.Context, req *storagetypes.QueryRepositoryPackfileRequest) (*storagetypes.QueryRepositoryPackfileResponse, error)
 }
 
 type QueryServiceImpl struct {
 	Query *gc.Query
 }
 
-func (qs *QueryServiceImpl) GitopiaRepositoryStorage(ctx context.Context, req *gitopiatypes.QueryGetRepositoryRequest) (*gitopiatypes.QueryGetRepositoryResponse, error) {
-	return qs.Query.Gitopia.Repository(ctx, req)
+func (qs *QueryServiceImpl) GitopiaRepositoryPackfile(ctx context.Context, req *storagetypes.QueryRepositoryPackfileRequest) (*storagetypes.QueryRepositoryPackfileResponse, error) {
+	return qs.Query.Storage.RepositoryPackfile(ctx, req)
 }
 
 type SaveToArweavePostBody struct {
@@ -171,7 +177,7 @@ func getNamespaceAndRepo(input string) (string, string) {
 	return strings.Join(blocks[0:num-1], "/"), blocks[num-1]
 }
 
-func New(cfg utils.Config) (*Server, error) {
+func New(cmd *cobra.Command, cfg utils.Config) (*Server, error) {
 	s := Server{Config: cfg}
 	basic := &lfs.BasicHandler{
 		DefaultStorage: lfsutil.Storage(lfsutil.StorageLocal),
@@ -206,15 +212,23 @@ func New(cfg utils.Config) (*Server, error) {
 
 	s.QueryService = &QueryServiceImpl{&queryClient}
 
-	client := spheron.SpheronClient{
-		HttpClient:   &http.Client{},
-		ApiToken:     viper.GetString("SPHERON_API_TOKEN"),
-		BaseURL:      "https://api-v2.spheron.network",
-		Organization: viper.GetString("SPHERON_ORG_ID"),
-		Bucket:       viper.GetString("SPHERON_BUCKET_NAME"),
-		Protocol:     viper.GetString("SPHERON_PROTOCOL"),
+	// Initialize GitopiaProxy
+	ctx := cmd.Context()
+	clientCtx, err := gc.GetClientContext("git-server")
+	if err != nil {
+		return nil, errors.Wrap(err, "error initializing client context")
 	}
-	s.SpheronClient = &client
+	txf, err := tx.NewFactoryCLI(clientCtx, cmd.Flags())
+	if err != nil {
+		return nil, errors.Wrap(err, "error initializing tx factory")
+	}
+	txf = txf.WithGasAdjustment(app.GAS_ADJUSTMENT)
+
+	gitopiaClient, err := gc.NewClient(ctx, clientCtx, txf)
+	if err != nil {
+		return nil, err
+	}
+	s.GitopiaProxy = app.NewGitopiaProxy(gitopiaClient)
 
 	return &s, nil
 }
@@ -340,10 +354,13 @@ func (s *Server) GetInfoRefs(_ string, w http.ResponseWriter, r *Request) {
 		return
 	}
 
-	if err := s.CacheRepository(repoId); err != nil {
-		utils.LogError(context, err)
-		return
-	}
+	_ = repoId
+
+	// TODO: uncomment this
+	// if err := s.CacheRepository(repoId); err != nil {
+	// 	utils.LogError(context, err)
+	// 	return
+	// }
 
 	cmd, pipe := utils.GitCommand(s.Config.GitPath, subCommand(rpc), "--stateless-rpc", "--advertise-refs", r.RepoPath)
 	if err := cmd.Start(); err != nil {
@@ -410,12 +427,12 @@ type LfsService struct {
 }
 
 type Server struct {
-	Config        utils.Config
-	Services      []Service
-	LfsServices   []LfsService
-	AuthFunc      func(string, *Request) (bool, error)
-	QueryService  QueryService
-	SpheronClient spheron.SpheronClientInterface
+	Config       utils.Config
+	Services     []Service
+	LfsServices  []LfsService
+	AuthFunc     func(string, *Request) (bool, error)
+	QueryService QueryService
+	GitopiaProxy app.GitopiaProxy
 }
 
 type ServerWrapper struct {
@@ -428,77 +445,132 @@ type Request struct {
 	RepoPath string
 }
 
-func (s *Server) PostRPC(rpc string, w http.ResponseWriter, r *Request) {
-	context := "post-rpc"
+func (s *Server) PostRPC(service string, w http.ResponseWriter, r *Request) {
+	logContext := "post-rpc"
 	body := r.Body
 
 	if r.Header.Get("Content-Encoding") == "gzip" {
 		var err error
 		body, err = gzip.NewReader(r.Body)
 		if err != nil {
-			fail500(w, context, err)
+			fail500(w, logContext, err)
 			return
 		}
 	}
 
-	cmd, outPipe := utils.GitCommand(s.Config.GitPath, subCommand(rpc), "--stateless-rpc", r.RepoPath)
+	repoId, err := utils.ParseRepositoryIdfromURI(r.URL.Path)
+	if err != nil {
+		fail500(w, logContext, fmt.Errorf("failed to parse repository id: %v", err))
+		return
+	}
+
+	// Get cid from the chain
+	packfileResp, err := s.QueryService.GitopiaRepositoryPackfile(context.Background(), &storagetypes.QueryRepositoryPackfileRequest{
+		RepositoryId: repoId,
+	})
+	if err != nil {
+		fail500(w, logContext, fmt.Errorf("failed to get cid from chain: %v", err))
+		return
+	}
+
+	// Check if packfile exists in objects/pack directory
+	cached := false
+	packfilePath := filepath.Join(r.RepoPath, "objects", "pack", packfileResp.Packfile.Name)
+	if _, err := os.Stat(packfilePath); err == nil {
+		cached = true
+	}
+
+	if !cached {
+		// Fetch packfile from IPFS and place in objects/pack directory
+		ipfsUrl := fmt.Sprintf("http://127.0.0.1:5001/api/v0/cat?arg=/ipfs/%s&progress=false", packfileResp.Packfile.Cid)
+		resp, err := http.Post(ipfsUrl, "application/json", nil)
+		if err != nil {
+			fail500(w, logContext, fmt.Errorf("failed to fetch packfile from IPFS: %v", err))
+			return
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			fail500(w, logContext, fmt.Errorf("failed to fetch packfile from IPFS: %v", resp.Status))
+			return
+		}
+
+		// Create objects/pack directory if it doesn't exist
+		packDir := filepath.Join(r.RepoPath, "objects", "pack")
+		if err := os.MkdirAll(packDir, 0755); err != nil {
+			fail500(w, logContext, fmt.Errorf("failed to create pack directory: %v", err))
+			return
+		}
+
+		// Create packfile in objects/pack directory
+		packfilePath := filepath.Join(packDir, packfileResp.Packfile.Name)
+		packfile, err := os.Create(packfilePath)
+		if err != nil {
+			fail500(w, logContext, fmt.Errorf("failed to create packfile: %v", err))
+			return
+		}
+		defer packfile.Close()
+
+		// Copy packfile contents
+		if _, err := io.Copy(packfile, resp.Body); err != nil {
+			fail500(w, logContext, fmt.Errorf("failed to write packfile: %v", err))
+			return
+		}
+	}
+
+	cmd, outPipe := utils.GitCommand(s.Config.GitPath, subCommand(service), "--stateless-rpc", r.RepoPath)
 	defer outPipe.Close()
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		fail500(w, context, err)
+		fail500(w, logContext, err)
 		return
 	}
 	defer stdin.Close()
 
 	if err := cmd.Start(); err != nil {
-		fail500(w, context, err)
+		fail500(w, logContext, err)
 		return
 	}
 	defer utils.CleanUpProcessGroup(cmd)
 
 	if _, err := io.Copy(stdin, body); err != nil {
-		fail500(w, context, err)
+		fail500(w, logContext, err)
 		return
 	}
 	stdin.Close()
 
-	w.Header().Add("Content-Type", fmt.Sprintf("application/x-%s-result", rpc))
+	w.Header().Add("Content-Type", fmt.Sprintf("application/x-%s-result", service))
 	w.Header().Add("Cache-Control", "no-cache")
 	w.WriteHeader(200)
 
 	if _, err := io.Copy(newWriteFlusher(w), outPipe); err != nil {
-		utils.LogError(context, err)
+		utils.LogError(logContext, err)
 		return
 	}
 
 	if err := cmd.Wait(); err != nil {
-		utils.LogError(context, err)
+		utils.LogError(logContext, err)
 		return
 	}
 
-	// if receive pack
-	// upload to ipfs
-	// non-blocking
-	// make single packfile
-	// some lock to prevent concurrent
-	if rpc == "git-receive-pack" {
+	if service == "git-receive-pack" {
 		cmd, outPipe := utils.GitCommand(s.Config.GitPath, "gc")
 		cmd.Dir = r.RepoPath
 		if err := cmd.Start(); err != nil {
-			fail500(w, context, err)
+			fail500(w, logContext, err)
 			return
 		}
 		defer utils.CleanUpProcessGroup(cmd)
 
 		_, err = io.Copy(io.Discard, outPipe)
 		if err != nil {
-			fail500(w, context, err)
+			fail500(w, logContext, err)
 			return
 		}
 
 		if err := cmd.Wait(); err != nil {
-			utils.LogError(context, err)
+			utils.LogError(logContext, err)
 			return
 		}
 
@@ -520,26 +592,91 @@ func (s *Server) PostRPC(rpc string, w http.ResponseWriter, r *Request) {
 		})
 
 		if err != nil {
-			fail500(w, context, err)
+			fail500(w, logContext, err)
 			return
 		}
 
 		// Check if a .pack file was found
 		if packfileName == "" {
 			err := errors.New("No .pack file found")
-			fail500(w, context, err)
+			fail500(w, logContext, err)
 			return
 		}
 
-		_, err = s.SpheronClient.UploadFileInChunks(packfileName)
+		// Chunk the packfile and generate Merkle root
+		chunks, err := merkleproof.ChunkPackfile(packfileName, 256*1024) // 256KiB chunks
 		if err != nil {
-			err := errors.Wrap(err, "spheron upload failed")
-			fail500(w, context, err)
+			fail500(w, logContext, fmt.Errorf("failed to chunk packfile: %w", err))
 			return
 		}
 
-		// update cid and packname on gitopia
+		// Generate proofs and get root hash
+		_, rootHash, err := merkleproof.GeneratePackfileProofs(chunks)
+		if err != nil {
+			fail500(w, logContext, fmt.Errorf("failed to generate merkle root: %w", err))
+			return
+		}
 
+		// Initialize IPFS cluster client
+		cfg := &client.Config{
+			Host:    viper.GetString("IPFS_CLUSTER_PEER_HOST"),
+			Port:    viper.GetString("IPFS_CLUSTER_PEER_PORT"),
+			Timeout: time.Minute * 5, // Reasonable timeout for pinning
+		}
+
+		cl, err := client.NewDefaultClient(cfg)
+		if err != nil {
+			fail500(w, logContext, fmt.Errorf("failed to create IPFS cluster client: %w", err))
+			return
+		}
+
+		// Add and pin the packfile to IPFS cluster
+		paths := []string{packfileName}
+		addParams := api.DefaultAddParams()
+		addParams.Recursive = false
+		addParams.Layout = "balanced"
+
+		outputChan := make(chan api.AddedOutput)
+		var cid api.Cid
+
+		go func() {
+			err := cl.Add(context.Background(), paths, addParams, outputChan)
+			if err != nil {
+				utils.LogError(logContext, fmt.Errorf("failed to add file to IPFS cluster: %w", err))
+				close(outputChan)
+			}
+		}()
+
+		// Get CID from output channel
+		for output := range outputChan {
+			cid = output.Cid
+		}
+
+		// Pin the file with default options
+		pinOpts := api.PinOptions{
+			ReplicationFactorMin: -1,
+			ReplicationFactorMax: -1,
+			Name:                 filepath.Base(packfileName),
+		}
+
+		_, err = cl.Pin(context.Background(), cid, pinOpts)
+		if err != nil {
+			fail500(w, logContext, fmt.Errorf("failed to pin file in IPFS cluster: %w", err))
+			return
+		}
+
+		// After successfully pinning to IPFS
+		err = s.GitopiaProxy.UpdateRepositoryPackfile(
+			context.Background(),
+			repoId,
+			filepath.Base(packfileName),
+			cid.String(),
+			hex.EncodeToString(rootHash), // Pass the hex-encoded root hash
+		)
+		if err != nil {
+			fail500(w, logContext, fmt.Errorf("failed to update repository packfile: %w", err))
+			return
+		}
 	}
 }
 

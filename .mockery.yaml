@@ -4,6 +4,4 @@ packages:
   github.com/gitopia/git-server/internal/app:
     interfaces:
       QueryService:
-  github.com/gitopia/git-server/pkg/spheron:
-    interfaces:
-      SpheronClientInterface:
+

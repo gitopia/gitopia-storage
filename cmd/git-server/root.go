@@ -7,10 +7,6 @@ import (
 	"github.com/spf13/viper"
 )
 
-const (
-	AppName = "git-server-events"
-)
-
 func NewRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:               AppName,
@@ -19,7 +15,7 @@ func NewRootCmd() *cobra.Command {
 			return gitopia.CommandInit(cmd, AppName)
 		},
 	}
-	rootCmd.AddCommand(NewRunCmd())
+	rootCmd.AddCommand(NewStartCmd())
 	rootCmd.AddCommand(keys.Commands(viper.GetString("WORKING_DIR")))
 	return rootCmd
 }
