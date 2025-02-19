@@ -468,53 +468,56 @@ func (s *Server) PostRPC(service string, w http.ResponseWriter, r *Request) {
 	packfileResp, err := s.QueryService.GitopiaRepositoryPackfile(context.Background(), &storagetypes.QueryRepositoryPackfileRequest{
 		RepositoryId: repoId,
 	})
-	if err != nil {
+	if err != nil && !strings.Contains(err.Error(), "packfile not found") {
 		fail500(w, logContext, fmt.Errorf("failed to get cid from chain: %v", err))
 		return
 	}
 
-	// Check if packfile exists in objects/pack directory
-	cached := false
-	packfilePath := filepath.Join(r.RepoPath, "objects", "pack", packfileResp.Packfile.Name)
-	if _, err := os.Stat(packfilePath); err == nil {
-		cached = true
-	}
-
-	if !cached {
-		// Fetch packfile from IPFS and place in objects/pack directory
-		ipfsUrl := fmt.Sprintf("http://127.0.0.1:5001/api/v0/cat?arg=/ipfs/%s&progress=false", packfileResp.Packfile.Cid)
-		resp, err := http.Post(ipfsUrl, "application/json", nil)
-		if err != nil {
-			fail500(w, logContext, fmt.Errorf("failed to fetch packfile from IPFS: %v", err))
-			return
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			fail500(w, logContext, fmt.Errorf("failed to fetch packfile from IPFS: %v", resp.Status))
-			return
+	// Only attempt to fetch and cache packfile if it exists on chain
+	if packfileResp != nil && packfileResp.Packfile.Cid != "" {
+		// Check if packfile exists in objects/pack directory
+		cached := false
+		packfilePath := filepath.Join(r.RepoPath, "objects", "pack", packfileResp.Packfile.Name)
+		if _, err := os.Stat(packfilePath); err == nil {
+			cached = true
 		}
 
-		// Create objects/pack directory if it doesn't exist
-		packDir := filepath.Join(r.RepoPath, "objects", "pack")
-		if err := os.MkdirAll(packDir, 0755); err != nil {
-			fail500(w, logContext, fmt.Errorf("failed to create pack directory: %v", err))
-			return
-		}
+		if !cached {
+			// Fetch packfile from IPFS and place in objects/pack directory
+			ipfsUrl := fmt.Sprintf("http://127.0.0.1:5001/api/v0/cat?arg=/ipfs/%s&progress=false", packfileResp.Packfile.Cid)
+			resp, err := http.Post(ipfsUrl, "application/json", nil)
+			if err != nil {
+				fail500(w, logContext, fmt.Errorf("failed to fetch packfile from IPFS: %v", err))
+				return
+			}
+			defer resp.Body.Close()
 
-		// Create packfile in objects/pack directory
-		packfilePath := filepath.Join(packDir, packfileResp.Packfile.Name)
-		packfile, err := os.Create(packfilePath)
-		if err != nil {
-			fail500(w, logContext, fmt.Errorf("failed to create packfile: %v", err))
-			return
-		}
-		defer packfile.Close()
+			if resp.StatusCode != http.StatusOK {
+				fail500(w, logContext, fmt.Errorf("failed to fetch packfile from IPFS: %v", resp.Status))
+				return
+			}
 
-		// Copy packfile contents
-		if _, err := io.Copy(packfile, resp.Body); err != nil {
-			fail500(w, logContext, fmt.Errorf("failed to write packfile: %v", err))
-			return
+			// Create objects/pack directory if it doesn't exist
+			packDir := filepath.Join(r.RepoPath, "objects", "pack")
+			if err := os.MkdirAll(packDir, 0755); err != nil {
+				fail500(w, logContext, fmt.Errorf("failed to create pack directory: %v", err))
+				return
+			}
+
+			// Create packfile in objects/pack directory
+			packfilePath := filepath.Join(packDir, packfileResp.Packfile.Name)
+			packfile, err := os.Create(packfilePath)
+			if err != nil {
+				fail500(w, logContext, fmt.Errorf("failed to create packfile: %v", err))
+				return
+			}
+			defer packfile.Close()
+
+			// Copy packfile contents
+			if _, err := io.Copy(packfile, resp.Body); err != nil {
+				fail500(w, logContext, fmt.Errorf("failed to write packfile: %v", err))
+				return
+			}
 		}
 	}
 
