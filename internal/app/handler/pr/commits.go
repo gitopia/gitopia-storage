@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/gitopia/git-server/utils"
+	"github.com/spf13/viper"
 )
 
 func PullRequestCommitsHandler(w http.ResponseWriter, r *http.Request) {
@@ -25,6 +26,37 @@ func PullRequestCommitsHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
+		}
+
+		// check if  base repository is cached
+		cacheDir := viper.GetString("GIT_DIR")
+		isCached, err := utils.IsRepoCached(body.BaseRepositoryID, cacheDir)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if !isCached {
+			err = utils.DownloadRepo(body.BaseRepositoryID, cacheDir)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		if body.HeadRepositoryID != body.BaseRepositoryID {
+			// check if head repository is cached
+			isCached, err := utils.IsRepoCached(body.HeadRepositoryID, cacheDir)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if !isCached {
+				err = utils.DownloadRepo(body.HeadRepositoryID, cacheDir)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+			}
 		}
 
 		quarantineRepoPath, err := utils.CreateQuarantineRepo(body.BaseRepositoryID, body.HeadRepositoryID, body.BaseBranch, body.HeadBranch)

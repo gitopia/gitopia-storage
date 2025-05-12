@@ -2,13 +2,13 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"strings"
 
 	"github.com/cosmos/cosmos-sdk/client"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/gitopia/gitopia-go"
 	"github.com/gitopia/gitopia-go/logger"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/spf13/viper"
@@ -41,8 +41,6 @@ func initConfig() {
 		log.Fatal(err)
 	}
 
-	log.Printf("ENV: %s\n", os.Getenv("ENV"))
-	fmt.Println(viper.AllSettings())
 	for _, key := range viper.AllKeys() {
 		env = append(env, strings.ToUpper(key)+"="+viper.GetString(key))
 	}
@@ -57,6 +55,16 @@ func main() {
 	// Initialize context with logger
 	ctx := logger.InitLogger(context.Background(), AppName)
 	ctx = context.WithValue(ctx, client.ClientContextKey, &client.Context{})
+
+	logger.FromContext(ctx).SetOutput(os.Stdout)
+
+	// Initialize Gitopia client configuration
+	gitopia.WithAppName(viper.GetString("APP_NAME"))
+	gitopia.WithChainId(viper.GetString("CHAIN_ID"))
+	gitopia.WithGasPrices(viper.GetString("GAS_PRICES"))
+	gitopia.WithGitopiaAddr(viper.GetString("GITOPIA_ADDR"))
+	gitopia.WithTmAddr(viper.GetString("TM_ADDR"))
+	gitopia.WithWorkingDir(viper.GetString("WORKING_DIR"))
 
 	// Execute root command
 	rc := NewRootCmd()

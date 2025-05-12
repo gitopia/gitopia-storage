@@ -11,6 +11,7 @@ import (
 
 	"github.com/gitopia/git-server/utils"
 	"github.com/gitopia/gitopia/v5/x/gitopia/types"
+	"github.com/spf13/viper"
 )
 
 type pullRequestCheckResponseData struct {
@@ -38,6 +39,37 @@ func PullRequestCheckHandler(w http.ResponseWriter, r *http.Request) {
 			b, _ := json.Marshal(resp)
 			http.Error(w, string(b), http.StatusBadRequest)
 			return
+		}
+
+		// check if  base repository is cached
+		cacheDir := viper.GetString("GIT_DIR")
+		isCached, err := utils.IsRepoCached(body.BaseRepositoryID, cacheDir)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if !isCached {
+			err = utils.DownloadRepo(body.BaseRepositoryID, cacheDir)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		if body.HeadRepositoryID != body.BaseRepositoryID {
+			// check if head repository is cached
+			isCached, err := utils.IsRepoCached(body.HeadRepositoryID, cacheDir)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if !isCached {
+				err = utils.DownloadRepo(body.HeadRepositoryID, cacheDir)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+			}
 		}
 
 		quarantineRepoPath, err := utils.CreateQuarantineRepo(body.BaseRepositoryID, body.HeadRepositoryID, body.BaseBranch, body.HeadBranch)

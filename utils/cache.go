@@ -2,103 +2,54 @@ package utils
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"io"
-	"log"
 	"math"
 	"net/http"
 	"os"
-	"path"
-	"time"
+	"path/filepath"
+	"strings"
 
 	"github.com/cosmos/cosmos-sdk/types/query"
 	"github.com/gitopia/gitopia-go"
 	gitopiatypes "github.com/gitopia/gitopia/v5/x/gitopia/types"
+	storagetypes "github.com/gitopia/gitopia/v5/x/storage/types"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 )
 
-const (
-	cacheExpiryTime = 24 * time.Hour
-)
-
-func InitializeDB(dbPath string) *sql.DB {
-	db, err := sql.Open("sqlite3", dbPath)
+func IsRepoCached(id uint64, cacheDir string) (bool, error) {
+	queryClient, err := gitopia.GetQueryClient(viper.GetString("GITOPIA_ADDR"))
 	if err != nil {
-		log.Fatal(err)
+		return false, errors.Wrap(err, "error connecting to gitopia")
 	}
 
-	// Create table if not exists
-	createTableSQL := `CREATE TABLE IF NOT EXISTS cache (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-		repo_id INTEGER NOT NULL UNIQUE,
-		parent_repo_id INTEGER,
-        cid TEXT NOT NULL UNIQUE,
-		packfile_name TEXT NOT NULL UNIQUE,
-		creation_time DATETIME NOT NULL,
-        last_accessed_time DATETIME NOT NULL,
-        expiry_time DATETIME NOT NULL
-    );`
-	_, err = db.Exec(createTableSQL)
-	if err != nil {
-		log.Fatal(err)
+	res, err := queryClient.Storage.RepositoryPackfile(context.Background(), &storagetypes.QueryRepositoryPackfileRequest{
+		RepositoryId: id,
+	})
+	if err != nil && !strings.Contains(err.Error(), "packfile not found") {
+		return false, errors.Wrap(err, "failed to get cid from chain")
 	}
 
-	return db
+	if res != nil {
+		// empty repository
+		if res.Packfile.Cid == "" {
+			return true, nil
+		}
+
+		// Check if packfile exists in objects/pack directory
+		repoPath := filepath.Join(cacheDir, fmt.Sprintf("%d.git", id))
+		packfilePath := filepath.Join(repoPath, "objects", "pack", res.Packfile.Name)
+		if _, err := os.Stat(packfilePath); err == nil {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
-func DbExists(dbPath string) bool {
-	_, err := os.Stat(dbPath)
-	return !os.IsNotExist(err)
-}
-
-func InsertCacheData(db *sql.DB, repoId uint64, parentRepoId uint64, cid string, packfileName string, creationTime, lastAccessedTime, expiryTime time.Time) {
-	insertSQL := `INSERT INTO cache (repo_id, parent_repo_id, cid, packfile_name, creation_time, last_accessed_time, expiry_time) VALUES (?, ?, ?, ?, ?, ?, ?)`
-	statement, err := db.Prepare(insertSQL)
-	if err != nil {
-		log.Fatal(err)
-	}
-	_, err = statement.Exec(repoId, parentRepoId, cid, packfileName, creationTime, lastAccessedTime, expiryTime)
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
-func IsCached(db *sql.DB, repoId uint64, cid string, packfileName string) bool {
-	query := `SELECT COUNT(*) FROM cache WHERE repo_id = ? AND cid = ? AND packfile_name = ?`
-	stmt, err := db.Prepare(query)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer stmt.Close()
-
-	var count int
-	err = stmt.QueryRow(repoId, cid, packfileName).Scan(&count)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	return count > 0
-}
-
-func ReadCacheData(db *sql.DB) {
-	row, err := db.Query("SELECT * FROM cache")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer row.Close()
-
-	for row.Next() {
-		var id int
-		var cid, packfileName string
-		var creationTime, lastAccessedTime, expiryTime time.Time
-		row.Scan(&id, &cid, &packfileName, &creationTime, &lastAccessedTime, &expiryTime)
-	}
-}
-
-func DownloadRepo(db *sql.DB, id uint64, cacheDir string, config *Config) error {
+func DownloadRepo(id uint64, cacheDir string) error {
 	queryClient, err := gitopia.GetQueryClient(viper.GetString("GITOPIA_ADDR"))
 	if err != nil {
 		return errors.Wrap(err, "error connecting to gitopia")
@@ -111,61 +62,80 @@ func DownloadRepo(db *sql.DB, id uint64, cacheDir string, config *Config) error 
 		return err
 	}
 
+	repoDir := filepath.Join(cacheDir, fmt.Sprintf("%d", res.Repository.Id))
+
 	// download parent repos first
 	if res.Repository.Parent != 0 {
-		err := DownloadRepo(db, res.Repository.Parent, cacheDir, config)
+		err := DownloadRepo(res.Repository.Parent, cacheDir)
 		if err != nil {
 			return errors.Wrap(err, "error downloading parent repo")
 		}
+
+		// Create alternates file to link with parent repo
+		alternatesDir := filepath.Join(repoDir, "objects", "info")
+		if err := os.MkdirAll(alternatesDir, 0755); err != nil {
+			return fmt.Errorf("failed to create alternates directory: %v", err)
+		}
+
+		// Write parent repo objects path to alternates file
+		alternatesPath := filepath.Join(alternatesDir, "alternates")
+		parentObjectsPath := filepath.Join(cacheDir, fmt.Sprintf("%d", res.Repository.Parent), "objects")
+		if err := os.WriteFile(alternatesPath, []byte(parentObjectsPath+"\n"), 0644); err != nil {
+			return fmt.Errorf("failed to write alternates file: %v", err)
+		}
 	}
 
-	// TODO: use the new packfile query
-	_, err = queryClient.Gitopia.Repository(context.Background(), &gitopiatypes.QueryGetRepositoryRequest{
-		Id: id,
+	_, err = queryClient.Storage.RepositoryPackfile(context.Background(), &storagetypes.QueryRepositoryPackfileRequest{
+		RepositoryId: id,
 	})
-	if err != nil {
-		return errors.Wrap(err, "storage not found")
+	if err != nil && !strings.Contains(err.Error(), "packfile not found") {
+		return fmt.Errorf("failed to get cid from chain: %v", err)
 	}
 
-	// make sure dependent parent repos are there
-	// TODO: use the new packfile query
-	if err := downloadPackfile("cid", "name", cacheDir, config); err != nil {
+	if err := downloadPackfile("cid", "name", repoDir); err != nil {
 		return errors.Wrap(err, "error downloading packfile")
 	}
 
 	// create refs on the server
-	createBranchesAndTags(queryClient, res.Repository.Owner.Id, res.Repository.Name, cacheDir, config)
-
-	InsertCacheData(db, id, res.Repository.Parent, "cid", "name", time.Now(), time.Now(), time.Now().Add(cacheExpiryTime))
+	createBranchesAndTags(queryClient, res.Repository.Owner.Id, res.Repository.Name, repoDir)
 
 	return nil
 }
 
-func downloadPackfile(cid string, packfileName string, cacheDir string, config *Config) error {
-	ipfsUrl := fmt.Sprintf("https://%s.%s/%s", cid, viper.GetString("IPFS_GATEWAY"), packfileName)
-
-	resp, err := http.Get(ipfsUrl)
+func downloadPackfile(cid string, packfileName string, repoDir string) error {
+	ipfsUrl := fmt.Sprintf("http://%s:%s/api/v0/cat?arg=/ipfs/%s&progress=false", viper.GetString("IPFS_HOST"), viper.GetString("IPFS_PORT"), cid)
+	resp, err := http.Post(ipfsUrl, "application/json", nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to fetch packfile from IPFS: %v", err)
 	}
 	defer resp.Body.Close()
 
-	out, err := os.Create(cacheDir + "/objects/pack/" + packfileName)
-	if err != nil {
-		return err
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to fetch packfile from IPFS: %v", resp.Status)
 	}
-	defer out.Close()
 
-	// Write the body to file
-	_, err = io.Copy(out, resp.Body)
+	// Create objects/pack directory if it doesn't exist
+	packDir := filepath.Join(repoDir, "objects", "pack")
+	if err := os.MkdirAll(packDir, 0755); err != nil {
+		return fmt.Errorf("failed to create pack directory: %v", err)
+	}
+
+	// Create packfile in objects/pack directory
+	packfilePath := filepath.Join(packDir, packfileName)
+	packfile, err := os.Create(packfilePath)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create packfile: %v", err)
+	}
+	defer packfile.Close()
+
+	// Copy packfile contents
+	if _, err := io.Copy(packfile, resp.Body); err != nil {
+		return fmt.Errorf("failed to write packfile: %v", err)
 	}
 
 	// Build pack index file
-	packfilePath := fmt.Sprintf("objects/pack/%s", packfileName)
-	cmd, outPipe := GitCommand(config.GitPath, "index-pack", packfilePath)
-	cmd.Dir = cacheDir
+	cmd, outPipe := GitCommand("git", "index-pack", packfilePath)
+	cmd.Dir = repoDir
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -183,7 +153,7 @@ func downloadPackfile(cid string, packfileName string, cacheDir string, config *
 	return nil
 }
 
-func createBranchesAndTags(queryClient gitopia.Query, repoOwner string, repoName string, cacheDir string, config *Config) error {
+func createBranchesAndTags(queryClient gitopia.Query, repoOwner string, repoName string, repoDir string) error {
 	branchAllRes, err := queryClient.Gitopia.RepositoryBranchAll(context.Background(), &gitopiatypes.QueryAllRepositoryBranchRequest{
 		Id:             repoOwner,
 		RepositoryName: repoName,
@@ -195,8 +165,8 @@ func createBranchesAndTags(queryClient gitopia.Query, repoOwner string, repoName
 		return err
 	}
 	for _, branch := range branchAllRes.Branch {
-		cmd, outPipe := GitCommand(config.GitPath, "branch", branch.Name, branch.Sha)
-		cmd.Dir = cacheDir
+		cmd, outPipe := GitCommand("git", "branch", branch.Name, branch.Sha)
+		cmd.Dir = repoDir
 		if err := cmd.Start(); err != nil {
 			return err
 		}
@@ -223,8 +193,8 @@ func createBranchesAndTags(queryClient gitopia.Query, repoOwner string, repoName
 		return err
 	}
 	for _, tag := range tagAllRes.Tag {
-		cmd, outPipe := GitCommand(config.GitPath, "tag", tag.Name, tag.Sha)
-		cmd.Dir = cacheDir
+		cmd, outPipe := GitCommand("git", "tag", tag.Name, tag.Sha)
+		cmd.Dir = repoDir
 		if err := cmd.Start(); err != nil {
 			return err
 		}
@@ -239,73 +209,5 @@ func createBranchesAndTags(queryClient gitopia.Query, repoOwner string, repoName
 			return err
 		}
 	}
-	return nil
-}
-
-// UpdateCacheEntry updates the last_accessed_time and expiry_time for a cache entry.
-func UpdateCacheEntry(db *sql.DB, repoID uint64, cid, packfileName string) error {
-	newExpiryTime := time.Now().Add(cacheExpiryTime)
-
-	updateSQL := `UPDATE cache
-                  SET last_accessed_time = CURRENT_TIMESTAMP,
-                      expiry_time = ?
-                  WHERE repo_id = ? AND cid = ? AND packfile_name = ?;`
-
-	_, err := db.Exec(updateSQL, newExpiryTime, repoID, cid, packfileName)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// CleanupCacheEntry deletes a cache entry matching the repo_id, cid, and packfile_name.
-func CleanupCacheEntry(db *sql.DB, repoID uint64, cid, packfileName string) error {
-	deleteSQL := `DELETE FROM cache WHERE repo_id = ? AND cid = ? AND packfile_name = ?;`
-
-	_, err := db.Exec(deleteSQL, repoID, cid, packfileName)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// CleanupExpiredRepoCache cleans up expired cache entries for a specific repo_id and deletes.
-func CleanupExpiredRepoCache(db *sql.DB, cacheDir string) error {
-	selectSQL := `SELECT repo_id, cid, packfile_name FROM cache WHERE expiry_time < CURRENT_TIMESTAMP;`
-
-	rows, err := db.Query(selectSQL)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var repoID uint64
-		var cid, packfileName string
-		err = rows.Scan(&repoID, &cid, &packfileName)
-		if err != nil {
-			continue
-		}
-
-		// Delete repository from the file system
-		err := os.RemoveAll(path.Join(cacheDir, fmt.Sprintf("%v.git", repoID)))
-		if err != nil {
-			return err
-		}
-
-		// Delete the cache entry
-		err = CleanupCacheEntry(db, repoID, cid, packfileName)
-		if err != nil {
-			return err
-		}
-	}
-
-	// Check for errors from iterating over rows
-	if err = rows.Err(); err != nil {
-		return err
-	}
-
 	return nil
 }

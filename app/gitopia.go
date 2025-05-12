@@ -176,13 +176,14 @@ func (g GitopiaProxy) Repository(ctx context.Context, repositoryId uint64) (type
 	return *resp.Repository, nil
 }
 
-func (g GitopiaProxy) UpdateRepositoryPackfile(ctx context.Context, repositoryId uint64, name string, cid string, rootHash string) error {
+func (g GitopiaProxy) UpdateRepositoryPackfile(ctx context.Context, repositoryId uint64, name string, cid string, rootHash []byte, size int64) error {
 	msg := &storagetypes.MsgUpdateRepositoryPackfile{
 		Creator:      g.gc.Address().String(),
 		RepositoryId: repositoryId,
 		Name:         name,
 		Cid:          cid,
 		RootHash:     rootHash,
+		Size_:        uint64(size),
 	}
 
 	err := g.gc.BroadcastTxAndWait(ctx, msg)
@@ -193,7 +194,7 @@ func (g GitopiaProxy) UpdateRepositoryPackfile(ctx context.Context, repositoryId
 	return nil
 }
 
-func (g GitopiaProxy) SubmitChallenge(ctx context.Context, creator string, challengeId uint64, data []byte, proof [][]byte) error {
+func (g GitopiaProxy) SubmitChallenge(ctx context.Context, creator string, challengeId uint64, data []byte, proof *storagetypes.Proof) error {
 	msg := &storagetypes.MsgSubmitChallengeResponse{
 		Creator:     creator,
 		ChallengeId: challengeId,
@@ -233,4 +234,50 @@ func (g GitopiaProxy) Packfile(ctx context.Context, id uint64) (storagetypes.Pac
 
 func (g GitopiaProxy) IsProviderChallenge(providerAddress string) bool {
 	return providerAddress == g.gc.Address().String()
+}
+
+// get client address
+func (g GitopiaProxy) ClientAddress() string {
+	return g.gc.Address().String()
+}
+
+func (g GitopiaProxy) UserQuota(ctx context.Context, address string) (types.UserQuota, error) {
+	resp, err := g.gc.QueryClient().Gitopia.UserQuota(ctx, &types.QueryUserQuotaRequest{
+		Address: address,
+	})
+	if err != nil {
+		return types.UserQuota{}, errors.WithMessage(err, "query error")
+	}
+
+	return resp.UserQuota, nil
+}
+
+func (g GitopiaProxy) ReleaseAsset(ctx context.Context, id uint64) (storagetypes.ReleaseAsset, error) {
+	resp, err := g.gc.QueryClient().Storage.ReleaseAsset(ctx, &storagetypes.QueryReleaseAssetRequest{
+		Id: id,
+	})
+	if err != nil {
+		return storagetypes.ReleaseAsset{}, errors.WithMessage(err, "query error")
+	}
+
+	return resp.ReleaseAsset, nil
+}
+
+func (g GitopiaProxy) UpdateReleaseAsset(ctx context.Context, repositoryId uint64, tag string, name string, cid string, rootHash []byte, size int64) error {
+	msg := &storagetypes.MsgUpdateReleaseAsset{
+		Creator:      g.gc.Address().String(),
+		RepositoryId: repositoryId,
+		Tag:          tag,
+		Name:         name,
+		Cid:          cid,
+		RootHash:     rootHash,
+		Size_:        uint64(size),
+	}
+
+	err := g.gc.BroadcastTxAndWait(ctx, msg)
+	if err != nil {
+		return errors.WithMessage(err, "error sending tx")
+	}
+
+	return nil
 }

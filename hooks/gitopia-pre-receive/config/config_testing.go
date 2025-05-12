@@ -3,5 +3,5 @@
 package config
 
 const (
-	GRPCHost = "localhost:9090"
+	GRPCHost = "gitopiad:9090"
 )

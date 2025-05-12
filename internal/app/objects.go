@@ -5,14 +5,13 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	git "github.com/gitopia/go-git/v5"
 	"github.com/gitopia/go-git/v5/plumbing"
 	"github.com/gitopia/go-git/v5/plumbing/format/objfile"
-	"github.com/spf13/viper"
 )
 
 // Serve loose git objects
@@ -43,8 +42,8 @@ func (s *Server) ObjectsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		RepoPath := path.Join(viper.GetString("GIT_DIR"), fmt.Sprintf("%s.git", repositoryId))
-		repo, err := git.PlainOpen(RepoPath)
+		repoPath := filepath.Join(s.Config.Dir, fmt.Sprintf("%d.git", repoId))
+		repo, err := git.PlainOpen(repoPath)
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 			return

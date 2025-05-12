@@ -35,10 +35,10 @@ services:
   ipfs0:
     container_name: ipfs0
     image: ipfs/kubo:release
-#   ports:
-#     - "4001:4001" # ipfs swarm - expose if needed/wanted
-#     - "5001:5001" # ipfs api - expose if needed/wanted
-#     - "8080:8080" # ipfs gateway - expose if needed/wanted
+    ports:
+      - "4001:4001" # ipfs swarm - expose if needed/wanted
+      - "5004:5001" # ipfs api - expose if needed/wanted
+      - "8080:8080" # ipfs gateway - expose if needed/wanted
     volumes:
       - ./compose/ipfs0:/data/ipfs
     networks:
@@ -78,6 +78,11 @@ services:
       - IPFS_CLUSTER_PEER_HOST=cluster0
       - IPFS_CLUSTER_PEER_PORT=9094
       - GIT_SERVER_ID=0
+      - IPFS_HOST=ipfs0
+      - IPFS_PORT=5001
+      - ENABLE_EXTERNAL_PINNING=${ENABLE_EXTERNAL_PINNING:-false}
+      - PINATA_API_KEY=${PINATA_API_KEY:-}
+      - PINATA_SECRET_KEY=${PINATA_SECRET_KEY:-}
     ports:
       - "5001:5000"
     volumes:
@@ -93,6 +98,8 @@ services:
   ipfs1:
     container_name: ipfs1
     image: ipfs/kubo:release
+    ports:
+      - "5005:5001"
     volumes:
       - ./compose/ipfs1:/data/ipfs
     networks:
@@ -123,6 +130,11 @@ services:
       - IPFS_CLUSTER_PEER_HOST=cluster1
       - IPFS_CLUSTER_PEER_PORT=9094
       - GIT_SERVER_ID=1
+      - IPFS_HOST=ipfs1
+      - IPFS_PORT=5001
+      - ENABLE_EXTERNAL_PINNING=${ENABLE_EXTERNAL_PINNING:-false}
+      - PINATA_API_KEY=${PINATA_API_KEY:-}
+      - PINATA_SECRET_KEY=${PINATA_SECRET_KEY:-}
     ports:
       - "5002:5000"
     volumes:
@@ -138,6 +150,8 @@ services:
   ipfs2:
     container_name: ipfs2
     image: ipfs/kubo:release
+    ports:
+      - "5006:5001"
     volumes:
       - ./compose/ipfs2:/data/ipfs
     networks:
@@ -168,6 +182,11 @@ services:
       - IPFS_CLUSTER_PEER_HOST=cluster2
       - IPFS_CLUSTER_PEER_PORT=9094
       - GIT_SERVER_ID=2
+      - IPFS_HOST=ipfs2
+      - IPFS_PORT=5001
+      - ENABLE_EXTERNAL_PINNING=${ENABLE_EXTERNAL_PINNING:-false}
+      - PINATA_API_KEY=${PINATA_API_KEY:-}
+      - PINATA_SECRET_KEY=${PINATA_SECRET_KEY:-}
     ports:
       - "5003:5000"
     volumes:

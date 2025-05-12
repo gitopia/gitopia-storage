@@ -16,6 +16,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/types/tx"
 	"github.com/gitopia/git-server/app"
 	"github.com/gitopia/git-server/app/consumer"
+	"github.com/gitopia/git-server/utils"
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia/v5/x/gitopia/types"
 	"github.com/pkg/errors"
@@ -259,8 +260,22 @@ func (h *InvokeForkRepositoryEventHandler) Process(ctx context.Context, event In
 		return nil
 	}
 
-	sourceRepoPath := path.Join(viper.GetString("GIT_DIR"), fmt.Sprintf("%v.git", event.RepoId))
-	targetRepoPath := path.Join(viper.GetString("GIT_DIR"), fmt.Sprintf("%v.git", forkedRepoId))
+	cacheDir := viper.GetString("GIT_DIR")
+	sourceRepoPath := path.Join(cacheDir, fmt.Sprintf("%v.git", event.RepoId))
+	targetRepoPath := path.Join(cacheDir, fmt.Sprintf("%v.git", forkedRepoId))
+
+	// check if source repo is cached
+	isCached, err := utils.IsRepoCached(event.RepoId, cacheDir)
+	if err != nil {
+		return err
+	}
+	if !isCached {
+		err = utils.DownloadRepo(event.RepoId, cacheDir)
+		if err != nil {
+			return err
+		}
+	}
+
 	cmd := exec.Command("git", "clone", "--shared", "--bare", sourceRepoPath, targetRepoPath)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

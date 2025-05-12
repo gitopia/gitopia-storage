@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
+	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/tx"
 	"github.com/gitopia/git-server/app"
 	"github.com/gitopia/git-server/app/consumer"
@@ -20,13 +21,16 @@ import (
 	"github.com/gitopia/gitopia-go"
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/rs/cors"
+	"github.com/sirupsen/logrus"
 )
 
-const (
+var (
 	invokeForkRepositoryQuery      = "tm.event='Tx' AND message.action='InvokeForkRepository'"
 	InvokeMergePullRequestQuery    = "tm.event='Tx' AND message.action='InvokeMergePullRequest'"
 	InvokeDaoMergePullRequestQuery = "tm.event='Tx' AND message.action='InvokeDaoMergePullRequest'"
-	challengeCreatedQuery          = "tm.event='EventChallengeCreated'"
+	challengeCreatedQuery          = "tm.event='NewBlock' AND gitopia.gitopia.storage.EventChallengeCreated.challenge_id EXISTS"
+	packfileUpdatedQuery           = "tm.event='NewBlock' AND gitopia.gitopia.storage.EventPackfileUpdated.repository_id EXISTS"
+	releaseAssetUpdatedQuery       = "tm.event='NewBlock' AND gitopia.gitopia.storage.EventReleaseAssetUpdated.repository_id EXISTS"
 )
 
 func NewStartCmd() *cobra.Command {
@@ -46,23 +50,10 @@ func NewStartCmd() *cobra.Command {
 func start(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
-	// Initialize Gitopia client configuration
-	gitopia.WithAppName(viper.GetString("APP_NAME"))
-	gitopia.WithChainId(viper.GetString("CHAIN_ID"))
-	gitopia.WithFeeGranter(viper.GetString("FEE_GRANTER"))
-	gitopia.WithGasPrices(viper.GetString("GAS_PRICES"))
-	gitopia.WithGitopiaAddr(viper.GetString("GITOPIA_ADDR"))
-	gitopia.WithTmAddr(viper.GetString("TM_ADDR"))
-	gitopia.WithWorkingDir(viper.GetString("WORKING_DIR"))
-
 	// Start event processor in a goroutine
 	eventErrChan := make(chan error, 1)
 	go func() {
-		clientCtx, err := gitopia.GetClientContext(AppName)
-		if err != nil {
-			eventErrChan <- errors.Wrap(err, "error initializing client context")
-			return
-		}
+		clientCtx := client.GetClientContextFromCmd(cmd)
 		txf, err := tx.NewFactoryCLI(clientCtx, cmd.Flags())
 		if err != nil {
 			eventErrChan <- errors.Wrap(err, "error initializing tx factory")
@@ -76,7 +67,14 @@ func start(cmd *cobra.Command, args []string) error {
 			return
 		}
 		defer gc.Close()
+
 		gp := app.NewGitopiaProxy(gc)
+
+		logger.FromContext(ctx).WithFields(logrus.Fields{
+			"provider": gp.ClientAddress(),
+			"env":      viper.GetString("ENV"),
+			"port":     viper.GetString("WEB_SERVER_PORT"),
+		}).Info("starting storage provider")
 
 		ftmc, err := gitopia.NewWSEvents(ctx, invokeForkRepositoryQuery)
 		if err != nil {
@@ -97,6 +95,18 @@ func start(cmd *cobra.Command, args []string) error {
 		}
 
 		ctmc, err := gitopia.NewWSEvents(ctx, challengeCreatedQuery)
+		if err != nil {
+			eventErrChan <- errors.WithMessage(err, "tm error")
+			return
+		}
+
+		putmc, err := gitopia.NewWSEvents(ctx, packfileUpdatedQuery)
+		if err != nil {
+			eventErrChan <- errors.WithMessage(err, "tm error")
+			return
+		}
+
+		rautmc, err := gitopia.NewWSEvents(ctx, releaseAssetUpdatedQuery)
 		if err != nil {
 			eventErrChan <- errors.WithMessage(err, "tm error")
 			return
@@ -124,11 +134,21 @@ func start(cmd *cobra.Command, args []string) error {
 		mergeHandler := handler.NewInvokeMergePullRequestEventHandler(gp, mcc)
 		daoMergeHandler := handler.NewInvokeDaoMergePullRequestEventHandler(gp, dmcc)
 		challengeHandler := handler.NewChallengeEventHandler(gp)
+		packfileUpdatedHandler := handler.NewPackfileUpdatedEventHandler(gp)
+		releaseAssetUpdatedHandler := handler.NewReleaseAssetUpdatedEventHandler(gp)
 
 		forkDone, forkSubscribeErr := ftmc.Subscribe(ctx, forkHandler.Handle)
 		mergeDone, mergeSubscribeErr := mtmc.Subscribe(ctx, mergeHandler.Handle)
 		daoMergeDone, daoMergeSubscribeErr := dmtmc.Subscribe(ctx, daoMergeHandler.Handle)
 		challengeDone, challengeSubscribeErr := ctmc.Subscribe(ctx, challengeHandler.Handle)
+
+		// Only subscribe to packfile and release asset events if external pinning is enabled
+		var packfileUpdatedDone, releaseAssetUpdatedDone <-chan struct{}
+		var packfileUpdatedSubscribeErr, releaseAssetUpdatedSubscribeErr <-chan error
+		if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
+			packfileUpdatedDone, packfileUpdatedSubscribeErr = putmc.Subscribe(ctx, packfileUpdatedHandler.Handle)
+			releaseAssetUpdatedDone, releaseAssetUpdatedSubscribeErr = rautmc.Subscribe(ctx, releaseAssetUpdatedHandler.Handle)
+		}
 
 		select {
 		case err = <-forkSubscribeErr:
@@ -147,6 +167,22 @@ func start(cmd *cobra.Command, args []string) error {
 			eventErrChan <- errors.WithMessage(err, "challenge tm subscribe error")
 		case <-challengeDone:
 			logger.FromContext(ctx).Info("challenge done")
+		case err = <-packfileUpdatedSubscribeErr:
+			if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
+				eventErrChan <- errors.WithMessage(err, "packfile updated tm subscribe error")
+			}
+		case <-packfileUpdatedDone:
+			if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
+				logger.FromContext(ctx).Info("packfile updated done")
+			}
+		case err = <-releaseAssetUpdatedSubscribeErr:
+			if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
+				eventErrChan <- errors.WithMessage(err, "release asset updated tm subscribe error")
+			}
+		case <-releaseAssetUpdatedDone:
+			if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
+				logger.FromContext(ctx).Info("release asset updated done")
+			}
 		}
 	}()
 

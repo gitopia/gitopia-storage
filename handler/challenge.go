@@ -1,22 +1,27 @@
 package handler
 
 import (
+	"bytes"
 	"context"
-	"encoding/hex"
-	"io"
+	"fmt"
+	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/buger/jsonparser"
-	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/gitopia/git-server/app"
 	"github.com/gitopia/git-server/pkg/merkleproof"
 	"github.com/gitopia/gitopia-go/logger"
+	storagetypes "github.com/gitopia/gitopia/v5/x/storage/types"
 	"github.com/ipfs/boxo/files"
 	"github.com/ipfs/boxo/path"
 	"github.com/ipfs/kubo/client/rpc"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 )
+
+const EventChallengeCreatedType = "gitopia.gitopia.storage.EventChallengeCreated"
 
 type ChallengeEvent struct {
 	ChallengeId     uint64
@@ -24,19 +29,21 @@ type ChallengeEvent struct {
 }
 
 func (e *ChallengeEvent) UnMarshal(eventBuf []byte) error {
-	challengeIdStr, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+".challenge_id", "[0]")
+	challengeIdStr, err := jsonparser.GetString(eventBuf, "events", EventChallengeCreatedType+".challenge_id", "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing challenge id")
 	}
+	challengeIdStr = strings.Trim(challengeIdStr, "\"")
 	challengeId, err := strconv.ParseUint(challengeIdStr, 10, 64)
 	if err != nil {
 		return errors.Wrap(err, "error parsing challenge id")
 	}
 
-	providerAddress, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+".provider_address", "[0]")
+	providerAddress, err := jsonparser.GetString(eventBuf, "events", EventChallengeCreatedType+".provider_address", "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing provider address")
 	}
+	providerAddress = strings.Trim(providerAddress, "\"")
 
 	e.ChallengeId = challengeId
 	e.ProviderAddress = providerAddress
@@ -68,11 +75,10 @@ func (h *ChallengeEventHandler) Handle(ctx context.Context, eventBuf []byte) err
 }
 
 func (h *ChallengeEventHandler) Process(ctx context.Context, event ChallengeEvent) error {
-	logger := logger.FromContext(ctx).WithFields(logrus.Fields{
+	logger.FromContext(ctx).WithFields(logrus.Fields{
 		"challengeId": event.ChallengeId,
 		"provider":    event.ProviderAddress,
-	})
-	logger.Info("Processing challenge event")
+	}).Info("processing challenge event")
 
 	// Get challenge details
 	challenge, err := h.gc.Challenge(ctx, event.ChallengeId)
@@ -80,8 +86,16 @@ func (h *ChallengeEventHandler) Process(ctx context.Context, event ChallengeEven
 		return errors.WithMessage(err, "failed to get challenge")
 	}
 
+	logger.FromContext(ctx).WithFields(logrus.Fields{
+		"challengeId": event.ChallengeId,
+		"provider":    event.ProviderAddress,
+		"packfileId":  challenge.PackfileId,
+		"chunkIndex":  challenge.ChunkIndex,
+		"rootHash":    challenge.RootHash,
+	}).Info("challenge details retrieved")
+
 	// Get packfile from IPFS using challenge CID
-	api, err := rpc.NewLocalApi()
+	api, err := rpc.NewURLApiWithClient(fmt.Sprintf("http://%s:%s", viper.GetString("IPFS_HOST"), viper.GetString("IPFS_PORT")), &http.Client{})
 	if err != nil {
 		return errors.WithMessage(err, "failed to create IPFS API")
 	}
@@ -101,57 +115,49 @@ func (h *ChallengeEventHandler) Process(ctx context.Context, event ChallengeEven
 		return errors.WithMessage(err, "failed to get packfile from IPFS")
 	}
 
+	logger.FromContext(ctx).WithFields(logrus.Fields{
+		"cid": packfile.Cid,
+	}).Info("packfile retrieved from IPFS daemon")
+
 	file, ok := f.(files.File)
 	if !ok {
 		return errors.New("invalid packfile format")
 	}
 
-	data, err := io.ReadAll(file)
-	if err != nil {
-		return errors.WithMessage(err, "failed to read packfile data")
-	}
-
-	// Generate proof for the challenged chunk
-	chunks := splitIntoChunks(data, 256*1024) // 256KiB chunks
-	proofs, root, err := merkleproof.GeneratePackfileProofs(chunks)
+	proof, root, chunkHash, err := merkleproof.GenerateChunkProof(file, challenge.ChunkIndex, 256*1024)
 	if err != nil {
 		return errors.WithMessage(err, "failed to generate proofs")
 	}
 
 	// Verify root hash matches
-	if hex.EncodeToString(root) != challenge.RootHash {
+	if !bytes.Equal(root, challenge.RootHash) {
 		return errors.New("root hash mismatch")
 	}
-
-	// Get proof for challenged chunk
-	if int(challenge.ChunkIndex) >= len(proofs) {
-		return errors.New("invalid chunk index")
-	}
-	proof := proofs[challenge.ChunkIndex]
 
 	// Submit challenge response
 	err = h.gc.SubmitChallenge(ctx,
 		event.ProviderAddress,
 		event.ChallengeId,
-		proof.ChunkData,
-		proof.Proof.Hashes)
+		chunkHash,
+		&storagetypes.Proof{
+			Hashes: proof.Hashes,
+			Index:  proof.Index,
+		})
 	if err != nil {
-		return errors.WithMessage(err, "failed to submit challenge response")
-	}
-
-	logger.Info("Challenge response submitted successfully")
-	return nil
-}
-
-// Helper function to split data into chunks
-func splitIntoChunks(data []byte, chunkSize int) [][]byte {
-	var chunks [][]byte
-	for i := 0; i < len(data); i += chunkSize {
-		end := i + chunkSize
-		if end > len(data) {
-			end = len(data)
+		if strings.Contains(err.Error(), "challenge deadline exceeded") {
+			logger.FromContext(ctx).WithFields(logrus.Fields{
+				"challengeId": event.ChallengeId,
+				"provider":    event.ProviderAddress,
+			}).Error("challenge deadline exceeded")
+		} else {
+			return errors.WithMessage(err, "failed to submit challenge response")
 		}
-		chunks = append(chunks, data[i:end])
 	}
-	return chunks
+
+	logger.FromContext(ctx).WithFields(logrus.Fields{
+		"challengeId": event.ChallengeId,
+		"provider":    event.ProviderAddress,
+	}).Info("challenge response submitted")
+
+	return nil
 }

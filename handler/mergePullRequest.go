@@ -178,6 +178,33 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 		return err
 	}
 
+	// check if head repository is cached
+	cacheDir := viper.GetString("GIT_DIR")
+	isCached, err := utils.IsRepoCached(resp.Head.RepositoryId, cacheDir)
+	if err != nil {
+		return err
+	}
+	if !isCached {
+		err = utils.DownloadRepo(resp.Head.RepositoryId, cacheDir)
+		if err != nil {
+			return err
+		}
+	}
+
+	if resp.Base.RepositoryId != resp.Head.RepositoryId {
+		// check if base repository is cached
+		isCached, err := utils.IsRepoCached(resp.Base.RepositoryId, cacheDir)
+		if err != nil {
+			return err
+		}
+		if !isCached {
+			err = utils.DownloadRepo(resp.Base.RepositoryId, cacheDir)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
 	headRepositoryName, err := h.gc.RepositoryName(ctx, resp.Head.RepositoryId)
 	if err != nil {
 		err = errors.WithMessage(err, "query error")

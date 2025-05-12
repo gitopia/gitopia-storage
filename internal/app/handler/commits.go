@@ -65,8 +65,23 @@ func CommitsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		RepoPath := path.Join(viper.GetString("GIT_DIR"), fmt.Sprintf("%d.git", body.RepositoryID))
-		repo, err := git.PlainOpen(RepoPath)
+		// check if repository is cached
+		cacheDir := viper.GetString("GIT_DIR")
+		isCached, err := utils.IsRepoCached(body.RepositoryID, cacheDir)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if !isCached {
+			err = utils.DownloadRepo(body.RepositoryID, cacheDir)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		repoPath := path.Join(cacheDir, fmt.Sprintf("%d.git", body.RepositoryID))
+		repo, err := git.PlainOpen(repoPath)
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 			return
@@ -97,7 +112,7 @@ func CommitsHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		pageRes, err = utils.PaginateCommitHistoryResponse(RepoPath, repo, body.Pagination, 100, &body, func(commit utils.Commit) error {
+		pageRes, err = utils.PaginateCommitHistoryResponse(repoPath, repo, body.Pagination, 100, &body, func(commit utils.Commit) error {
 			commits = append(commits, &commit)
 			return nil
 		})

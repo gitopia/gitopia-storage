@@ -1,36 +1,43 @@
 package app
 
 import (
-	// "context"
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
-	"github.com/gitopia/git-server/internal/db"
 	"github.com/gitopia/git-server/utils"
-	// gitopiatypes "github.com/gitopia/gitopia/v5/x/gitopia/types"
+	storagetypes "github.com/gitopia/gitopia/v5/x/storage/types"
 )
 
 func (s *Server) CacheRepository(repoId uint64) error {
-	// TODO: get latest packfile info from the chain
-	name := "pack-xyz.pack"
-	cid := "QmPK1xyz"
-
-	if !utils.IsCached(db.CacheDb, repoId, cid, name) {
-		CacheMutex.Lock()
-		defer CacheMutex.Unlock()
-		if err := utils.DownloadRepo(db.CacheDb, repoId, "repo-path", &s.Config); err != nil {
-			return err
-		}
-	} else { // Repository is already available in file system cache
-		CacheMutex.Lock()
-		// Increase cache expiry time for this repository
-		if err := utils.UpdateCacheEntry(db.CacheDb, repoId, cid, name); err != nil {
-			return err
-		}
-		CacheMutex.Unlock()
-
-		// Acquire mutex for reading
-		// This is to make sure that no cache updates happen
-		CacheMutex.RLock()
-		defer CacheMutex.RUnlock()
+	// Get cid from the chain
+	packfileResp, err := s.QueryService.GitopiaRepositoryPackfile(context.Background(), &storagetypes.QueryRepositoryPackfileRequest{
+		RepositoryId: repoId,
+	})
+	if err != nil && !strings.Contains(err.Error(), "packfile not found") {
+		return fmt.Errorf("failed to get cid from chain: %v", err)
 	}
+
+	// Only attempt to fetch and cache packfile if it exists on chain
+	if packfileResp != nil && packfileResp.Packfile.Cid != "" {
+		// Check if packfile exists in objects/pack directory
+		cached := false
+		repoPath := filepath.Join(s.Config.Dir, fmt.Sprintf("%d.git", repoId))
+		packfilePath := filepath.Join(repoPath, "objects", "pack", packfileResp.Packfile.Name)
+		if _, err := os.Stat(packfilePath); err == nil {
+			cached = true
+		}
+
+		if !cached {
+			// Fetch packfile from IPFS and place in objects/pack directory
+			err = utils.DownloadRepo(repoId, s.Config.Dir)
+			if err != nil {
+				return fmt.Errorf("failed to cache repository: %v", err)
+			}
+		}
+	}
+
 	return nil
 }
