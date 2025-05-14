@@ -232,8 +232,8 @@ func (g GitopiaProxy) Packfile(ctx context.Context, id uint64) (storagetypes.Pac
 	return resp.Packfile, nil
 }
 
-func (g GitopiaProxy) IsProviderChallenge(providerAddress string) bool {
-	return providerAddress == g.gc.Address().String()
+func (g GitopiaProxy) CheckProvider(provider string) bool {
+	return provider == g.gc.Address().String()
 }
 
 // get client address
@@ -280,4 +280,17 @@ func (g GitopiaProxy) UpdateReleaseAsset(ctx context.Context, repositoryId uint6
 	}
 
 	return nil
+}
+
+func (g GitopiaProxy) RepositoryReleaseAsset(ctx context.Context, repositoryId uint64, tag string, name string) (storagetypes.ReleaseAsset, error) {
+	resp, err := g.gc.QueryClient().Storage.RepositoryReleaseAsset(ctx, &storagetypes.QueryRepositoryReleaseAssetRequest{
+		RepositoryId: repositoryId,
+		Tag:          tag,
+		Name:         name,
+	})
+	if err != nil {
+		return storagetypes.ReleaseAsset{}, errors.WithMessage(err, "query error")
+	}
+
+	return resp.ReleaseAsset, nil
 }

@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -20,17 +22,21 @@ import (
 	"github.com/gitopia/git-server/utils"
 	"github.com/gitopia/gitopia-go"
 	"github.com/gitopia/gitopia-go/logger"
+	ipfsclusterclient "github.com/ipfs-cluster/ipfs-cluster/api/rest/client"
 	"github.com/rs/cors"
 	"github.com/sirupsen/logrus"
 )
 
-var (
-	invokeForkRepositoryQuery      = "tm.event='Tx' AND message.action='InvokeForkRepository'"
+const (
+	InvokeForkRepositoryQuery      = "tm.event='Tx' AND message.action='InvokeForkRepository'"
 	InvokeMergePullRequestQuery    = "tm.event='Tx' AND message.action='InvokeMergePullRequest'"
 	InvokeDaoMergePullRequestQuery = "tm.event='Tx' AND message.action='InvokeDaoMergePullRequest'"
-	challengeCreatedQuery          = "tm.event='NewBlock' AND gitopia.gitopia.storage.EventChallengeCreated.challenge_id EXISTS"
-	packfileUpdatedQuery           = "tm.event='NewBlock' AND gitopia.gitopia.storage.EventPackfileUpdated.repository_id EXISTS"
-	releaseAssetUpdatedQuery       = "tm.event='NewBlock' AND gitopia.gitopia.storage.EventReleaseAssetUpdated.repository_id EXISTS"
+	ChallengeCreatedQuery          = "tm.event='NewBlock' AND gitopia.gitopia.storage.EventChallengeCreated.challenge_id EXISTS"
+	PackfileUpdatedQuery           = "tm.event='Tx' AND message.action='gitopia.gitopia.storage.EventPackfileUpdated'"
+	ReleaseAssetUpdatedQuery       = "tm.event='Tx' AND message.action='gitopia.gitopia.storage.EventReleaseAssetUpdated'"
+	CreateReleaseQuery             = "tm.event='Tx' AND message.action='CreateRelease'"
+	UpdateReleaseQuery             = "tm.event='Tx' AND message.action='UpdateRelease'"
+	DeleteReleaseQuery             = "tm.event='Tx' AND message.action='DeleteRelease'"
 )
 
 func NewStartCmd() *cobra.Command {
@@ -70,13 +76,25 @@ func start(cmd *cobra.Command, args []string) error {
 
 		gp := app.NewGitopiaProxy(gc)
 
+		// Initialize IPFS cluster client
+		ipfsCfg := &ipfsclusterclient.Config{
+			Host:    viper.GetString("IPFS_CLUSTER_PEER_HOST"),
+			Port:    viper.GetString("IPFS_CLUSTER_PEER_PORT"),
+			Timeout: time.Minute * 5, // Reasonable timeout for pinning
+		}
+		cl, err := ipfsclusterclient.NewDefaultClient(ipfsCfg)
+		if err != nil {
+			eventErrChan <- errors.Wrap(err, "failed to create IPFS cluster client")
+			return
+		}
+
 		logger.FromContext(ctx).WithFields(logrus.Fields{
 			"provider": gp.ClientAddress(),
 			"env":      viper.GetString("ENV"),
 			"port":     viper.GetString("WEB_SERVER_PORT"),
 		}).Info("starting storage provider")
 
-		ftmc, err := gitopia.NewWSEvents(ctx, invokeForkRepositoryQuery)
+		ftmc, err := gitopia.NewWSEvents(ctx, InvokeForkRepositoryQuery)
 		if err != nil {
 			eventErrChan <- errors.WithMessage(err, "tm error")
 			return
@@ -94,19 +112,19 @@ func start(cmd *cobra.Command, args []string) error {
 			return
 		}
 
-		ctmc, err := gitopia.NewWSEvents(ctx, challengeCreatedQuery)
+		ctmc, err := gitopia.NewWSEvents(ctx, ChallengeCreatedQuery)
 		if err != nil {
 			eventErrChan <- errors.WithMessage(err, "tm error")
 			return
 		}
 
-		putmc, err := gitopia.NewWSEvents(ctx, packfileUpdatedQuery)
+		putmc, err := gitopia.NewWSEvents(ctx, PackfileUpdatedQuery)
 		if err != nil {
 			eventErrChan <- errors.WithMessage(err, "tm error")
 			return
 		}
 
-		rautmc, err := gitopia.NewWSEvents(ctx, releaseAssetUpdatedQuery)
+		rautmc, err := gitopia.NewWSEvents(ctx, ReleaseAssetUpdatedQuery)
 		if err != nil {
 			eventErrChan <- errors.WithMessage(err, "tm error")
 			return
@@ -136,11 +154,40 @@ func start(cmd *cobra.Command, args []string) error {
 		challengeHandler := handler.NewChallengeEventHandler(gp)
 		packfileUpdatedHandler := handler.NewPackfileUpdatedEventHandler(gp)
 		releaseAssetUpdatedHandler := handler.NewReleaseAssetUpdatedEventHandler(gp)
+		releaseHandler := handler.NewReleaseEventHandler(gp, cl)
 
 		forkDone, forkSubscribeErr := ftmc.Subscribe(ctx, forkHandler.Handle)
 		mergeDone, mergeSubscribeErr := mtmc.Subscribe(ctx, mergeHandler.Handle)
 		daoMergeDone, daoMergeSubscribeErr := dmtmc.Subscribe(ctx, daoMergeHandler.Handle)
 		challengeDone, challengeSubscribeErr := ctmc.Subscribe(ctx, challengeHandler.Handle)
+
+		// Subscribe to release events
+		createReleaseTMC, err := gitopia.NewWSEvents(ctx, CreateReleaseQuery)
+		if err != nil {
+			eventErrChan <- errors.WithMessage(err, "create release tm error")
+			return
+		}
+		createReleaseDone, createReleaseSubscribeErr := createReleaseTMC.Subscribe(ctx, func(ctx context.Context, eventBuf []byte) error {
+			return releaseHandler.Handle(ctx, eventBuf, handler.EventCreateReleaseType)
+		})
+
+		updateReleaseTMC, err := gitopia.NewWSEvents(ctx, UpdateReleaseQuery)
+		if err != nil {
+			eventErrChan <- errors.WithMessage(err, "update release tm error")
+			return
+		}
+		updateReleaseDone, updateReleaseSubscribeErr := updateReleaseTMC.Subscribe(ctx, func(ctx context.Context, eventBuf []byte) error {
+			return releaseHandler.Handle(ctx, eventBuf, handler.EventUpdateReleaseType)
+		})
+
+		deleteReleaseTMC, err := gitopia.NewWSEvents(ctx, DeleteReleaseQuery)
+		if err != nil {
+			eventErrChan <- errors.WithMessage(err, "delete release tm error")
+			return
+		}
+		deleteReleaseDone, deleteReleaseSubscribeErr := deleteReleaseTMC.Subscribe(ctx, func(ctx context.Context, eventBuf []byte) error {
+			return releaseHandler.Handle(ctx, eventBuf, handler.EventDeleteReleaseType)
+		})
 
 		// Only subscribe to packfile and release asset events if external pinning is enabled
 		var packfileUpdatedDone, releaseAssetUpdatedDone <-chan struct{}
@@ -183,6 +230,18 @@ func start(cmd *cobra.Command, args []string) error {
 			if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
 				logger.FromContext(ctx).Info("release asset updated done")
 			}
+		case err = <-createReleaseSubscribeErr:
+			eventErrChan <- errors.WithMessage(err, "create release tm subscribe error")
+		case <-createReleaseDone:
+			logger.FromContext(ctx).Info("create release done")
+		case err = <-updateReleaseSubscribeErr:
+			eventErrChan <- errors.WithMessage(err, "update release tm subscribe error")
+		case <-updateReleaseDone:
+			logger.FromContext(ctx).Info("update release done")
+		case err = <-deleteReleaseSubscribeErr:
+			eventErrChan <- errors.WithMessage(err, "delete release tm subscribe error")
+		case <-deleteReleaseDone:
+			logger.FromContext(ctx).Info("delete release done")
 		}
 	}()
 

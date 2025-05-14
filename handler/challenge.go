@@ -24,8 +24,8 @@ import (
 const EventChallengeCreatedType = "gitopia.gitopia.storage.EventChallengeCreated"
 
 type ChallengeEvent struct {
-	ChallengeId     uint64
-	ProviderAddress string
+	ChallengeId uint64
+	Provider    string
 }
 
 func (e *ChallengeEvent) UnMarshal(eventBuf []byte) error {
@@ -39,14 +39,14 @@ func (e *ChallengeEvent) UnMarshal(eventBuf []byte) error {
 		return errors.Wrap(err, "error parsing challenge id")
 	}
 
-	providerAddress, err := jsonparser.GetString(eventBuf, "events", EventChallengeCreatedType+".provider_address", "[0]")
+	provider, err := jsonparser.GetString(eventBuf, "events", EventChallengeCreatedType+".provider", "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing provider address")
 	}
-	providerAddress = strings.Trim(providerAddress, "\"")
+	provider = strings.Trim(provider, "\"")
 
 	e.ChallengeId = challengeId
-	e.ProviderAddress = providerAddress
+	e.Provider = provider
 
 	return nil
 }
@@ -67,7 +67,7 @@ func (h *ChallengeEventHandler) Handle(ctx context.Context, eventBuf []byte) err
 	}
 
 	// Only process challenges meant for this provider
-	if !h.gc.IsProviderChallenge(event.ProviderAddress) {
+	if !h.gc.CheckProvider(event.Provider) {
 		return nil
 	}
 
@@ -76,8 +76,8 @@ func (h *ChallengeEventHandler) Handle(ctx context.Context, eventBuf []byte) err
 
 func (h *ChallengeEventHandler) Process(ctx context.Context, event ChallengeEvent) error {
 	logger.FromContext(ctx).WithFields(logrus.Fields{
-		"challengeId": event.ChallengeId,
-		"provider":    event.ProviderAddress,
+		"challenge_id": event.ChallengeId,
+		"provider":     event.Provider,
 	}).Info("processing challenge event")
 
 	// Get challenge details
@@ -87,11 +87,12 @@ func (h *ChallengeEventHandler) Process(ctx context.Context, event ChallengeEven
 	}
 
 	logger.FromContext(ctx).WithFields(logrus.Fields{
-		"challengeId": event.ChallengeId,
-		"provider":    event.ProviderAddress,
-		"packfileId":  challenge.PackfileId,
-		"chunkIndex":  challenge.ChunkIndex,
-		"rootHash":    challenge.RootHash,
+		"challenge_id":   event.ChallengeId,
+		"provider":       event.Provider,
+		"challenge_type": challenge.ChallengeType,
+		"content_id":     challenge.ContentId,
+		"chunk_index":    challenge.ChunkIndex,
+		"root_hash":      challenge.RootHash,
 	}).Info("challenge details retrieved")
 
 	// Get packfile from IPFS using challenge CID
@@ -100,12 +101,22 @@ func (h *ChallengeEventHandler) Process(ctx context.Context, event ChallengeEven
 		return errors.WithMessage(err, "failed to create IPFS API")
 	}
 
-	packfile, err := h.gc.Packfile(ctx, challenge.PackfileId)
-	if err != nil {
-		return errors.WithMessage(err, "failed to get packfile from Gitopia")
+	var cid string
+	if challenge.ChallengeType == storagetypes.ChallengeType_CHALLENGE_TYPE_PACKFILE {
+		packfile, err := h.gc.Packfile(ctx, challenge.ContentId)
+		if err != nil {
+			return errors.WithMessage(err, "failed to get packfile from Gitopia")
+		}
+		cid = packfile.Cid
+	} else {
+		release, err := h.gc.ReleaseAsset(ctx, challenge.ContentId)
+		if err != nil {
+			return errors.WithMessage(err, "failed to get release asset from Gitopia")
+		}
+		cid = release.Cid
 	}
 
-	p, err := path.NewPath("/ipfs/" + packfile.Cid)
+	p, err := path.NewPath("/ipfs/" + cid)
 	if err != nil {
 		return errors.WithMessage(err, "failed to create path")
 	}
@@ -116,12 +127,12 @@ func (h *ChallengeEventHandler) Process(ctx context.Context, event ChallengeEven
 	}
 
 	logger.FromContext(ctx).WithFields(logrus.Fields{
-		"cid": packfile.Cid,
-	}).Info("packfile retrieved from IPFS daemon")
+		"cid": cid,
+	}).Info("content retrieved from IPFS daemon")
 
 	file, ok := f.(files.File)
 	if !ok {
-		return errors.New("invalid packfile format")
+		return errors.New("invalid content format")
 	}
 
 	proof, root, chunkHash, err := merkleproof.GenerateChunkProof(file, challenge.ChunkIndex, 256*1024)
@@ -136,7 +147,7 @@ func (h *ChallengeEventHandler) Process(ctx context.Context, event ChallengeEven
 
 	// Submit challenge response
 	err = h.gc.SubmitChallenge(ctx,
-		event.ProviderAddress,
+		event.Provider,
 		event.ChallengeId,
 		chunkHash,
 		&storagetypes.Proof{
@@ -147,7 +158,7 @@ func (h *ChallengeEventHandler) Process(ctx context.Context, event ChallengeEven
 		if strings.Contains(err.Error(), "challenge deadline exceeded") {
 			logger.FromContext(ctx).WithFields(logrus.Fields{
 				"challengeId": event.ChallengeId,
-				"provider":    event.ProviderAddress,
+				"provider":    event.Provider,
 			}).Error("challenge deadline exceeded")
 		} else {
 			return errors.WithMessage(err, "failed to submit challenge response")
@@ -156,7 +167,7 @@ func (h *ChallengeEventHandler) Process(ctx context.Context, event ChallengeEven
 
 	logger.FromContext(ctx).WithFields(logrus.Fields{
 		"challengeId": event.ChallengeId,
-		"provider":    event.ProviderAddress,
+		"provider":    event.Provider,
 	}).Info("challenge response submitted")
 
 	return nil

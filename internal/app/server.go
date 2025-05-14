@@ -30,7 +30,7 @@ import (
 	offchaintypes "github.com/gitopia/gitopia/v5/x/offchain/types"
 	storagetypes "github.com/gitopia/gitopia/v5/x/storage/types"
 	"github.com/ipfs-cluster/ipfs-cluster/api"
-	ipfsClusterClient "github.com/ipfs-cluster/ipfs-cluster/api/rest/client"
+	ipfsclusterclient "github.com/ipfs-cluster/ipfs-cluster/api/rest/client"
 	"github.com/ipfs/boxo/files"
 	ipfsPath "github.com/ipfs/boxo/path"
 	"github.com/ipfs/kubo/client/rpc"
@@ -242,12 +242,12 @@ func New(cmd *cobra.Command, cfg utils.Config) (*Server, error) {
 	s.GitopiaProxy = app.NewGitopiaProxy(gitopiaClient)
 
 	// Initialize IPFS cluster client
-	ipfsCfg := &ipfsClusterClient.Config{
+	ipfsCfg := &ipfsclusterclient.Config{
 		Host:    viper.GetString("IPFS_CLUSTER_PEER_HOST"),
 		Port:    viper.GetString("IPFS_CLUSTER_PEER_PORT"),
 		Timeout: time.Minute * 5, // Reasonable timeout for pinning
 	}
-	cl, err := ipfsClusterClient.NewDefaultClient(ipfsCfg)
+	cl, err := ipfsclusterclient.NewDefaultClient(ipfsCfg)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create IPFS cluster client")
 	}
@@ -453,7 +453,7 @@ type Server struct {
 	AuthFunc          func(string, *Request) (bool, error)
 	QueryService      QueryService
 	GitopiaProxy      app.GitopiaProxy
-	IPFSClusterClient ipfsClusterClient.Client
+	IPFSClusterClient ipfsclusterclient.Client
 }
 
 type ServerWrapper struct {
