@@ -6,9 +6,13 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/pkg/errors"
 )
 
 // GetFullCommitID returns full length (40) of commit ID by given short SHA in a repository.
@@ -104,4 +108,34 @@ func CleanUpProcessGroup(cmd *exec.Cmd) {
 	}
 
 	go cmd.Wait()
+}
+
+func GetPackfileName(repoPath string) (string, error) {
+	// Walk the directory and get the packfile name
+	var packfileName string
+	packfileDir := path.Join(repoPath, "objects", "pack")
+	err := filepath.Walk(packfileDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Check if the file has a .pack extension
+		if !info.IsDir() && strings.HasSuffix(info.Name(), ".pack") {
+			packfileName = path
+			return nil // Found the file, no need to continue walking
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return "", err
+	}
+
+	// Check if a .pack file was found
+	if packfileName == "" {
+		return "", errors.New("No .pack file found")
+	}
+
+	return packfileName, nil
 }

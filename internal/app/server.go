@@ -29,10 +29,9 @@ import (
 	gitopiatypes "github.com/gitopia/gitopia/v5/x/gitopia/types"
 	offchaintypes "github.com/gitopia/gitopia/v5/x/offchain/types"
 	storagetypes "github.com/gitopia/gitopia/v5/x/storage/types"
-	"github.com/ipfs-cluster/ipfs-cluster/api"
 	ipfsclusterclient "github.com/ipfs-cluster/ipfs-cluster/api/rest/client"
 	"github.com/ipfs/boxo/files"
-	ipfsPath "github.com/ipfs/boxo/path"
+	ipfspath "github.com/ipfs/boxo/path"
 	"github.com/ipfs/kubo/client/rpc"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/spf13/cobra"
@@ -546,84 +545,32 @@ func (s *Server) PostRPC(service string, w http.ResponseWriter, r *Request) {
 			return
 		}
 
-		// Walk the directory and get the packfile name
-		var packfileName string
-		packfileDir := path.Join(r.RepoPath, "objects", "pack")
-		err := filepath.Walk(packfileDir, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-
-			// Check if the file has a .pack extension
-			if !info.IsDir() && strings.HasSuffix(info.Name(), ".pack") {
-				packfileName = path
-				return nil // Found the file, no need to continue walking
-			}
-
-			return nil
-		})
-
+		packfileName, err := utils.GetPackfileName(r.RepoPath)
 		if err != nil {
-			fail500(w, logContext, err)
+			fail500(w, logContext, fmt.Errorf("failed to get packfile name: %w", err))
 			return
 		}
 
-		// Check if a .pack file was found
-		if packfileName == "" {
-			err := errors.New("No .pack file found")
-			fail500(w, logContext, err)
-			return
-		}
-
-		// Add and pin the packfile to IPFS cluster
-		paths := []string{packfileName}
-		addParams := api.DefaultAddParams()
-		addParams.Recursive = false
-		addParams.Layout = "balanced"
-
-		outputChan := make(chan api.AddedOutput)
-		var cid api.Cid
-
-		go func() {
-			err := s.IPFSClusterClient.Add(context.Background(), paths, addParams, outputChan)
-			if err != nil {
-				utils.LogError(logContext, fmt.Errorf("failed to add file to IPFS cluster: %w", err))
-				close(outputChan)
-			}
-		}()
-
-		// Get CID from output channel
-		for output := range outputChan {
-			cid = output.Cid
-		}
-
-		// Pin the file with default options
-		pinOpts := api.PinOptions{
-			ReplicationFactorMin: -1,
-			ReplicationFactorMax: -1,
-			Name:                 filepath.Base(packfileName),
-		}
-
-		_, err = s.IPFSClusterClient.Pin(context.Background(), cid, pinOpts)
+		cid, err := utils.PinFile(s.IPFSClusterClient, packfileName)
 		if err != nil {
-			fail500(w, logContext, fmt.Errorf("failed to pin file in IPFS cluster: %w", err))
+			fail500(w, logContext, fmt.Errorf("failed to pin packfile to IPFS cluster: %w", err))
 			return
 		}
 
-		// Get packfile from IPFS using challenge CID
-		api, err := rpc.NewURLApiWithClient(fmt.Sprintf("http://%s:%s", viper.GetString("IPFS_HOST"), viper.GetString("IPFS_PORT")), &http.Client{})
+		// Get packfile from IPFS cluster
+		ipfsHttpApi, err := rpc.NewURLApiWithClient(fmt.Sprintf("http://%s:%s", viper.GetString("IPFS_HOST"), viper.GetString("IPFS_PORT")), &http.Client{})
 		if err != nil {
 			fail500(w, logContext, fmt.Errorf("failed to create IPFS API: %w", err))
 			return
 		}
 
-		p, err := ipfsPath.NewPath("/ipfs/" + cid.String())
+		p, err := ipfspath.NewPath("/ipfs/" + cid)
 		if err != nil {
 			fail500(w, logContext, fmt.Errorf("failed to create path: %w", err))
 			return
 		}
 
-		f, err := api.Unixfs().Get(context.Background(), p)
+		f, err := ipfsHttpApi.Unixfs().Get(context.Background(), p)
 		if err != nil {
 			fail500(w, logContext, fmt.Errorf("failed to get packfile from IPFS: %w", err))
 			return
@@ -648,12 +595,29 @@ func (s *Server) PostRPC(service string, w http.ResponseWriter, r *Request) {
 			return
 		}
 
+		// fetch older packfile details from gitopia
+		packfileResp, err := s.QueryService.GitopiaRepositoryPackfile(context.Background(), &storagetypes.QueryRepositoryPackfileRequest{
+			RepositoryId: repoId,
+		})
+		if err != nil {
+			fail500(w, logContext, fmt.Errorf("failed to get packfile details: %w", err))
+			return
+		}
+
+		if packfileResp != nil && packfileResp.Packfile.Cid != "" {
+			err = utils.UnpinFile(s.IPFSClusterClient, packfileResp.Packfile.Cid)
+			if err != nil {
+				fail500(w, logContext, fmt.Errorf("failed to unpin packfile from IPFS cluster: %w", err))
+				return
+			}
+		}
+
 		// After successfully pinning to IPFS
 		err = s.GitopiaProxy.UpdateRepositoryPackfile(
 			context.Background(),
 			repoId,
 			filepath.Base(packfileName),
-			cid.String(),
+			cid,
 			rootHash,
 			packfileInfo.Size(),
 		)

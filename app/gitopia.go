@@ -294,3 +294,14 @@ func (g GitopiaProxy) RepositoryReleaseAsset(ctx context.Context, repositoryId u
 
 	return resp.ReleaseAsset, nil
 }
+
+func (g GitopiaProxy) RepositoryPackfile(ctx context.Context, repositoryId uint64) (storagetypes.Packfile, error) {
+	resp, err := g.gc.QueryClient().Storage.RepositoryPackfile(ctx, &storagetypes.QueryRepositoryPackfileRequest{
+		RepositoryId: repositoryId,
+	})
+	if err != nil {
+		return storagetypes.Packfile{}, errors.WithMessage(err, "query error")
+	}
+
+	return resp.Packfile, nil
+}

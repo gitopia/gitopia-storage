@@ -15,7 +15,6 @@ import (
 	"github.com/ipfs-cluster/ipfs-cluster/api"
 	ipfsclusterclient "github.com/ipfs-cluster/ipfs-cluster/api/rest/client"
 	"github.com/ipfs/boxo/files"
-	"github.com/ipfs/go-cid"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -159,16 +158,13 @@ func (h *ReleaseEventHandler) pinAttachment(ctx context.Context, attachment Atta
 
 func (h *ReleaseEventHandler) unpinAttachment(ctx context.Context, asset storagetypes.ReleaseAsset) error {
 	// Parse CID from string
-	c, err := cid.Decode(asset.Cid)
+	cid, err := api.DecodeCid(asset.Cid)
 	if err != nil {
 		return errors.Wrap(err, "failed to parse CID")
 	}
 
-	// Convert to api.Cid
-	apiCid := api.Cid(c.String())
-
 	// Unpin the file from IPFS cluster
-	_, err = h.ipfsClusterClient.Unpin(ctx, apiCid)
+	_, err = h.ipfsClusterClient.Unpin(ctx, cid)
 	if err != nil {
 		return errors.Wrap(err, "failed to unpin file from IPFS cluster")
 	}

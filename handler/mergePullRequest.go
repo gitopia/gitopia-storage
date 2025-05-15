@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,9 +19,14 @@ import (
 	"github.com/cosmos/cosmos-sdk/types/tx"
 	"github.com/gitopia/git-server/app"
 	"github.com/gitopia/git-server/app/consumer"
+	"github.com/gitopia/git-server/pkg/merkleproof"
 	"github.com/gitopia/git-server/utils"
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia/v5/x/gitopia/types"
+	ipfsclusterclient "github.com/ipfs-cluster/ipfs-cluster/api/rest/client"
+	"github.com/ipfs/boxo/files"
+	ipfspath "github.com/ipfs/boxo/path"
+	"github.com/ipfs/kubo/client/rpc"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
@@ -92,6 +98,8 @@ type InvokeMergePullRequestEventHandler struct {
 
 	cc consumer.Client
 
+	ipfsClusterClient ipfsclusterclient.Client
+
 	// commit offset only when backfill is complete
 	commitOffset bool
 	// written by backfill routine
@@ -100,12 +108,13 @@ type InvokeMergePullRequestEventHandler struct {
 	offsetChan     chan uint64
 }
 
-func NewInvokeMergePullRequestEventHandler(g app.GitopiaProxy, c consumer.Client) InvokeMergePullRequestEventHandler {
+func NewInvokeMergePullRequestEventHandler(g app.GitopiaProxy, c consumer.Client, ipfsClusterClient ipfsclusterclient.Client) InvokeMergePullRequestEventHandler {
 	return InvokeMergePullRequestEventHandler{
-		gc:           g,
-		cc:           c,
-		offsetChan:   make(chan uint64),
-		commitOffset: false,
+		gc:                g,
+		cc:                c,
+		ipfsClusterClient: ipfsClusterClient,
+		offsetChan:        make(chan uint64),
+		commitOffset:      false,
 	}
 }
 
@@ -482,6 +491,68 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 			return errors.WithMessage(err2, "update task error")
 		}
 		return err
+	}
+
+	baseRepoPath := filepath.Join(cacheDir, fmt.Sprintf("%d.git", resp.Base.RepositoryId))
+
+	packfileName, err := utils.GetPackfileName(baseRepoPath)
+	if err != nil {
+		return errors.WithMessage(err, "get packfile name error")
+	}
+
+	cid, err := utils.PinFile(h.ipfsClusterClient, packfileName)
+	if err != nil {
+		return errors.WithMessage(err, "pin packfile error")
+	}
+
+	// fetch older packfile details from gitopia
+	packfile, err := h.gc.RepositoryPackfile(context.Background(), resp.Base.RepositoryId)
+	if err != nil {
+		return errors.WithMessage(err, "get packfile details error")
+	}
+
+	if packfile.Cid != "" {
+		err = utils.UnpinFile(h.ipfsClusterClient, packfile.Cid)
+		if err != nil {
+			return errors.WithMessage(err, "unpin packfile error")
+		}
+	}
+
+	// Get packfile from IPFS cluster
+	ipfsHttpApi, err := rpc.NewURLApiWithClient(fmt.Sprintf("http://%s:%s", viper.GetString("IPFS_HOST"), viper.GetString("IPFS_PORT")), &http.Client{})
+	if err != nil {
+		return errors.WithMessage(err, "create IPFS API error")
+	}
+
+	p, err := ipfspath.NewPath("/ipfs/" + cid)
+	if err != nil {
+		return errors.WithMessage(err, "create path error")
+	}
+
+	f, err := ipfsHttpApi.Unixfs().Get(context.Background(), p)
+	if err != nil {
+		return errors.WithMessage(err, "get packfile from IPFS error")
+	}
+
+	file, ok := f.(files.File)
+	if !ok {
+		return errors.New("invalid packfile format")
+	}
+
+	rootHash, err := merkleproof.ComputePackfileMerkleRoot(file, 256*1024)
+	if err != nil {
+		return errors.WithMessage(err, "compute packfile merkle root error")
+	}
+
+	// Get packfile size
+	packfileInfo, err := os.Stat(packfileName)
+	if err != nil {
+		return errors.WithMessage(err, "get packfile size error")
+	}
+
+	err = h.gc.UpdateRepositoryPackfile(context.Background(), resp.Base.RepositoryId, filepath.Base(packfileName), cid, rootHash, packfileInfo.Size())
+	if err != nil {
+		return errors.WithMessage(err, "update repository packfile error")
 	}
 
 	logger.FromContext(ctx).
