@@ -149,8 +149,8 @@ func start(cmd *cobra.Command, args []string) error {
 		}
 
 		forkHandler := handler.NewInvokeForkRepositoryEventHandler(gp, fcc)
-		mergeHandler := handler.NewInvokeMergePullRequestEventHandler(gp, mcc)
-		daoMergeHandler := handler.NewInvokeDaoMergePullRequestEventHandler(gp, dmcc)
+		mergeHandler := handler.NewInvokeMergePullRequestEventHandler(gp, mcc, cl)
+		daoMergeHandler := handler.NewInvokeDaoMergePullRequestEventHandler(gp, dmcc, cl)
 		challengeHandler := handler.NewChallengeEventHandler(gp)
 		packfileUpdatedHandler := handler.NewPackfileUpdatedEventHandler(gp)
 		releaseAssetUpdatedHandler := handler.NewReleaseAssetUpdatedEventHandler(gp)

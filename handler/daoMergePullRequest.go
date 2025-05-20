@@ -16,6 +16,7 @@ import (
 	"github.com/gitopia/git-server/app/consumer"
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia/v5/x/gitopia/types"
+	ipfsclusterclient "github.com/ipfs-cluster/ipfs-cluster/api/rest/client"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -88,6 +89,8 @@ type InvokeDaoMergePullRequestEventHandler struct {
 
 	cc consumer.Client
 
+	ipfsClusterClient ipfsclusterclient.Client
+
 	// commit offset only when backfill is complete
 	commitOffset bool
 	// written by backfill routine
@@ -96,12 +99,13 @@ type InvokeDaoMergePullRequestEventHandler struct {
 	offsetChan     chan uint64
 }
 
-func NewInvokeDaoMergePullRequestEventHandler(g app.GitopiaProxy, c consumer.Client) InvokeDaoMergePullRequestEventHandler {
+func NewInvokeDaoMergePullRequestEventHandler(g app.GitopiaProxy, c consumer.Client, ipfsClusterClient ipfsclusterclient.Client) InvokeDaoMergePullRequestEventHandler {
 	return InvokeDaoMergePullRequestEventHandler{
-		gc:           g,
-		cc:           c,
-		offsetChan:   make(chan uint64),
-		commitOffset: false,
+		gc:                g,
+		cc:                c,
+		ipfsClusterClient: ipfsClusterClient,
+		offsetChan:        make(chan uint64),
+		commitOffset:      false,
 	}
 }
 
@@ -185,7 +189,7 @@ func (h *InvokeDaoMergePullRequestEventHandler) Process(ctx context.Context, eve
 	}
 
 	// Create a new InvokeMergePullRequestEventHandler to reuse its Process method
-	mergePullHandler := NewInvokeMergePullRequestEventHandler(h.gc, h.cc)
+	mergePullHandler := NewInvokeMergePullRequestEventHandler(h.gc, h.cc, h.ipfsClusterClient)
 
 	return mergePullHandler.Process(ctx, mergePullEvent)
 }
