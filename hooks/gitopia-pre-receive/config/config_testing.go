@@ -3,5 +3,5 @@
 package config
 
 const (
-	GRPCHost = "gitopiad:9090"
+	GRPCHost = "host.docker.internal:9100"
 )

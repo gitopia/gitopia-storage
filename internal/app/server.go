@@ -600,8 +600,10 @@ func (s *Server) PostRPC(service string, w http.ResponseWriter, r *Request) {
 			RepositoryId: repoId,
 		})
 		if err != nil {
-			fail500(w, logContext, fmt.Errorf("failed to get packfile details: %w", err))
-			return
+			if !strings.Contains(err.Error(), "packfile not found") {
+				fail500(w, logContext, fmt.Errorf("failed to get packfile details: %w", err))
+				return
+			}
 		}
 
 		if packfileResp != nil && packfileResp.Packfile.Cid != "" {
