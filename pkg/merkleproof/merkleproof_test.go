@@ -3,38 +3,43 @@ package merkleproof
 import (
 	"bytes"
 	"testing"
+
+	"github.com/ipfs/boxo/files"
+	merkletree "github.com/wealdtech/go-merkletree/v2"
 )
 
-func TestGenerateAndVerifyPackfileProofs(t *testing.T) {
+func TestGenerateAndVerifyChunkProof(t *testing.T) {
 	tests := []struct {
 		name        string
 		chunks      [][]byte
+		chunkSize   int
+		verifyIndex uint64
 		wantErr     bool
-		verifyIndex int // Index of chunk to verify
 	}{
 		{
 			name: "valid chunks",
 			chunks: [][]byte{
 				[]byte("chunk1"),
-				[]byte("chunk2"),
-				[]byte("chunk3"),
 			},
+			chunkSize:   1024,
+			verifyIndex: 0,
 			wantErr:     false,
-			verifyIndex: 1,
 		},
 		{
 			name:        "empty chunks",
 			chunks:      [][]byte{},
-			wantErr:     true,
+			chunkSize:   1024,
 			verifyIndex: 0,
+			wantErr:     true,
 		},
 		{
 			name: "single chunk",
 			chunks: [][]byte{
 				[]byte("chunk1"),
 			},
-			wantErr:     false,
+			chunkSize:   1024,
 			verifyIndex: 0,
+			wantErr:     false,
 		},
 		{
 			name: "large chunks",
@@ -44,15 +49,23 @@ func TestGenerateAndVerifyPackfileProofs(t *testing.T) {
 				bytes.Repeat([]byte("c"), 1024),
 				bytes.Repeat([]byte("d"), 1024),
 			},
-			wantErr:     false,
+			chunkSize:   1024,
 			verifyIndex: 2,
+			wantErr:     false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Generate proofs
-			proofs, root, err := GeneratePackfileProofs(tt.chunks)
+			// Create a file from chunks
+			var fileContent bytes.Buffer
+			for _, chunk := range tt.chunks {
+				fileContent.Write(chunk)
+			}
+			file := files.NewBytesFile(fileContent.Bytes())
+
+			// Generate proof for the specified chunk
+			proof, root, chunkHash, err := GenerateChunkProof(file, tt.verifyIndex, tt.chunkSize)
 
 			if tt.wantErr {
 				if err == nil {
@@ -62,25 +75,33 @@ func TestGenerateAndVerifyPackfileProofs(t *testing.T) {
 			}
 
 			if err != nil {
-				t.Errorf("GeneratePackfileProofs() error = %v", err)
+				t.Errorf("GenerateChunkProof() error = %v", err)
 				return
 			}
 
-			if len(proofs) != len(tt.chunks) {
-				t.Errorf("expected %d proofs, got %d", len(tt.chunks), len(proofs))
+			if proof == nil {
+				t.Error("expected proof, got nil")
 				return
 			}
 
-			// Verify a specific proof
-			if len(proofs) > 0 {
-				verified, err := VerifyPackfileProof(proofs[tt.verifyIndex], root)
-				if err != nil {
-					t.Errorf("VerifyPackfileProof() error = %v", err)
-					return
-				}
-				if !verified {
-					t.Error("proof verification failed")
-				}
+			if root == nil {
+				t.Error("expected root, got nil")
+				return
+			}
+
+			if chunkHash == nil {
+				t.Error("expected chunk hash, got nil")
+				return
+			}
+
+			// Verify the proof
+			verified, err := VerifyPackfileProof(chunkHash, proof, root)
+			if err != nil {
+				t.Errorf("VerifyPackfileProof() error = %v", err)
+				return
+			}
+			if !verified {
+				t.Error("proof verification failed")
 			}
 		})
 	}
@@ -88,36 +109,31 @@ func TestGenerateAndVerifyPackfileProofs(t *testing.T) {
 
 func TestVerifyPackfileProof_Invalid(t *testing.T) {
 	tests := []struct {
-		name    string
-		proof   PackfileProof
-		root    []byte
-		wantErr bool
+		name      string
+		chunkHash []byte
+		proof     *merkletree.Proof
+		root      []byte
+		wantErr   bool
 	}{
 		{
-			name: "nil proof",
-			proof: PackfileProof{
-				ChunkIndex: 0,
-				ChunkData:  []byte("chunk"),
-				Proof:      nil,
-			},
-			root:    []byte("root"),
-			wantErr: true,
+			name:      "nil proof",
+			chunkHash: []byte("chunk"),
+			proof:     nil,
+			root:      []byte("root"),
+			wantErr:   true,
 		},
 		{
-			name: "empty root",
-			proof: PackfileProof{
-				ChunkIndex: 0,
-				ChunkData:  []byte("chunk"),
-				Proof:      nil,
-			},
-			root:    []byte{},
-			wantErr: true,
+			name:      "empty root",
+			chunkHash: []byte("chunk"),
+			proof:     &merkletree.Proof{},
+			root:      []byte{},
+			wantErr:   true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := VerifyPackfileProof(tt.proof, tt.root)
+			_, err := VerifyPackfileProof(tt.chunkHash, tt.proof, tt.root)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("VerifyPackfileProof() error = %v, wantErr %v", err, tt.wantErr)
 			}

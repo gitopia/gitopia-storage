@@ -144,11 +144,12 @@ func VerifyPackfileProof(chunkHash []byte, proof *merkletree.Proof, root []byte)
 	}
 
 	// Verify the proof against the root
-	verified, err := merkletree.VerifyProof(
+	verified, err := merkletree.VerifyProofUsing(
 		chunkHash,
 		false, // No salting
 		proof,
 		[][]byte{root},
+		sha3.New256(),
 	)
 	if err != nil {
 		return false, fmt.Errorf("failed to verify proof: %w", err)
