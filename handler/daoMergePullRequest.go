@@ -30,6 +30,7 @@ type InvokeDaoMergePullRequestEvent struct {
 	PullIid      uint64
 	TaskId       uint64
 	TxHeight     uint64
+	Provider     string
 }
 
 // tm event codec
@@ -75,11 +76,17 @@ func (e *InvokeDaoMergePullRequestEvent) UnMarshal(eventBuf []byte) error {
 		return errors.Wrap(err, "error parsing height")
 	}
 
+	provider, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+types.EventAttributeProviderKey, "[0]")
+	if err != nil {
+		return errors.Wrap(err, "error parsing provider")
+	}
+
 	e.Admin = admin
 	e.RepositoryId = repositoryId
 	e.PullIid = iid
 	e.TaskId = taskId
 	e.TxHeight = height
+	e.Provider = provider
 
 	return nil
 }
@@ -143,6 +150,11 @@ func (h *InvokeDaoMergePullRequestEventHandler) Handle(ctx context.Context, even
 }
 
 func (h *InvokeDaoMergePullRequestEventHandler) Process(ctx context.Context, event InvokeDaoMergePullRequestEvent) error {
+	// Skip processing if message is not meant for this provider
+	if !h.gc.CheckProvider(event.Provider) {
+		return nil
+	}
+
 	logger.FromContext(ctx).WithFields(logrus.Fields{
 		"admin":         event.Admin,
 		"repository-id": event.RepositoryId,

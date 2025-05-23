@@ -15,6 +15,7 @@ import (
 
 	"github.com/buger/jsonparser"
 	"github.com/cosmos/cosmos-sdk/codec"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/query"
 	"github.com/cosmos/cosmos-sdk/types/tx"
 	"github.com/gitopia/git-server/app"
@@ -39,6 +40,7 @@ type InvokeMergePullRequestEvent struct {
 	PullRequestIid uint64
 	TaskId         uint64
 	TxHeight       uint64
+	Provider       string
 }
 
 // tm event codec
@@ -84,11 +86,17 @@ func (e *InvokeMergePullRequestEvent) UnMarshal(eventBuf []byte) error {
 		return errors.Wrap(err, "error parsing height")
 	}
 
+	provider, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+types.EventAttributeProviderKey, "[0]")
+	if err != nil {
+		return errors.Wrap(err, "error parsing provider")
+	}
+
 	e.Creator = creator
 	e.RepositoryId = repositoryId
 	e.PullRequestIid = iid
 	e.TaskId = taskId
 	e.TxHeight = height
+	e.Provider = provider
 
 	return nil
 }
@@ -152,6 +160,11 @@ func (h *InvokeMergePullRequestEventHandler) Handle(ctx context.Context, eventBu
 }
 
 func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event InvokeMergePullRequestEvent) error {
+	// Skip processing if message is not meant for this provider
+	if !h.gc.CheckProvider(event.Provider) {
+		return nil
+	}
+
 	logger.FromContext(ctx).Info("process merge pull request event")
 
 	res, err := h.gc.Task(ctx, event.TaskId)

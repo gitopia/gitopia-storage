@@ -62,7 +62,7 @@ func DownloadRepo(id uint64, cacheDir string) error {
 		return err
 	}
 
-	repoDir := filepath.Join(cacheDir, fmt.Sprintf("%d", res.Repository.Id))
+	repoDir := filepath.Join(cacheDir, fmt.Sprintf("%d.git", res.Repository.Id))
 
 	// download parent repos first
 	if res.Repository.Parent != 0 {
@@ -85,15 +85,17 @@ func DownloadRepo(id uint64, cacheDir string) error {
 		}
 	}
 
-	_, err = queryClient.Storage.RepositoryPackfile(context.Background(), &storagetypes.QueryRepositoryPackfileRequest{
+	packfileRes, err := queryClient.Storage.RepositoryPackfile(context.Background(), &storagetypes.QueryRepositoryPackfileRequest{
 		RepositoryId: id,
 	})
 	if err != nil && !strings.Contains(err.Error(), "packfile not found") {
 		return fmt.Errorf("failed to get cid from chain: %v", err)
 	}
 
-	if err := downloadPackfile("cid", "name", repoDir); err != nil {
-		return errors.Wrap(err, "error downloading packfile")
+	if packfileRes != nil {
+		if err := downloadPackfile(packfileRes.Packfile.Cid, packfileRes.Packfile.Name, repoDir); err != nil {
+			return errors.Wrap(err, "error downloading packfile")
+		}
 	}
 
 	// create refs on the server
