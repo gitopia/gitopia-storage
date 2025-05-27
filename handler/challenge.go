@@ -12,7 +12,7 @@ import (
 	"github.com/gitopia/git-server/app"
 	"github.com/gitopia/git-server/pkg/merkleproof"
 	"github.com/gitopia/gitopia-go/logger"
-	storagetypes "github.com/gitopia/gitopia/v5/x/storage/types"
+	storagetypes "github.com/gitopia/gitopia/v6/x/storage/types"
 	"github.com/ipfs/boxo/files"
 	"github.com/ipfs/boxo/path"
 	"github.com/ipfs/kubo/client/rpc"

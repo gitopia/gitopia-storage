@@ -23,7 +23,7 @@ import (
 	"github.com/gitopia/git-server/pkg/merkleproof"
 	"github.com/gitopia/git-server/utils"
 	"github.com/gitopia/gitopia-go/logger"
-	"github.com/gitopia/gitopia/v5/x/gitopia/types"
+	"github.com/gitopia/gitopia/v6/x/gitopia/types"
 	ipfsclusterclient "github.com/ipfs-cluster/ipfs-cluster/api/rest/client"
 	"github.com/ipfs/boxo/files"
 	ipfspath "github.com/ipfs/boxo/path"
@@ -508,6 +508,14 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 
 	baseRepoPath := filepath.Join(cacheDir, fmt.Sprintf("%d.git", resp.Base.RepositoryId))
 
+	// git gc
+	cmd = exec.Command("git", "gc")
+	cmd.Dir = baseRepoPath
+	err = cmd.Run()
+	if err != nil {
+		return errors.WithMessage(err, "git gc error")
+	}
+
 	packfileName, err := utils.GetPackfileName(baseRepoPath)
 	if err != nil {
 		return errors.WithMessage(err, "get packfile name error")
@@ -524,7 +532,7 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 		return errors.WithMessage(err, "get packfile details error")
 	}
 
-	if packfile.Cid != "" {
+	if packfile.Cid != "" && packfile.Cid != cid {
 		err = utils.UnpinFile(h.ipfsClusterClient, packfile.Cid)
 		if err != nil {
 			return errors.WithMessage(err, "unpin packfile error")

@@ -2,16 +2,19 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
 
 	"github.com/buger/jsonparser"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/gitopia/git-server/app"
 	"github.com/gitopia/git-server/pkg/merkleproof"
 	"github.com/gitopia/gitopia-go/logger"
-	storagetypes "github.com/gitopia/gitopia/v5/x/storage/types"
+	gitopiatypes "github.com/gitopia/gitopia/v6/x/gitopia/types"
+	storagetypes "github.com/gitopia/gitopia/v6/x/storage/types"
 	"github.com/ipfs-cluster/ipfs-cluster/api"
 	ipfsclusterclient "github.com/ipfs-cluster/ipfs-cluster/api/rest/client"
 	"github.com/ipfs/boxo/files"
@@ -29,19 +32,12 @@ const (
 type ReleaseEvent struct {
 	RepositoryId uint64
 	Tag          string
-	Attachments  []Attachment
+	Attachments  []gitopiatypes.Attachment
 	Provider     string
 }
 
-type Attachment struct {
-	Name     string
-	Size     uint64
-	Sha      string
-	Uploader string
-}
-
-func (e *ReleaseEvent) UnMarshal(eventBuf []byte, eventType string) error {
-	repoIdStr, err := jsonparser.GetString(eventBuf, "events", eventType+".RepositoryId", "[0]")
+func (e *ReleaseEvent) UnMarshal(eventBuf []byte) error {
+	repoIdStr, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+gitopiatypes.EventAttributeRepoIdKey, "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing repository id")
 	}
@@ -51,35 +47,26 @@ func (e *ReleaseEvent) UnMarshal(eventBuf []byte, eventType string) error {
 		return errors.Wrap(err, "error parsing repository id")
 	}
 
-	tag, err := jsonparser.GetString(eventBuf, "events", eventType+".ReleaseTagName", "[0]")
+	tag, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+gitopiatypes.EventAttributeReleaseTagNameKey, "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing tag")
 	}
 	tag = strings.Trim(tag, "\"")
 
-	// Parse attachments array
-	attachments := make([]Attachment, 0)
-	jsonparser.ArrayEach(eventBuf, func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
-		if err != nil {
-			return
-		}
+	attachmentsStr, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+gitopiatypes.EventAttributeReleaseAttachmentsKey, "[0]")
+	if err != nil {
+		return errors.Wrap(err, "error parsing attachments")
+	}
+	attachmentsStr = strings.Trim(attachmentsStr, "\"")
 
-		name, _ := jsonparser.GetString(value, "name")
-		sizeStr, _ := jsonparser.GetString(value, "size")
-		sha, _ := jsonparser.GetString(value, "sha")
-		uploader, _ := jsonparser.GetString(value, "uploader")
+	// unmarshal attachments
+	var attachments []gitopiatypes.Attachment
+	err = json.Unmarshal([]byte(attachmentsStr), &attachments)
+	if err != nil {
+		return errors.Wrap(err, "error unmarshalling attachments")
+	}
 
-		size, _ := strconv.ParseUint(sizeStr, 10, 64)
-
-		attachments = append(attachments, Attachment{
-			Name:     name,
-			Size:     size,
-			Sha:      sha,
-			Uploader: uploader,
-		})
-	}, "events", eventType+".ReleaseAttachments", "[0]")
-
-	provider, err := jsonparser.GetString(eventBuf, "events", eventType+".Provider", "[0]")
+	provider, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+gitopiatypes.EventAttributeProviderKey, "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing provider")
 	}
@@ -106,15 +93,20 @@ func NewReleaseEventHandler(g app.GitopiaProxy, ipfsClusterClient ipfsclustercli
 
 func (h *ReleaseEventHandler) Handle(ctx context.Context, eventBuf []byte, eventType string) error {
 	event := &ReleaseEvent{}
-	err := event.UnMarshal(eventBuf, eventType)
+	err := event.UnMarshal(eventBuf)
 	if err != nil {
 		return errors.WithMessage(err, "event parse error")
 	}
 
-	return h.Process(ctx, *event, eventType)
+	err = h.Process(ctx, *event, eventType)
+	if err != nil {
+		return errors.WithMessage(err, "error processing event")
+	}
+
+	return nil
 }
 
-func (h *ReleaseEventHandler) pinAttachment(ctx context.Context, attachment Attachment) (string, error) {
+func (h *ReleaseEventHandler) pinAttachment(ctx context.Context, attachment gitopiatypes.Attachment) (string, error) {
 	// Get attachment file path from attachment directory
 	attachmentDir := viper.GetString("ATTACHMENT_DIR")
 	filePath := fmt.Sprintf("%s/%s", attachmentDir, attachment.Sha)
@@ -171,7 +163,7 @@ func (h *ReleaseEventHandler) unpinAttachment(ctx context.Context, asset storage
 	return nil
 }
 
-func (h *ReleaseEventHandler) calculateMerkleRoot(ctx context.Context, attachment Attachment) ([]byte, error) {
+func (h *ReleaseEventHandler) calculateMerkleRoot(ctx context.Context, attachment gitopiatypes.Attachment) ([]byte, error) {
 	// Get attachment file path from attachment directory
 	attachmentDir := viper.GetString("ATTACHMENT_DIR")
 	filePath := fmt.Sprintf("%s/%s", attachmentDir, attachment.Sha)
@@ -183,8 +175,16 @@ func (h *ReleaseEventHandler) calculateMerkleRoot(ctx context.Context, attachmen
 	}
 	defer file.Close()
 
+	stat, err := file.Stat()
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to get file stat: %s", attachment.Name)
+	}
+
 	// Create a files.File from the os.File
-	ipfsFile := files.NewReaderFile(file)
+	ipfsFile, err := files.NewReaderPathFile(filePath, file, stat)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to create files.File from attachment file: %s", attachment.Name)
+	}
 
 	// Calculate merkle root
 	rootHash, err := merkleproof.ComputePackfileMerkleRoot(ipfsFile, 256*1024)
@@ -238,7 +238,7 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 				continue
 			}
 
-			err = h.gc.UpdateReleaseAsset(ctx, event.RepositoryId, event.Tag, attachment.Name, cid, rootHash, int64(attachment.Size))
+			err = h.gc.UpdateReleaseAsset(ctx, event.RepositoryId, event.Tag, attachment.Name, cid, rootHash, int64(attachment.Size_))
 			if err != nil {
 				logger.FromContext(ctx).WithError(err).WithField("attachment", attachment.Name).Error("failed to update release asset")
 			}
@@ -287,7 +287,7 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 					}
 
 					// Update the release asset with new CID and merkle root
-					err = h.gc.UpdateReleaseAsset(ctx, event.RepositoryId, event.Tag, attachment.Name, newCid, rootHash, int64(attachment.Size))
+					err = h.gc.UpdateReleaseAsset(ctx, event.RepositoryId, event.Tag, attachment.Name, newCid, rootHash, int64(attachment.Size_))
 					if err != nil {
 						logger.FromContext(ctx).WithError(err).WithField("attachment", attachment.Name).Error("failed to update release asset")
 					}
@@ -307,7 +307,7 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 				}
 
 				// Update the release asset with new CID and merkle root
-				err = h.gc.UpdateReleaseAsset(ctx, event.RepositoryId, event.Tag, attachment.Name, newCid, rootHash, int64(attachment.Size))
+				err = h.gc.UpdateReleaseAsset(ctx, event.RepositoryId, event.Tag, attachment.Name, newCid, rootHash, int64(attachment.Size_))
 				if err != nil {
 					logger.FromContext(ctx).WithError(err).WithField("attachment", attachment.Name).Error("failed to update release asset")
 				}

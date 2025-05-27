@@ -17,7 +17,7 @@ import (
 	"github.com/gitopia/git-server/pkg/merkleproof"
 	"github.com/gitopia/git-server/utils"
 	gc "github.com/gitopia/gitopia-go"
-	gitopiatypes "github.com/gitopia/gitopia/v5/x/gitopia/types"
+	gitopiatypes "github.com/gitopia/gitopia/v6/x/gitopia/types"
 	"github.com/ipfs-cluster/ipfs-cluster/api"
 	ipfsclusterclient "github.com/ipfs-cluster/ipfs-cluster/api/rest/client"
 	"github.com/ipfs/boxo/files"
@@ -91,7 +91,7 @@ func main() {
 				fmt.Printf("Processing repository %d\n", repoId)
 
 				// git gc
-				cmd := exec.Command("git", "gc", "--auto")
+				cmd := exec.Command("git", "gc")
 				cmd.Dir = filepath.Join(gitDir, entry.Name())
 				if err := cmd.Run(); err != nil {
 					fmt.Printf("Error running git gc for repo %d: %v\n", repoId, err)

@@ -3,7 +3,7 @@ package main
 import (
 	"github.com/cosmos/cosmos-sdk/client/keys"
 	"github.com/gitopia/gitopia-go"
-	"github.com/gitopia/gitopia/v5/x/storage/client/cli"
+	"github.com/gitopia/gitopia/v6/x/storage/client/cli"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )

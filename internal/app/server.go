@@ -25,10 +25,10 @@ import (
 	"github.com/gitopia/git-server/route/lfs"
 	"github.com/gitopia/git-server/utils"
 	gc "github.com/gitopia/gitopia-go"
-	gitopia "github.com/gitopia/gitopia/v5/app"
-	gitopiatypes "github.com/gitopia/gitopia/v5/x/gitopia/types"
-	offchaintypes "github.com/gitopia/gitopia/v5/x/offchain/types"
-	storagetypes "github.com/gitopia/gitopia/v5/x/storage/types"
+	gitopia "github.com/gitopia/gitopia/v6/app"
+	gitopiatypes "github.com/gitopia/gitopia/v6/x/gitopia/types"
+	offchaintypes "github.com/gitopia/gitopia/v6/x/offchain/types"
+	storagetypes "github.com/gitopia/gitopia/v6/x/storage/types"
 	ipfsclusterclient "github.com/ipfs-cluster/ipfs-cluster/api/rest/client"
 	"github.com/ipfs/boxo/files"
 	ipfspath "github.com/ipfs/boxo/path"
@@ -52,6 +52,7 @@ type QueryService interface {
 	GitopiaRepositoryPackfile(ctx context.Context, req *storagetypes.QueryRepositoryPackfileRequest) (*storagetypes.QueryRepositoryPackfileResponse, error)
 	GitopiaRepositoryBranches(ctx context.Context, req *gitopiatypes.QueryAllRepositoryBranchRequest) (*gitopiatypes.QueryAllRepositoryBranchResponse, error)
 	GitopiaRepositoryTags(ctx context.Context, req *gitopiatypes.QueryAllRepositoryTagRequest) (*gitopiatypes.QueryAllRepositoryTagResponse, error)
+	GitopiaRepository(ctx context.Context, req *gitopiatypes.QueryGetRepositoryRequest) (*gitopiatypes.QueryGetRepositoryResponse, error)
 }
 
 type QueryServiceImpl struct {
@@ -68,6 +69,10 @@ func (qs *QueryServiceImpl) GitopiaRepositoryBranches(ctx context.Context, req *
 
 func (qs *QueryServiceImpl) GitopiaRepositoryTags(ctx context.Context, req *gitopiatypes.QueryAllRepositoryTagRequest) (*gitopiatypes.QueryAllRepositoryTagResponse, error) {
 	return qs.Query.Gitopia.RepositoryTagAll(ctx, req)
+}
+
+func (qs *QueryServiceImpl) GitopiaRepository(ctx context.Context, req *gitopiatypes.QueryGetRepositoryRequest) (*gitopiatypes.QueryGetRepositoryResponse, error) {
+	return qs.Query.Gitopia.Repository(ctx, req)
 }
 
 type SaveToArweavePostBody struct {

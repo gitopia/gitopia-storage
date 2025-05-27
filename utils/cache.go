@@ -12,8 +12,8 @@ import (
 
 	"github.com/cosmos/cosmos-sdk/types/query"
 	"github.com/gitopia/gitopia-go"
-	gitopiatypes "github.com/gitopia/gitopia/v5/x/gitopia/types"
-	storagetypes "github.com/gitopia/gitopia/v5/x/storage/types"
+	gitopiatypes "github.com/gitopia/gitopia/v6/x/gitopia/types"
+	storagetypes "github.com/gitopia/gitopia/v6/x/storage/types"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
@@ -93,6 +93,8 @@ func DownloadRepo(id uint64, cacheDir string) error {
 	}
 
 	if packfileRes != nil {
+		LogInfo("info", fmt.Sprintf("Downloading packfile with cid %s for repo %d", packfileRes.Packfile.Cid, id))
+
 		if err := downloadPackfile(packfileRes.Packfile.Cid, packfileRes.Packfile.Name, repoDir); err != nil {
 			return errors.Wrap(err, "error downloading packfile")
 		}
