@@ -24,7 +24,7 @@ type PackfileUpdatedEvent struct {
 }
 
 func (e *PackfileUpdatedEvent) UnMarshal(eventBuf []byte) error {
-	repoIdStr, err := jsonparser.GetString(eventBuf, "events", EventPackfileUpdatedType+".repository_id", "[0]")
+	repoIdStr, err := jsonparser.GetString(eventBuf, "events", EventPackfileUpdatedType+"."+"repository_id", "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing repository id")
 	}
@@ -34,13 +34,13 @@ func (e *PackfileUpdatedEvent) UnMarshal(eventBuf []byte) error {
 		return errors.Wrap(err, "error parsing repository id")
 	}
 
-	newCid, err := jsonparser.GetString(eventBuf, "events", EventPackfileUpdatedType+".new_cid", "[0]")
+	newCid, err := jsonparser.GetString(eventBuf, "events", EventPackfileUpdatedType+"."+"new_cid", "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing new cid")
 	}
 	newCid = strings.Trim(newCid, "\"")
 
-	oldCid, err := jsonparser.GetString(eventBuf, "events", EventPackfileUpdatedType+".old_cid", "[0]")
+	oldCid, err := jsonparser.GetString(eventBuf, "events", EventPackfileUpdatedType+"."+"old_cid", "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing old cid")
 	}
@@ -61,7 +61,7 @@ type PackfileUpdatedEventHandler struct {
 func NewPackfileUpdatedEventHandler(g app.GitopiaProxy) PackfileUpdatedEventHandler {
 	var pinningClient *pinclient.Client
 	if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
-		pinningClient = pinclient.NewClient(viper.GetString("PINNING_SERVICE_URL"), viper.GetString("PINNING_SERVICE_API_KEY"))
+		pinningClient = pinclient.NewClient(viper.GetString("PINNING_SERVICE_API_URL"), viper.GetString("PINNING_SERVICE_API_ACCESS_TOKEN"))
 	}
 	return PackfileUpdatedEventHandler{
 		gc:                   g,

@@ -26,7 +26,7 @@ type ReleaseAssetUpdatedEvent struct {
 }
 
 func (e *ReleaseAssetUpdatedEvent) UnMarshal(eventBuf []byte) error {
-	repoIdStr, err := jsonparser.GetString(eventBuf, "events", EventReleaseAssetUpdatedType+".repository_id", "[0]")
+	repoIdStr, err := jsonparser.GetString(eventBuf, "events", EventReleaseAssetUpdatedType+"."+"repository_id", "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing repository id")
 	}
@@ -36,25 +36,25 @@ func (e *ReleaseAssetUpdatedEvent) UnMarshal(eventBuf []byte) error {
 		return errors.Wrap(err, "error parsing repository id")
 	}
 
-	tag, err := jsonparser.GetString(eventBuf, "events", EventReleaseAssetUpdatedType+".tag", "[0]")
+	tag, err := jsonparser.GetString(eventBuf, "events", EventReleaseAssetUpdatedType+"."+"tag", "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing tag")
 	}
 	tag = strings.Trim(tag, "\"")
 
-	name, err := jsonparser.GetString(eventBuf, "events", EventReleaseAssetUpdatedType+".name", "[0]")
+	name, err := jsonparser.GetString(eventBuf, "events", EventReleaseAssetUpdatedType+"."+"name", "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing name")
 	}
 	name = strings.Trim(name, "\"")
 
-	newCid, err := jsonparser.GetString(eventBuf, "events", EventReleaseAssetUpdatedType+".new_cid", "[0]")
+	newCid, err := jsonparser.GetString(eventBuf, "events", EventReleaseAssetUpdatedType+"."+"new_cid", "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing new cid")
 	}
 	newCid = strings.Trim(newCid, "\"")
 
-	oldCid, err := jsonparser.GetString(eventBuf, "events", EventReleaseAssetUpdatedType+".old_cid", "[0]")
+	oldCid, err := jsonparser.GetString(eventBuf, "events", EventReleaseAssetUpdatedType+"."+"old_cid", "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing old cid")
 	}
@@ -77,7 +77,7 @@ type ReleaseAssetUpdatedEventHandler struct {
 func NewReleaseAssetUpdatedEventHandler(g app.GitopiaProxy) ReleaseAssetUpdatedEventHandler {
 	var pinningClient *pinclient.Client
 	if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
-		pinningClient = pinclient.NewClient(viper.GetString("PINNING_SERVICE_URL"), viper.GetString("PINNING_SERVICE_API_KEY"))
+		pinningClient = pinclient.NewClient(viper.GetString("PINNING_SERVICE_API_URL"), viper.GetString("PINNING_SERVICE_API_ACCESS_TOKEN"))
 	}
 	return ReleaseAssetUpdatedEventHandler{
 		gc:                   g,
