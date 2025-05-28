@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -12,11 +13,13 @@ import (
 
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/tx"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/query"
 	"github.com/gitopia/git-server/app"
 	"github.com/gitopia/git-server/pkg/merkleproof"
 	"github.com/gitopia/git-server/utils"
 	gc "github.com/gitopia/gitopia-go"
+	"github.com/gitopia/gitopia-go/logger"
 	gitopiatypes "github.com/gitopia/gitopia/v6/x/gitopia/types"
 	"github.com/ipfs-cluster/ipfs-cluster/api"
 	ipfsclusterclient "github.com/ipfs-cluster/ipfs-cluster/api/rest/client"
@@ -26,6 +29,12 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+)
+
+const (
+	AccountAddressPrefix = "gitopia"
+	AccountPubKeyPrefix  = AccountAddressPrefix + sdk.PrefixPublic
+	AppName              = "migrate"
 )
 
 func main() {
@@ -41,6 +50,13 @@ func main() {
 				return errors.Wrap(err, "error initializing tx factory")
 			}
 			txf = txf.WithGasAdjustment(app.GAS_ADJUSTMENT)
+
+			gc.WithAppName(AppName)
+			gc.WithChainId(viper.GetString("CHAIN_ID"))
+			gc.WithGasPrices(viper.GetString("GAS_PRICES"))
+			gc.WithGitopiaAddr(viper.GetString("GITOPIA_ADDR"))
+			gc.WithTmAddr(viper.GetString("TM_ADDR"))
+			gc.WithWorkingDir(viper.GetString("WORKING_DIR"))
 
 			gitopiaClient, err := gc.NewClient(ctx, clientCtx, txf)
 			if err != nil {
@@ -160,116 +176,125 @@ func main() {
 				}
 
 				fmt.Printf("Successfully migrated repository %d\n", repoId)
+			}
 
-				// Process releases for this repository
-				var nextKey []byte
-				for {
-					releases, err := gitopiaClient.QueryClient().Gitopia.RepositoryReleaseAll(ctx, &gitopiatypes.QueryAllRepositoryReleaseRequest{
-						Id: strconv.FormatUint(repoId, 10),
-						Pagination: &query.PageRequest{
-							Key:   nextKey,
-							Limit: 100, // Process 100 releases at a time
-						},
-					})
-					if err != nil {
-						fmt.Printf("Error getting releases for repo %d: %v\n", repoId, err)
-						break
-					}
-
-					for _, release := range releases.Release {
-						fmt.Printf("Processing release %s for repository %d\n", release.TagName, repoId)
-
-						for _, attachment := range release.Attachments {
-							// Get attachment file path
-							attachmentDir := viper.GetString("ATTACHMENT_DIR")
-							filePath := filepath.Join(attachmentDir, attachment.Sha)
-
-							// Pin attachment to IPFS cluster
-							paths := []string{filePath}
-							addParams := api.DefaultAddParams()
-							addParams.Recursive = false
-							addParams.Layout = "balanced"
-
-							outputChan := make(chan api.AddedOutput)
-							var attachmentCid api.Cid
-
-							go func() {
-								err := ipfsClusterClient.Add(ctx, paths, addParams, outputChan)
-								if err != nil {
-									fmt.Printf("Error adding attachment to IPFS cluster: %v\n", err)
-									close(outputChan)
-								}
-							}()
-
-							// Get CID from output channel
-							for output := range outputChan {
-								attachmentCid = output.Cid
-							}
-
-							// Pin the file with default options
-							pinOpts := api.PinOptions{
-								ReplicationFactorMin: -1,
-								ReplicationFactorMax: -1,
-								Name:                 attachment.Name,
-							}
-
-							_, err := ipfsClusterClient.Pin(ctx, attachmentCid, pinOpts)
-							if err != nil {
-								fmt.Printf("Error pinning attachment: %v\n", err)
-								continue
-							}
-
-							// Open the file for merkle root calculation
-							file, err := os.Open(filePath)
-							if err != nil {
-								fmt.Printf("Error opening attachment file: %v\n", err)
-								continue
-							}
-							defer file.Close()
-
-							// Create a files.File from the os.File
-							ipfsFile := files.NewReaderFile(file)
-
-							// Calculate merkle root
-							rootHash, err := merkleproof.ComputePackfileMerkleRoot(ipfsFile, 256*1024)
-							if err != nil {
-								fmt.Printf("Error computing merkle root for attachment: %v\n", err)
-								continue
-							}
-
-							// Get file size
-							fileInfo, err := file.Stat()
-							if err != nil {
-								fmt.Printf("Error getting file size: %v\n", err)
-								continue
-							}
-
-							// Update release asset on chain
-							err = gitopiaProxy.UpdateReleaseAsset(
-								ctx,
-								repoId,
-								release.TagName,
-								attachment.Name,
-								attachmentCid.String(),
-								rootHash,
-								fileInfo.Size(),
-								attachment.Sha,
-							)
-							if err != nil {
-								fmt.Printf("Error updating release asset: %v\n", err)
-								continue
-							}
-
-							fmt.Printf("Successfully migrated attachment %s for release %s\n", attachment.Name, release.TagName)
-						}
-					}
-
-					// Check if there are more pages
-					if releases.Pagination == nil || len(releases.Pagination.NextKey) == 0 {
-						break
-					}
-					nextKey = releases.Pagination.NextKey
+			// Process releases
+			var nextKey []byte
+			for {
+				releases, err := gitopiaClient.QueryClient().Gitopia.ReleaseAll(ctx, &gitopiatypes.QueryAllReleaseRequest{
+					Pagination: &query.PageRequest{
+						Key:   nextKey,
+						Limit: 100, // Process 100 releases at a time
+					},
+				})
+				if err != nil {
+					fmt.Printf("Error getting releases: %v\n", err)
+					break
 				}
+
+				for _, release := range releases.Release {
+					fmt.Printf("Processing release %s for repository %d\n", release.TagName, release.RepositoryId)
+
+					for _, attachment := range release.Attachments {
+						// Get attachment file path
+						attachmentDir := viper.GetString("ATTACHMENT_DIR")
+						filePath := filepath.Join(attachmentDir, attachment.Sha)
+
+						// Pin attachment to IPFS cluster
+						paths := []string{filePath}
+						addParams := api.DefaultAddParams()
+						addParams.Recursive = false
+						addParams.Layout = "balanced"
+
+						outputChan := make(chan api.AddedOutput)
+						var attachmentCid api.Cid
+
+						go func() {
+							err := ipfsClusterClient.Add(ctx, paths, addParams, outputChan)
+							if err != nil {
+								fmt.Printf("Error adding attachment to IPFS cluster: %v\n", err)
+								close(outputChan)
+							}
+						}()
+
+						// Get CID from output channel
+						for output := range outputChan {
+							attachmentCid = output.Cid
+						}
+
+						// Pin the file with default options
+						pinOpts := api.PinOptions{
+							ReplicationFactorMin: -1,
+							ReplicationFactorMax: -1,
+							Name:                 attachment.Name,
+						}
+
+						_, err := ipfsClusterClient.Pin(ctx, attachmentCid, pinOpts)
+						if err != nil {
+							fmt.Printf("Error pinning attachment: %v\n", err)
+							continue
+						}
+
+						// Open the file for merkle root calculation
+						file, err := os.Open(filePath)
+						if err != nil {
+							fmt.Printf("Error opening attachment file: %v\n", err)
+							continue
+						}
+						defer file.Close()
+
+						stat, err := file.Stat()
+						if err != nil {
+							fmt.Printf("Error getting file stat: %v\n", err)
+							continue
+						}
+
+						// Create a files.File from the os.File
+						ipfsFile, err := files.NewReaderPathFile(filePath, file, stat)
+						if err != nil {
+							fmt.Printf("Error creating files.File from attachment file: %v\n", err)
+							continue
+						}
+
+						// Calculate merkle root
+						rootHash, err := merkleproof.ComputePackfileMerkleRoot(ipfsFile, 256*1024)
+						if err != nil {
+							fmt.Printf("Error computing merkle root for attachment: %v\n", err)
+							continue
+						}
+
+						// Get file size
+						fileInfo, err := file.Stat()
+						if err != nil {
+							fmt.Printf("Error getting file size: %v\n", err)
+							continue
+						}
+
+						// Update release asset on chain
+						err = gitopiaProxy.UpdateReleaseAsset(
+							ctx,
+							release.RepositoryId,
+							release.TagName,
+							attachment.Name,
+							attachmentCid.String(),
+							rootHash,
+							fileInfo.Size(),
+							attachment.Sha,
+						)
+						if err != nil {
+							fmt.Printf("Error updating release asset: %v\n", err)
+							continue
+						}
+
+						fmt.Printf("Successfully migrated attachment %s for release %s\n", attachment.Name, release.TagName)
+					}
+				}
+
+				// Check if there are more pages
+				if releases.Pagination == nil || len(releases.Pagination.NextKey) == 0 {
+					break
+				}
+				nextKey = releases.Pagination.NextKey
 			}
 
 			return nil
@@ -283,6 +308,14 @@ func main() {
 	rootCmd.Flags().String("ipfs-cluster-peer-port", "", "IPFS cluster peer port")
 	rootCmd.Flags().String("ipfs-host", "", "IPFS host")
 	rootCmd.Flags().String("ipfs-port", "", "IPFS port")
+	rootCmd.Flags().String("from", "", "Name or address of private key with which to sign")
+	rootCmd.Flags().String("keyring-backend", "", "Select keyring's backend (os|file|kwallet|pass|test|memory)")
+	rootCmd.Flags().String("fees", "", "Fees to pay along with transaction; eg: 10ulore")
+	rootCmd.Flags().String("chain-id", "", "Chain ID")
+	rootCmd.Flags().String("gas-prices", "", "Gas prices")
+	rootCmd.Flags().String("gitopia-addr", "", "Gitopia address")
+	rootCmd.Flags().String("tm-addr", "", "Tendermint address")
+	rootCmd.Flags().String("working-dir", "", "Working directory")
 
 	// Bind flags to viper
 	viper.BindPFlag("GIT_DIR", rootCmd.Flags().Lookup("git-dir"))
@@ -291,8 +324,22 @@ func main() {
 	viper.BindPFlag("IPFS_CLUSTER_PEER_PORT", rootCmd.Flags().Lookup("ipfs-cluster-peer-port"))
 	viper.BindPFlag("IPFS_HOST", rootCmd.Flags().Lookup("ipfs-host"))
 	viper.BindPFlag("IPFS_PORT", rootCmd.Flags().Lookup("ipfs-port"))
+	viper.BindPFlag("CHAIN_ID", rootCmd.Flags().Lookup("chain-id"))
+	viper.BindPFlag("GAS_PRICES", rootCmd.Flags().Lookup("gas-prices"))
+	viper.BindPFlag("GITOPIA_ADDR", rootCmd.Flags().Lookup("gitopia-addr"))
+	viper.BindPFlag("TM_ADDR", rootCmd.Flags().Lookup("tm-addr"))
+	viper.BindPFlag("WORKING_DIR", rootCmd.Flags().Lookup("working-dir"))
 
-	if err := rootCmd.Execute(); err != nil {
+	conf := sdk.GetConfig()
+	conf.SetBech32PrefixForAccount(AccountAddressPrefix, AccountPubKeyPrefix)
+
+	// Initialize context with logger
+	ctx := logger.InitLogger(context.Background(), AppName)
+	ctx = context.WithValue(ctx, client.ClientContextKey, &client.Context{})
+
+	logger.FromContext(ctx).SetOutput(os.Stdout)
+
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}

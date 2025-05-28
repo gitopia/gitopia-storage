@@ -22,7 +22,7 @@ build:
 		@go build $(BUILD_FLAGS) -o build/ ./cmd/git-server
 		@go build $(BUILD_FLAGS) -o build/ ./hooks/gitopia-pre-receive 
 		@go build $(BUILD_FLAGS) -o build/ ./hooks/gitopia-post-receive 
-		
+		@go build $(BUILD_FLAGS) -o build/ ./cmd/migrate
 install: go.sum
 		@echo "--> Installing gitopia services"
 		@go install $(BUILD_FLAGS) -mod=readonly .
