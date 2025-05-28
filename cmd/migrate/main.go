@@ -253,6 +253,7 @@ func main() {
 								attachmentCid.String(),
 								rootHash,
 								fileInfo.Size(),
+								attachment.Sha,
 							)
 							if err != nil {
 								fmt.Printf("Error updating release asset: %v\n", err)

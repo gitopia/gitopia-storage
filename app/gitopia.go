@@ -263,7 +263,7 @@ func (g GitopiaProxy) ReleaseAsset(ctx context.Context, id uint64) (storagetypes
 	return resp.ReleaseAsset, nil
 }
 
-func (g GitopiaProxy) UpdateReleaseAsset(ctx context.Context, repositoryId uint64, tag string, name string, cid string, rootHash []byte, size int64) error {
+func (g GitopiaProxy) UpdateReleaseAsset(ctx context.Context, repositoryId uint64, tag string, name string, cid string, rootHash []byte, size int64, sha256 string) error {
 	msg := &storagetypes.MsgUpdateReleaseAsset{
 		Creator:      g.gc.Address().String(),
 		RepositoryId: repositoryId,
@@ -272,6 +272,7 @@ func (g GitopiaProxy) UpdateReleaseAsset(ctx context.Context, repositoryId uint6
 		Cid:          cid,
 		RootHash:     rootHash,
 		Size_:        uint64(size),
+		Sha256:       sha256,
 	}
 
 	err := g.gc.BroadcastTxAndWait(ctx, msg)

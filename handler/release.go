@@ -238,7 +238,7 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 				continue
 			}
 
-			err = h.gc.UpdateReleaseAsset(ctx, event.RepositoryId, event.Tag, attachment.Name, cid, rootHash, int64(attachment.Size_))
+			err = h.gc.UpdateReleaseAsset(ctx, event.RepositoryId, event.Tag, attachment.Name, cid, rootHash, int64(attachment.Size_), attachment.Sha)
 			if err != nil {
 				logger.FromContext(ctx).WithError(err).WithField("attachment", attachment.Name).Error("failed to update release asset")
 			}
@@ -287,7 +287,7 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 					}
 
 					// Update the release asset with new CID and merkle root
-					err = h.gc.UpdateReleaseAsset(ctx, event.RepositoryId, event.Tag, attachment.Name, newCid, rootHash, int64(attachment.Size_))
+					err = h.gc.UpdateReleaseAsset(ctx, event.RepositoryId, event.Tag, attachment.Name, newCid, rootHash, int64(attachment.Size_), attachment.Sha)
 					if err != nil {
 						logger.FromContext(ctx).WithError(err).WithField("attachment", attachment.Name).Error("failed to update release asset")
 					}
@@ -307,7 +307,7 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 				}
 
 				// Update the release asset with new CID and merkle root
-				err = h.gc.UpdateReleaseAsset(ctx, event.RepositoryId, event.Tag, attachment.Name, newCid, rootHash, int64(attachment.Size_))
+				err = h.gc.UpdateReleaseAsset(ctx, event.RepositoryId, event.Tag, attachment.Name, newCid, rootHash, int64(attachment.Size_), attachment.Sha)
 				if err != nil {
 					logger.FromContext(ctx).WithError(err).WithField("attachment", attachment.Name).Error("failed to update release asset")
 				}

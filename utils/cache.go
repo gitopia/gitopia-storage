@@ -215,3 +215,40 @@ func createBranchesAndTags(queryClient gitopia.Query, repoOwner string, repoName
 	}
 	return nil
 }
+
+func IsReleaseAssetCached(sha256, cacheDir string) (bool, error) {
+	attachmentDir := viper.GetString("ATTACHMENT_DIR")
+	filePath := fmt.Sprintf("%s/%s", attachmentDir, sha256)
+
+	if _, err := os.Stat(filePath); err == nil {
+		return true, nil
+	}
+	return false, nil
+}
+
+func DownloadReleaseAsset(cid, sha256, cacheDir string) error {
+	ipfsUrl := fmt.Sprintf("http://%s:%s/api/v0/cat?arg=/ipfs/%s&progress=false", viper.GetString("IPFS_HOST"), viper.GetString("IPFS_PORT"), cid)
+	resp, err := http.Post(ipfsUrl, "application/json", nil)
+	if err != nil {
+		return fmt.Errorf("failed to fetch release asset from IPFS: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to fetch release asset from IPFS: %v", resp.Status)
+	}
+
+	attachmentDir := viper.GetString("ATTACHMENT_DIR")
+	filePath := fmt.Sprintf("%s/%s", attachmentDir, sha256)
+	attachmentFile, err := os.Create(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to create attachment file: %v", err)
+	}
+	defer attachmentFile.Close()
+
+	if _, err := io.Copy(attachmentFile, resp.Body); err != nil {
+		return fmt.Errorf("failed to write attachment file: %v", err)
+	}
+
+	return nil
+}

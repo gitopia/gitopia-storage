@@ -2,14 +2,16 @@ package handler
 
 import (
 	"context"
+	"fmt"
+	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/buger/jsonparser"
 	"github.com/gitopia/git-server/app"
+	"github.com/gitopia/git-server/utils"
 	"github.com/gitopia/gitopia-go/logger"
-	pinclient "github.com/ipfs/boxo/pinning/remote/client"
-	"github.com/ipfs/go-cid"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -21,6 +23,8 @@ type PackfileUpdatedEvent struct {
 	RepositoryId uint64
 	NewCid       string
 	OldCid       string
+	NewName      string
+	OldName      string
 }
 
 func (e *PackfileUpdatedEvent) UnMarshal(eventBuf []byte) error {
@@ -46,26 +50,40 @@ func (e *PackfileUpdatedEvent) UnMarshal(eventBuf []byte) error {
 	}
 	oldCid = strings.Trim(oldCid, "\"")
 
+	newName, err := jsonparser.GetString(eventBuf, "events", EventPackfileUpdatedType+"."+"new_name", "[0]")
+	if err != nil {
+		return errors.Wrap(err, "error parsing new name")
+	}
+	newName = strings.Trim(newName, "\"")
+
+	oldName, err := jsonparser.GetString(eventBuf, "events", EventPackfileUpdatedType+"."+"old_name", "[0]")
+	if err != nil {
+		return errors.Wrap(err, "error parsing old name")
+	}
+	oldName = strings.Trim(oldName, "\"")
+
 	e.RepositoryId = repoId
 	e.NewCid = newCid
 	e.OldCid = oldCid
+	e.NewName = newName
+	e.OldName = oldName
 
 	return nil
 }
 
 type PackfileUpdatedEventHandler struct {
-	gc                   app.GitopiaProxy
-	pinningServiceClient *pinclient.Client
+	gc           app.GitopiaProxy
+	pinataClient *PinataClient
 }
 
 func NewPackfileUpdatedEventHandler(g app.GitopiaProxy) PackfileUpdatedEventHandler {
-	var pinningClient *pinclient.Client
+	var pinataClient *PinataClient
 	if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
-		pinningClient = pinclient.NewClient(viper.GetString("PINNING_SERVICE_API_URL"), viper.GetString("PINNING_SERVICE_API_ACCESS_TOKEN"))
+		pinataClient = NewPinataClient(viper.GetString("PINATA_JWT"))
 	}
 	return PackfileUpdatedEventHandler{
-		gc:                   g,
-		pinningServiceClient: pinningClient,
+		gc:           g,
+		pinataClient: pinataClient,
 	}
 }
 
@@ -91,22 +109,41 @@ func (h *PackfileUpdatedEventHandler) Process(ctx context.Context, event Packfil
 		"old_cid":       event.OldCid,
 	}).Info("processing packfile updated event")
 
-	// Pin to external service if enabled
-	if h.pinningServiceClient != nil && event.NewCid != "" {
-		newCid, err := cid.Decode(event.NewCid)
+	// Pin to Pinata if enabled
+	if h.pinataClient != nil && event.NewCid != "" {
+		cacheDir := viper.GetString("GIT_DIR")
+
+		// check if repo is cached
+		isCached, err := utils.IsRepoCached(event.RepositoryId, cacheDir)
 		if err != nil {
-			logger.FromContext(ctx).WithError(err).Error("failed to decode CID")
+			return err
+		}
+		if !isCached {
+			err = utils.DownloadRepo(event.RepositoryId, cacheDir)
+			if err != nil {
+				return err
+			}
+		}
+
+		packfilePath := path.Join(cacheDir, fmt.Sprintf("%v.git/objects/pack/", event.RepositoryId), event.NewName)
+		resp, err := h.pinataClient.PinFile(ctx, packfilePath, filepath.Base(packfilePath))
+		if err != nil {
+			logger.FromContext(ctx).WithError(err).Error("failed to pin file to Pinata")
 			// Don't fail the process, just log the error
 		} else {
-			_, err = h.pinningServiceClient.Add(ctx, newCid)
-			if err != nil {
-				logger.FromContext(ctx).WithError(err).Error("failed to pin file to external service")
-				// Don't fail the process, just log the error
-			} else {
-				logger.FromContext(ctx).WithField("cid", event.NewCid).Info("successfully pinned to external service")
-			}
+			logger.FromContext(ctx).WithFields(logrus.Fields{
+				"cid":       event.NewCid,
+				"pinata_id": resp.Data.ID,
+			}).Info("successfully pinned to Pinata")
 		}
 	}
 
+	// Unpin old packfile from Pinata if enabled
+	if h.pinataClient != nil && event.OldCid != "" && event.OldCid != event.NewCid {
+		err := h.pinataClient.UnpinFile(ctx, event.OldName)
+		if err != nil {
+			logger.FromContext(ctx).WithError(err).Error("failed to unpin file from Pinata")
+		}
+	}
 	return nil
 }

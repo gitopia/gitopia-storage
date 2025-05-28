@@ -9,11 +9,10 @@ require (
 	github.com/buger/jsonparser v1.1.1
 	github.com/cosmos/cosmos-sdk v0.47.13
 	github.com/gitopia/gitopia-go v0.6.2
-	github.com/gitopia/gitopia/v6 v6.0.0-rc
+	github.com/gitopia/gitopia/v6 v6.0.0-rc.1
 	github.com/gitopia/go-git/v5 v5.4.3-0.20221011074003-f70479dc646c
 	github.com/ipfs-cluster/ipfs-cluster v1.1.2
 	github.com/ipfs/boxo v0.27.4
-	github.com/ipfs/go-cid v0.4.1
 	github.com/ipfs/kubo v0.33.1
 	github.com/mattn/go-sqlite3 v1.14.24
 	github.com/pkg/errors v0.9.1
@@ -162,6 +161,7 @@ require (
 	github.com/ipfs/bbloom v0.0.4 // indirect
 	github.com/ipfs/go-bitfield v1.1.0 // indirect
 	github.com/ipfs/go-block-format v0.2.0 // indirect
+	github.com/ipfs/go-cid v0.4.1 // indirect
 	github.com/ipfs/go-datastore v0.6.0 // indirect
 	github.com/ipfs/go-ds-measure v0.2.0 // indirect
 	github.com/ipfs/go-fs-lock v0.0.7 // indirect
