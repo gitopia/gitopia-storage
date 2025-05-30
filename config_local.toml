@@ -9,3 +9,11 @@ WORKING_DIR = "/src/app/"
 GAS_PRICES = "0.001ulore"
 CHAIN_ID = "localgitopia"
 FEE_GRANTER="gitopia12sjhqc3rqgvu3zpg8ekmwl005rp4ys58ekqg89"
+
+# IPFS Configuration
+IPFS_CLUSTER_PEER_HOST = "host.docker.internal"
+IPFS_CLUSTER_PEER_PORT = "9094"
+IPFS_HOST = "host.docker.internal"
+IPFS_PORT = "5001"
+ENABLE_EXTERNAL_PINNING = false
+PINATA_JWT = ""

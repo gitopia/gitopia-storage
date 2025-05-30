@@ -9,3 +9,11 @@ WORKING_DIR = "/home/ubuntu/git-server/"
 GAS_PRICES = "0.001ulore"
 CHAIN_ID = "gitopia-janus-devnet-4"
 FEE_GRANTER=""
+
+# IPFS Configuration
+IPFS_CLUSTER_PEER_HOST = "ipfs-cluster"
+IPFS_CLUSTER_PEER_PORT = "9094"
+IPFS_HOST = "ipfs"
+IPFS_PORT = "5001"
+ENABLE_EXTERNAL_PINNING = false
+PINATA_JWT = ""

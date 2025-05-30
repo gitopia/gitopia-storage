@@ -1,31 +1,108 @@
-# gitopia services
+# Gitopia Storage Provider
 
-gitopia services for [gitopia](https://gitopia.org/)
-
-## Web server
+Storage provider and git apis for [gitopia](https://gitopia.org/)
 
 ## Dependencies
 
 - [git](https://git-scm.com/)
+- [go](https://golang.org/) 1.23 or later
 
 ### Build
 
-By default, git-server is built with local configurations. If you want to build with `PRODUCTION` or `DEVELOPMENT` configurations, pass a build arg `ENV` with respective value.
+#### Local Build
+
+To build the services locally:
+
+```sh
+# Build all binaries
+make build
+
+# Install binaries to $GOPATH/bin
+make install
 ```
+
+The build process will create the following binaries in the `build/` directory:
+- `git-server`: Main server binary
+- `gitopia-pre-receive`: Git pre-receive hook
+- `gitopia-post-receive`: Git post-receive hook
+- `migrate`: Storage migration tool
+
+#### Docker Build
+
+By default, git-server is built with local configurations. If you want to build with `PRODUCTION` or `DEVELOPMENT` configurations, pass a build arg `ENV` with respective value.
+
+```sh
 make docker-build-debug
+```
+
+### Configuration
+
+The server can be configured using a TOML configuration file. Here's the complete configuration structure:
+
+```toml
+# Server Configuration
+WEB_SERVER_PORT = 5000
+GIT_DIR = "/var/repos"
+LFS_OBJECTS_DIR = "/var/lfs-objects"
+ATTACHMENT_DIR = "/var/attachments"
+WORKING_DIR = "/home/ubuntu/git-server/"
+
+# Gitopia Network Configuration
+GITOPIA_ADDR = "gitopia-grpc.polkachu.com:11390"
+TM_ADDR = "https://gitopia-rpc.polkachu.com:443"
+GIT_SERVER_EXTERNAL_ADDR = "https://server.gitopia.com"
+CHAIN_ID = "gitopia"
+GAS_PRICES = "0.001ulore"
+FEE_GRANTER = "gitopia13ashgc6j5xle4m47kqyn5psavq0u3klmscfxql"
+
+# IPFS Configuration
+IPFS_CLUSTER_PEER_HOST = "your-ipfs-host"
+IPFS_CLUSTER_PEER_PORT = "your-ipfs-port"
+IPFS_HOST = "your-ipfs-host"
+IPFS_PORT = "your-ipfs-port"
+ENABLE_EXTERNAL_PINNING = false
+PINATA_JWT = "your-pinata-jwt"  # Required if ENABLE_EXTERNAL_PINNING is true
 ```
 
 ### Usage
 
-Make necessary changes in `config.toml` for production and also set the following environment variable. Create `GIT_DIR` and `ATTACHMENT_DIR` and verify the permissions.
+#### Local Usage
 
-To start the server, execute the following command
+1. Create necessary directories and set permissions:
+```sh
+mkdir -p /var/repos /var/attachments /var/lfs-objects
+chmod 755 /var/repos /var/attachments /var/lfs-objects
+```
 
+2. Set up key and register as provider:
+```sh
+# Generate or recover key based on server ID
+git-server keys add git-server --keyring-backend test --recover
+
+# Register as provider (adjust amount as needed)
+git-server register-provider http://localhost:5000 1000000000000ulore --from git-server --keyring-backend test --fees 200ulore
+```
+
+3. Start the server:
+```sh
+git-server start --from git-server --keyring-backend test
+```
+
+#### Docker Usage
+
+1. Create necessary directories and set permissions:
+```sh
+mkdir -p /var/repos /var/attachments /var/lfs-objects
+chmod 755 /var/repos /var/attachments /var/lfs-objects
+```
+
+2. Start the container:
 ```sh
 docker run -it \
   --name git-server \
   --mount type=bind,source=/var/attachments,target=/var/attachments \
-  --mount type=bind,source=/var/repos,target=/var/repos -p 5000:5000 \
+  --mount type=bind,source=/var/repos,target=/var/repos \
+  -p 5000:5000 \
   gitopia/git-server
 ```
 
@@ -64,38 +141,6 @@ The server will be listening at port `5000`
   }
   ```
 - `GET` /raw/<id>/<repoName>/<branchName>/<filePath> : get raw file
-
-## Event processing service
-
-### Build
-
-```
-make build
-```
-
-### Usage
-
-Make necessary changes in `config.toml` for production and also set the following environment variable. Create `GIT_DIR` and verify the permissions.
-
-Create a key for git-server-events and send some tokens to it's address
-
-```sh
-./build/git-server-events keys add git-server --keyring-backend test
-```
-
-Get address
-
-```sh
-./build/git-server-events keys show git-server -a --keyring-backend test
-```
-
-To start the service, execute the following command
-
-```sh
-./build/git-server-events run --from git-server --keyring-backend test
-```
-
-Logs will be available at `gitopia-git-server-events.log`
 
 ## Contributing
 
