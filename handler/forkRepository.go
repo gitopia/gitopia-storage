@@ -3,17 +3,12 @@ package handler
 import (
 	"context"
 	"fmt"
-	"math"
 	"os/exec"
 	"path"
 	"strconv"
-	"sync"
 
 	"github.com/buger/jsonparser"
-	"github.com/cosmos/cosmos-sdk/codec"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/cosmos/cosmos-sdk/types/query"
-	"github.com/cosmos/cosmos-sdk/types/tx"
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia-storage/app"
 	"github.com/gitopia/gitopia-storage/app/consumer"
@@ -22,8 +17,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 type InvokeForkRepositoryEvent struct {
@@ -128,21 +121,12 @@ type InvokeForkRepositoryEventHandler struct {
 	gc app.GitopiaProxy
 
 	cc consumer.Client
-
-	// commit offset only when backfill is complete
-	commitOffset bool
-	// written by backfill routine
-	// read by real time event processor routine
-	commitOffsetMu sync.RWMutex
-	offsetChan     chan uint64
 }
 
 func NewInvokeForkRepositoryEventHandler(g app.GitopiaProxy, c consumer.Client) InvokeForkRepositoryEventHandler {
 	return InvokeForkRepositoryEventHandler{
-		gc:           g,
-		cc:           c,
-		offsetChan:   make(chan uint64),
-		commitOffset: false,
+		gc: g,
+		cc: c,
 	}
 }
 
@@ -158,24 +142,6 @@ func (h *InvokeForkRepositoryEventHandler) Handle(ctx context.Context, eventBuf 
 		return errors.WithMessage(err, "error processing event")
 	}
 
-	commitOffset := func() bool {
-		h.commitOffsetMu.RLock()
-		defer h.commitOffsetMu.RUnlock()
-		return h.commitOffset
-	}()
-	if commitOffset {
-		err = h.cc.Commit(event.TxHeight)
-		if err != nil {
-			return errors.WithMessage(err, "error commiting tx height")
-		}
-	} else {
-		// send if there are any receivers listening
-		select {
-		case h.offsetChan <- event.TxHeight:
-		default:
-			// ignore if there are no receivers
-		}
-	}
 	return nil
 }
 
@@ -348,138 +314,4 @@ func (h *InvokeForkRepositoryEventHandler) Process(ctx context.Context, event In
 	}).Info("Repository forked successfully")
 
 	return nil
-}
-
-// run asynchronously
-// read offset until which tx's are processed
-// fetch missed txs
-// fetch repository information for missed txs
-// process setRepositoryEvent
-func (h *InvokeForkRepositoryEventHandler) BackfillMissedEvents(ctx context.Context) (<-chan struct{}, chan error) {
-	errChan := make(chan error)
-	ctx, cancel := context.WithCancel(ctx)
-	go func() {
-		defer func() {
-			// notify backfill is done
-			func() {
-				h.commitOffsetMu.Lock()
-				defer h.commitOffsetMu.Unlock()
-				h.commitOffset = true
-			}()
-			cancel()
-		}()
-
-		startHeight, err := h.cc.Offset()
-		if err != nil {
-			errChan <- errors.WithMessage(err, "error fetching processed tx height")
-			return
-		}
-
-		// no known offset to backfill
-		if startHeight == 0 {
-			logger.FromContext(ctx).Info("no known offset to backfill. terminating")
-			return
-		}
-
-		// fetch upper limit for range query
-		// in order to avoid scanning whole kv store
-		// !!WAIT!! until first real time event is received. practically, real time events should flow as soon as bridge starts
-		// backfill till current offset
-		endHeight := <-h.offsetChan
-
-		logger.FromContext(ctx).WithField("start", startHeight).WithField("end", endHeight).Info("backfill in progress")
-		defer func() {
-			logger.FromContext(ctx).Info("backfill done")
-		}()
-
-		grpcConn, err := grpc.Dial(viper.GetString("GITOPIA_ADDR"),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithDefaultCallOptions(grpc.ForceCodec(codec.NewProtoCodec(nil).GRPCCodec())),
-		)
-		if err != nil {
-			errChan <- errors.Wrap(err, "dial err")
-			return
-		}
-		serviceClient := tx.NewServiceClient(grpcConn)
-
-		// process events in batches
-		for offset, remainingPages := uint64(0), uint64(0); offset == 0 || remainingPages > 0; offset,
-			remainingPages = offset+query.DefaultLimit, remainingPages-1 {
-			res, err := serviceClient.GetTxsEvent(ctx, &tx.GetTxsEventRequest{
-				Events: []string{"message.action='InvokeForkRepository'",
-					// NOTE: > and < operators are not supported
-					fmt.Sprintf("tx.height>=%d", startHeight+1),
-					fmt.Sprintf("tx.height<=%d", endHeight-1),
-				},
-				Pagination: &query.PageRequest{
-					Offset: offset,
-				},
-			})
-			if err != nil {
-				errChan <- errors.Wrap(err, "error fetching events")
-				return
-			}
-			if remainingPages == 0 {
-				remainingPages = uint64(math.Ceil(float64(res.GetPagination().GetTotal()) / query.DefaultLimit))
-			}
-
-			for _, r := range res.GetTxResponses() {
-				for _, e := range r.Events {
-					switch e.GetType() {
-					case "InvokeForkRepository":
-						attributeMap := make(map[string]string)
-						for i := 0; i < len(e.Attributes); i++ {
-							attributeMap[string(e.Attributes[i].Key)] = string(e.Attributes[i].Value)
-						}
-
-						repoId, err := strconv.ParseUint(attributeMap[types.EventAttributeRepoIdKey], 10, 64)
-						if err != nil {
-							errChan <- errors.WithMessage(err, "error parsing repo id")
-							return
-						}
-
-						taskId, err := strconv.ParseUint(attributeMap[types.EventAttributeTaskIdKey], 10, 64)
-						if err != nil {
-							errChan <- errors.WithMessage(err, "error parsing task id")
-							return
-						}
-
-						event := InvokeForkRepositoryEvent{
-							Creator:             attributeMap[types.EventAttributeCreatorKey],
-							RepoId:              repoId,
-							RepoName:            attributeMap[types.EventAttributeRepoNameKey],
-							RepoOwnerId:         attributeMap[types.EventAttributeRepoOwnerIdKey],
-							ForkRepoName:        attributeMap[types.EventAttributeForkRepoNameKey],
-							ForkRepoDescription: attributeMap[types.EventAttributeForkRepoDescriptionKey],
-							ForkRepoBranch:      attributeMap[types.EventAttributeForkRepoBranchKey],
-							ForkRepoOwnerId:     attributeMap[types.EventAttributeForkRepoOwnerIdKey],
-							TaskId:              taskId,
-							TxHeight:            uint64(r.Height),
-						}
-
-						// The missed events will be processed for the current/latest state of the repository, and not the state of the repository when the event was triggered
-						err = h.Process(ctx, event)
-						if err != nil {
-							errChan <- errors.WithMessage(err, "error processing event")
-							return
-						}
-						err = h.cc.Commit(event.TxHeight)
-						if err != nil {
-							errChan <- errors.WithMessage(err, "error commiting tx height")
-							return
-						}
-					}
-				}
-			}
-		}
-		// processed all missed txs
-		// handoff height tracking to real time event processor
-		err = h.cc.Commit(endHeight)
-		if err != nil {
-			errChan <- errors.WithMessage(err, "error commiting tx height")
-			return
-		}
-	}()
-
-	return ctx.Done(), errChan
 }
