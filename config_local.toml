@@ -8,7 +8,6 @@ TM_ADDR = "http://host.docker.internal:26667"
 WORKING_DIR = "/src/app/"
 GAS_PRICES = "0.001ulore"
 CHAIN_ID = "localgitopia"
-FEE_GRANTER="gitopia12sjhqc3rqgvu3zpg8ekmwl005rp4ys58ekqg89"
 
 # IPFS Configuration
 IPFS_CLUSTER_PEER_HOST = "host.docker.internal"

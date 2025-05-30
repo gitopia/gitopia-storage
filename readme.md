@@ -53,7 +53,6 @@ TM_ADDR = "https://gitopia-rpc.polkachu.com:443"
 GIT_SERVER_EXTERNAL_ADDR = "https://server.gitopia.com"
 CHAIN_ID = "gitopia"
 GAS_PRICES = "0.001ulore"
-FEE_GRANTER = "gitopia13ashgc6j5xle4m47kqyn5psavq0u3klmscfxql"
 
 # IPFS Configuration
 IPFS_CLUSTER_PEER_HOST = "your-ipfs-host"
