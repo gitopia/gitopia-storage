@@ -17,7 +17,7 @@ import (
 const (
 	AccountAddressPrefix = "gitopia"
 	AccountPubKeyPrefix  = AccountAddressPrefix + sdk.PrefixPublic
-	AppName              = "git-server"
+	AppName              = "gitopia-storage"
 )
 
 var (

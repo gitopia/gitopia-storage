@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"path"
 
-	"github.com/gitopia/git-server/utils"
+	"github.com/gitopia/gitopia-storage/utils"
 	git "github.com/gitopia/go-git/v5"
 	"github.com/gitopia/go-git/v5/plumbing"
 	"github.com/gitopia/go-git/v5/plumbing/object"

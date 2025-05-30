@@ -9,9 +9,9 @@ import (
 	"strings"
 
 	"github.com/buger/jsonparser"
-	"github.com/gitopia/git-server/app"
-	"github.com/gitopia/git-server/pkg/merkleproof"
 	"github.com/gitopia/gitopia-go/logger"
+	"github.com/gitopia/gitopia-storage/app"
+	"github.com/gitopia/gitopia-storage/pkg/merkleproof"
 	storagetypes "github.com/gitopia/gitopia/v6/x/storage/types"
 	"github.com/ipfs/boxo/files"
 	"github.com/ipfs/boxo/path"

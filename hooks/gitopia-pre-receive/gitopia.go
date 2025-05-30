@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"cosmossdk.io/errors"
-	"github.com/gitopia/git-server/hooks/gitopia-pre-receive/config"
 	"github.com/gitopia/gitopia-go"
+	"github.com/gitopia/gitopia-storage/hooks/gitopia-pre-receive/config"
 	"github.com/gitopia/gitopia/v6/x/gitopia/types"
 )
 

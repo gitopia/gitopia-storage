@@ -1,3 +1,5 @@
+# GITOPIA_ENV can be set to: prod, testing
+# Default is prod, can be overridden via environment variable or command line
 GITOPIA_ENV ?= prod
 
 ifeq ($(LINK_STATICALLY),true)
@@ -19,7 +21,7 @@ all: install
 .PHONY: build
 
 build:
-		@go build $(BUILD_FLAGS) -o build/ ./cmd/git-server
+		@go build $(BUILD_FLAGS) -o build/ ./cmd/gitopia-storaged
 		@go build $(BUILD_FLAGS) -o build/ ./hooks/gitopia-pre-receive 
 		@go build $(BUILD_FLAGS) -o build/ ./hooks/gitopia-post-receive 
 		@go build $(BUILD_FLAGS) -o build/ ./cmd/migrate
@@ -33,5 +35,5 @@ go.sum: go.mod
 		@echo "--> Ensure dependencies have not been modified"
 		GO111MODULE=on go mod verify
 
-docker-build-debug:
-	@docker build -t gitopia/git-server -f Dockerfile .
+docker-build-gitopia-storage:
+	@docker build --build-arg GITOPIA_ENV=$(GITOPIA_ENV) -t gitopia/gitopia-storage -f Dockerfile .

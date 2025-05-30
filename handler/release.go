@@ -10,9 +10,9 @@ import (
 
 	"github.com/buger/jsonparser"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/gitopia/git-server/app"
-	"github.com/gitopia/git-server/pkg/merkleproof"
 	"github.com/gitopia/gitopia-go/logger"
+	"github.com/gitopia/gitopia-storage/app"
+	"github.com/gitopia/gitopia-storage/pkg/merkleproof"
 	gitopiatypes "github.com/gitopia/gitopia/v6/x/gitopia/types"
 	storagetypes "github.com/gitopia/gitopia/v6/x/storage/types"
 	"github.com/ipfs-cluster/ipfs-cluster/api"

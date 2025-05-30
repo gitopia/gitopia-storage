@@ -69,9 +69,9 @@ services:
     networks:
       - storage-provider-test
 
-  git-server0:
-    container_name: git-server0
-    image: gitopia/git-server:latest
+  gitopia-storage0:
+    container_name: gitopia-storage0
+    image: gitopia/gitopia-storage:latest
     depends_on:
       - cluster0
     environment:
@@ -86,7 +86,7 @@ services:
     ports:
       - "5001:5000"
     volumes:
-      - ./compose/git-server0:/var/repos
+      - ./compose/gitopia-storage0:/var/repos
     networks:
       - storage-provider-test
 
@@ -121,9 +121,9 @@ services:
     networks:
       - storage-provider-test
 
-  git-server1:
-    container_name: git-server1
-    image: gitopia/git-server:latest
+  gitopia-storage1:
+    container_name: gitopia-storage1
+    image: gitopia/gitopia-storage:latest
     depends_on:
       - cluster1
     environment:
@@ -138,7 +138,7 @@ services:
     ports:
       - "5002:5000"
     volumes:
-      - ./compose/git-server1:/var/repos
+      - ./compose/gitopia-storage1:/var/repos
     networks:
       - storage-provider-test
 
@@ -173,9 +173,9 @@ services:
     networks:
       - storage-provider-test
 
-  git-server2:
-    container_name: git-server2
-    image: gitopia/git-server:latest
+  gitopia-storage2:
+    container_name: gitopia-storage2
+    image: gitopia/gitopia-storage:latest
     depends_on:
       - cluster2
     environment:
@@ -190,7 +190,7 @@ services:
     ports:
       - "5003:5000"
     volumes:
-      - ./compose/git-server2:/var/repos
+      - ./compose/gitopia-storage2:/var/repos
     networks:
       - storage-provider-test
 

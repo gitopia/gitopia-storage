@@ -9,7 +9,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/gitopia/git-server/utils"
+	"github.com/gitopia/gitopia-storage/utils"
 	"github.com/spf13/viper"
 )
 

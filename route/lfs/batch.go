@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net/http"
 
-	lfsutil "github.com/gitopia/git-server/lfs"
-	"github.com/gitopia/git-server/utils"
+	lfsutil "github.com/gitopia/gitopia-storage/lfs"
+	"github.com/gitopia/gitopia-storage/utils"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )

@@ -9,9 +9,9 @@ import (
 	"strings"
 
 	"github.com/buger/jsonparser"
-	"github.com/gitopia/git-server/app"
-	"github.com/gitopia/git-server/utils"
 	"github.com/gitopia/gitopia-go/logger"
+	"github.com/gitopia/gitopia-storage/app"
+	"github.com/gitopia/gitopia-storage/utils"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"

@@ -1,7 +1,7 @@
 with-expecter: true
 dir: mocks/{{ replaceAll .PackagePath "internal" "internal_" }}
 packages:
-  github.com/gitopia/git-server/internal/app:
+  github.com/gitopia/gitopia-storage/internal/app:
     interfaces:
       QueryService:
 

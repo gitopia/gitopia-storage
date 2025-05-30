@@ -8,9 +8,9 @@ import (
 	"path"
 	"testing"
 
-	"github.com/gitopia/git-server/internal/app"
-	mocks "github.com/gitopia/git-server/mocks/github.com/gitopia/git-server/internal_/app"
-	"github.com/gitopia/git-server/utils"
+	"github.com/gitopia/gitopia-storage/internal/app"
+	mocks "github.com/gitopia/gitopia-storage/mocks/github.com/gitopia/gitopia-storage/internal_/app"
+	"github.com/gitopia/gitopia-storage/utils"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
 )

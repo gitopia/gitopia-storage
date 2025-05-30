@@ -17,6 +17,6 @@ case "${GIT_SERVER_ID}" in
     ;;
 esac
 
-echo $MNEMONIC | /usr/local/bin/git-server keys add git-server --keyring-backend test --recover
-/usr/local/bin/git-server register-provider http://git-server$GIT_SERVER_ID:5000 10000000000ulore --from git-server --keyring-backend test --fees 200ulore
-/usr/local/bin/git-server start --from git-server --keyring-backend test
+echo $MNEMONIC | /usr/local/bin/gitopia-storaged keys add gitopia-storage --keyring-backend test --recover
+/usr/local/bin/gitopia-storaged register-provider http://gitopia-storage$GIT_SERVER_ID:5000 10000000000ulore --from gitopia-storage --keyring-backend test --fees 200ulore
+/usr/local/bin/gitopia-storaged start --from gitopia-storage --keyring-backend test

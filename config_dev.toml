@@ -5,7 +5,7 @@ LFS_OBJECTS_DIR = "/var/lfs-objects"
 GIT_SERVER_EXTERNAL_ADDR = "https://server.devnet.gitopia.com"
 ATTACHMENT_DIR = "/var/attachments"
 TM_ADDR = "https://rpc.devnet.gitopia.com:443"
-WORKING_DIR = "/home/ubuntu/git-server/"
+WORKING_DIR = "/home/ubuntu/gitopia-storage/"
 GAS_PRICES = "0.001ulore"
 CHAIN_ID = "gitopia-janus-devnet-4"
 

@@ -9,7 +9,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/gitopia/git-server/utils"
+	"github.com/gitopia/gitopia-storage/utils"
 	"github.com/gitopia/gitopia/v6/x/gitopia/types"
 	"github.com/spf13/viper"
 )

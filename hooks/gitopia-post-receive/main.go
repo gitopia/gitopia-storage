@@ -6,7 +6,7 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/gitopia/git-server/hooks/utils"
+	"github.com/gitopia/gitopia-storage/hooks/utils"
 	"github.com/pkg/errors"
 )
 

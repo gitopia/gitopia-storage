@@ -1,4 +1,4 @@
-module github.com/gitopia/git-server
+module github.com/gitopia/gitopia-storage
 
 go 1.23
 

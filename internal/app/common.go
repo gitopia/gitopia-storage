@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gitopia/git-server/utils"
+	"github.com/gitopia/gitopia-storage/utils"
 	gitopiatypes "github.com/gitopia/gitopia/v6/x/gitopia/types"
 	storagetypes "github.com/gitopia/gitopia/v6/x/storage/types"
 )
