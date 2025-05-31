@@ -141,21 +141,6 @@ func (h *InvokeDaoMergePullRequestEventHandler) Process(ctx context.Context, eve
 		return err
 	}
 
-	haveAuthorization, err := h.gc.CheckGitServerAuthorization(ctx, repository.Owner.Id)
-	if err != nil {
-		return err
-	}
-	if !haveAuthorization {
-		logger.FromContext(ctx).
-			WithField("creator", repository.Owner.Id).
-			WithField("repository-id", event.RepositoryId).
-			WithField("pull-iid", event.PullIid).
-			WithField("task-id", event.TaskId).
-			WithField("tx-height", event.TxHeight).
-			Info("skipping dao merge pull request, not authorized")
-		return nil
-	}
-
 	mergePullEvent := InvokeMergePullRequestEvent{
 		Creator:        repository.Owner.Id,
 		RepositoryId:   event.RepositoryId,

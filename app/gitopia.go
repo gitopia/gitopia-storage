@@ -24,71 +24,12 @@ func NewGitopiaProxy(g gitopia.Client) GitopiaProxy {
 	return GitopiaProxy{g}
 }
 
-func (g GitopiaProxy) ForkRepository(ctx context.Context,
-	creator string,
-	repositoryId types.RepositoryId,
-	forkRepositoryName string,
-	forkRepositoryDescription string,
-	branch string,
-	owner string,
-	taskId uint64) error {
-	msg := &types.MsgForkRepository{
-		Creator:                   creator,
-		RepositoryId:              repositoryId,
-		ForkRepositoryName:        forkRepositoryName,
-		ForkRepositoryDescription: forkRepositoryDescription,
-		Branch:                    branch,
-		Owner:                     owner,
-		TaskId:                    taskId,
-	}
-
-	err := g.gc.AuthorizedBroadcastTx(ctx, msg)
-	if err != nil {
-		return errors.WithMessage(err, "error sending authorized tx")
-	}
-
-	return nil
-}
-
-func (g GitopiaProxy) ForkRepositorySuccess(ctx context.Context, creator string, repositoryId types.RepositoryId, taskId uint64) error {
-	msg := &types.MsgForkRepositorySuccess{
-		Creator:      creator,
-		RepositoryId: repositoryId,
-		TaskId:       taskId,
-	}
-
-	err := g.gc.AuthorizedBroadcastTx(ctx, msg)
-	if err != nil {
-		return errors.WithMessage(err, "error sending authorized tx")
-	}
-
-	return nil
-}
-
 func (g GitopiaProxy) UpdateTask(ctx context.Context, creator string, id uint64, state types.TaskState, message string) error {
 	msg := &types.MsgUpdateTask{
 		Creator: creator,
 		Id:      id,
 		State:   state,
 		Message: message,
-	}
-
-	err := g.gc.AuthorizedBroadcastTx(ctx, msg)
-	if err != nil {
-		return errors.WithMessage(err, "error sending authorized tx")
-	}
-
-	return nil
-}
-
-func (g GitopiaProxy) SetPullRequestState(ctx context.Context, creator string, repositoryId, iid uint64, state string, mergeCommitSha string, taskId uint64) error {
-	msg := &types.MsgSetPullRequestState{
-		Creator:        creator,
-		RepositoryId:   repositoryId,
-		Iid:            iid,
-		State:          state,
-		MergeCommitSha: mergeCommitSha,
-		TaskId:         taskId,
 	}
 
 	err := g.gc.AuthorizedBroadcastTx(ctx, msg)
@@ -108,18 +49,6 @@ func (g GitopiaProxy) RepositoryName(ctx context.Context, id uint64) (string, er
 	}
 
 	return resp.Repository.Name, nil
-}
-
-func (g GitopiaProxy) CheckGitServerAuthorization(ctx context.Context, userAddress string) (bool, error) {
-	resp, err := g.gc.QueryClient().Gitopia.CheckGitServerAuthorization(ctx, &types.QueryCheckGitServerAuthorizationRequest{
-		UserAddress:     userAddress,
-		ProviderAddress: g.gc.Address().String(),
-	})
-	if err != nil {
-		return false, errors.WithMessage(err, "query error")
-	}
-
-	return resp.HaveAuthorization, nil
 }
 
 func (g GitopiaProxy) RepositoryId(ctx context.Context, address string, repoName string) (uint64, error) {

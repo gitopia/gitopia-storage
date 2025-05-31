@@ -28,7 +28,6 @@ import (
 )
 
 const (
-	InvokeForkRepositoryQuery      = "tm.event='Tx' AND message.action='InvokeForkRepository'"
 	InvokeMergePullRequestQuery    = "tm.event='Tx' AND message.action='InvokeMergePullRequest'"
 	InvokeDaoMergePullRequestQuery = "tm.event='Tx' AND message.action='InvokeDaoMergePullRequest'"
 	ChallengeCreatedQuery          = "tm.event='NewBlock' AND gitopia.gitopia.storage.EventChallengeCreated.challenge_id EXISTS"
@@ -53,12 +52,85 @@ func NewStartCmd() *cobra.Command {
 	return cmdStart
 }
 
+func validateConfig() error {
+	requiredConfigs := []string{
+		"IPFS_CLUSTER_PEER_HOST",
+		"IPFS_CLUSTER_PEER_PORT",
+		"WEB_SERVER_PORT",
+		"GIT_DIR",
+	}
+
+	for _, config := range requiredConfigs {
+		if !viper.IsSet(config) {
+			return fmt.Errorf("required configuration %s is not set", config)
+		}
+	}
+
+	return nil
+}
+
+func setupWebServer(cmd *cobra.Command) (*http.Server, error) {
+	server, err := internalapp.New(cmd, utils.Config{
+		Dir:        viper.GetString("GIT_DIR"),
+		AutoCreate: true,
+		Auth:       true,
+		AutoHooks:  true,
+		Hooks: &utils.HookScripts{
+			PreReceive:  "gitopia-pre-receive",
+			PostReceive: "gitopia-post-receive",
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Ensure cache directory exists
+	if err := os.MkdirAll(viper.GetString("GIT_DIR"), os.ModePerm); err != nil {
+		return nil, err
+	}
+
+	// Configure git server
+	if err = server.Setup(); err != nil {
+		return nil, err
+	}
+
+	mux := http.NewServeMux()
+	serverWrapper := internalapp.ServerWrapper{Server: server}
+
+	mux.Handle("/", &serverWrapper)
+	mux.Handle("/objects/", http.HandlerFunc(serverWrapper.Server.ObjectsHandler))
+	mux.Handle("/commits", http.HandlerFunc(internalhandler.CommitsHandler))
+	mux.Handle("/commits/", http.HandlerFunc(internalhandler.CommitsHandler))
+	mux.Handle("/content", http.HandlerFunc(internalhandler.ContentHandler))
+	mux.Handle("/diff", http.HandlerFunc(internalhandler.CommitDiffHandler))
+	mux.Handle("/pull/diff", http.HandlerFunc(pr.PullDiffHandler))
+	mux.Handle("/upload", http.HandlerFunc(internalhandler.UploadAttachmentHandler))
+	mux.Handle("/releases/", http.HandlerFunc(internalhandler.GetAttachmentHandler))
+	mux.Handle("/pull/commits", http.HandlerFunc(pr.PullRequestCommitsHandler))
+	mux.Handle("/pull/check", http.HandlerFunc(pr.PullRequestCheckHandler))
+	mux.Handle("/raw/", http.HandlerFunc(internalhandler.GetRawFileHandler))
+
+	handler := cors.Default().Handler(mux)
+
+	return &http.Server{
+		Addr:    fmt.Sprintf(":%v", viper.GetString("WEB_SERVER_PORT")),
+		Handler: handler,
+	}, nil
+}
+
 func start(cmd *cobra.Command, args []string) error {
-	ctx := cmd.Context()
+	ctx, cancel := context.WithCancel(cmd.Context())
+	defer cancel()
+
+	if err := validateConfig(); err != nil {
+		return errors.Wrap(err, "configuration validation failed")
+	}
 
 	// Start event processor in a goroutine
 	eventErrChan := make(chan error, 1)
 	go func() {
+		defer close(eventErrChan)
+
 		clientCtx := client.GetClientContextFromCmd(cmd)
 		txf, err := tx.NewFactoryCLI(clientCtx, cmd.Flags())
 		if err != nil {
@@ -94,12 +166,6 @@ func start(cmd *cobra.Command, args []string) error {
 			"port":     viper.GetString("WEB_SERVER_PORT"),
 		}).Info("starting storage provider")
 
-		ftmc, err := gitopia.NewWSEvents(ctx, InvokeForkRepositoryQuery)
-		if err != nil {
-			eventErrChan <- errors.WithMessage(err, "tm error")
-			return
-		}
-
 		mtmc, err := gitopia.NewWSEvents(ctx, InvokeMergePullRequestQuery)
 		if err != nil {
 			eventErrChan <- errors.WithMessage(err, "tm error")
@@ -130,12 +196,6 @@ func start(cmd *cobra.Command, args []string) error {
 			return
 		}
 
-		fcc, err := consumer.NewClient("invokeForkRepositoryEvent")
-		if err != nil {
-			eventErrChan <- errors.WithMessage(err, "error creating consumer client")
-			return
-		}
-
 		mcc, err := consumer.NewClient("invokeMergePullRequestEvent")
 		if err != nil {
 			eventErrChan <- errors.WithMessage(err, "error creating consumer client")
@@ -148,7 +208,6 @@ func start(cmd *cobra.Command, args []string) error {
 			return
 		}
 
-		forkHandler := handler.NewInvokeForkRepositoryEventHandler(gp, fcc)
 		mergeHandler := handler.NewInvokeMergePullRequestEventHandler(gp, mcc, cl)
 		daoMergeHandler := handler.NewInvokeDaoMergePullRequestEventHandler(gp, dmcc, cl)
 		challengeHandler := handler.NewChallengeEventHandler(gp)
@@ -156,7 +215,6 @@ func start(cmd *cobra.Command, args []string) error {
 		releaseAssetUpdatedHandler := handler.NewReleaseAssetUpdatedEventHandler(gp)
 		releaseHandler := handler.NewReleaseEventHandler(gp, cl)
 
-		forkDone, forkSubscribeErr := ftmc.Subscribe(ctx, forkHandler.Handle)
 		mergeDone, mergeSubscribeErr := mtmc.Subscribe(ctx, mergeHandler.Handle)
 		daoMergeDone, daoMergeSubscribeErr := dmtmc.Subscribe(ctx, daoMergeHandler.Handle)
 		challengeDone, challengeSubscribeErr := ctmc.Subscribe(ctx, challengeHandler.Handle)
@@ -198,10 +256,6 @@ func start(cmd *cobra.Command, args []string) error {
 		}
 
 		select {
-		case err = <-forkSubscribeErr:
-			eventErrChan <- errors.WithMessage(err, "fork tm subscribe error")
-		case <-forkDone:
-			logger.FromContext(ctx).Info("fork done")
 		case err = <-mergeSubscribeErr:
 			eventErrChan <- errors.WithMessage(err, "merge tm subscribe error")
 		case <-mergeDone:
@@ -242,56 +296,21 @@ func start(cmd *cobra.Command, args []string) error {
 			eventErrChan <- errors.WithMessage(err, "delete release tm subscribe error")
 		case <-deleteReleaseDone:
 			logger.FromContext(ctx).Info("delete release done")
+		case <-ctx.Done():
+			eventErrChan <- ctx.Err()
 		}
 	}()
 
 	// Start web server in a goroutine
 	webErrChan := make(chan error, 1)
 	go func() {
-		// Configure git service
-		server, err := internalapp.New(cmd, utils.Config{
-			Dir:        viper.GetString("GIT_DIR"),
-			AutoCreate: true,
-			Auth:       true,
-			AutoHooks:  true,
-			Hooks: &utils.HookScripts{
-				PreReceive:  "gitopia-pre-receive",
-				PostReceive: "gitopia-post-receive",
-			},
-		})
+		server, err := setupWebServer(cmd)
 		if err != nil {
 			webErrChan <- err
 			return
 		}
 
-		// Ensure cache directory exists
-		os.MkdirAll(viper.GetString("GIT_DIR"), os.ModePerm)
-
-		// Configure git server
-		if err = server.Setup(); err != nil {
-			webErrChan <- err
-			return
-		}
-
-		mux := http.NewServeMux()
-		serverWrapper := internalapp.ServerWrapper{Server: server}
-
-		mux.Handle("/", &serverWrapper)
-		mux.Handle("/objects/", http.HandlerFunc(serverWrapper.Server.ObjectsHandler))
-		mux.Handle("/commits", http.HandlerFunc(internalhandler.CommitsHandler))
-		mux.Handle("/commits/", http.HandlerFunc(internalhandler.CommitsHandler))
-		mux.Handle("/content", http.HandlerFunc(internalhandler.ContentHandler))
-		mux.Handle("/diff", http.HandlerFunc(internalhandler.CommitDiffHandler))
-		mux.Handle("/pull/diff", http.HandlerFunc(pr.PullDiffHandler))
-		mux.Handle("/upload", http.HandlerFunc(internalhandler.UploadAttachmentHandler))
-		mux.Handle("/releases/", http.HandlerFunc(internalhandler.GetAttachmentHandler))
-		mux.Handle("/pull/commits", http.HandlerFunc(pr.PullRequestCommitsHandler))
-		mux.Handle("/pull/check", http.HandlerFunc(pr.PullRequestCheckHandler))
-		mux.Handle("/raw/", http.HandlerFunc(internalhandler.GetRawFileHandler))
-
-		handler := cors.Default().Handler(mux)
-
-		webErrChan <- http.ListenAndServe(fmt.Sprintf(":%v", viper.GetString("WEB_SERVER_PORT")), handler)
+		webErrChan <- server.ListenAndServe()
 	}()
 
 	// Wait for either service to error out

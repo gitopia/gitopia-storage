@@ -153,20 +153,6 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 		return nil
 	}
 
-	// Check authorization
-	haveAuthorization, err := h.gc.CheckGitServerAuthorization(ctx, event.Creator)
-	if err != nil {
-		return h.handleError(ctx, err, event.Creator, event.TaskId, "authorization check error")
-	}
-	if !haveAuthorization {
-		h.logOperation(ctx, "skip_unauthorized", map[string]interface{}{
-			"creator":          event.Creator,
-			"repository_id":    event.RepositoryId,
-			"pull_request_iid": event.PullRequestIid,
-		})
-		return nil
-	}
-
 	// Get pull request details
 	resp, err := h.gc.PullRequest(ctx, event.RepositoryId, event.PullRequestIid)
 	if err != nil {
