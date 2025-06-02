@@ -79,7 +79,7 @@ func DownloadRepo(id uint64, cacheDir string) error {
 
 		// Write parent repo objects path to alternates file
 		alternatesPath := filepath.Join(alternatesDir, "alternates")
-		parentObjectsPath := filepath.Join(cacheDir, fmt.Sprintf("%d", res.Repository.Parent), "objects")
+		parentObjectsPath := filepath.Join(cacheDir, fmt.Sprintf("%d.git", res.Repository.Parent), "objects")
 		if err := os.WriteFile(alternatesPath, []byte(parentObjectsPath+"\n"), 0644); err != nil {
 			return fmt.Errorf("failed to write alternates file: %v", err)
 		}

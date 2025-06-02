@@ -18,5 +18,5 @@ case "${GIT_SERVER_ID}" in
 esac
 
 echo $MNEMONIC | /usr/local/bin/gitopia-storaged keys add gitopia-storage --keyring-backend test --recover
-/usr/local/bin/gitopia-storaged register-provider http://gitopia-storage$GIT_SERVER_ID:5000 "test storage provider" 1000000000000ulore --from gitopia-storage --keyring-backend test --fees 200ulore
+/usr/local/bin/gitopia-storaged register-provider http://gitopia-storage$GIT_SERVER_ID:5000 "test storage provider" 1000000000000ulore localhost 9094 --from gitopia-storage --keyring-backend test --fees 200ulore
 /usr/local/bin/gitopia-storaged start --from gitopia-storage --keyring-backend test
