@@ -65,7 +65,7 @@ func DownloadRepo(id uint64, cacheDir string) error {
 	repoDir := filepath.Join(cacheDir, fmt.Sprintf("%d.git", res.Repository.Id))
 
 	// download parent repos first
-	if res.Repository.Parent != 0 {
+	if res.Repository.Fork {
 		err := DownloadRepo(res.Repository.Parent, cacheDir)
 		if err != nil {
 			return errors.Wrap(err, "error downloading parent repo")

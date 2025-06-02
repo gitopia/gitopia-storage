@@ -205,14 +205,14 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 		return h.handleError(ctx, err, event.Creator, event.TaskId, "push changes error")
 	}
 
-	// Update pull request state
-	if err := h.gc.SetPullRequestState(ctx, event.Creator, event.RepositoryId, event.PullRequestIid, "MERGED", mergeCommitSha, event.TaskId); err != nil {
-		return h.handleError(ctx, err, event.Creator, event.TaskId, "set pull request state error")
-	}
-
 	// Handle IPFS operations
 	if err := h.handlePostMergeOperations(ctx, resp, cacheDir); err != nil {
 		return h.handleError(ctx, err, event.Creator, event.TaskId, "post-merge operations error")
+	}
+
+	// Update pull request state and repository branch reference
+	if err := h.gc.MergePullRequest(ctx, event.RepositoryId, event.PullRequestIid, mergeCommitSha, event.TaskId); err != nil {
+		return h.handleError(ctx, err, event.Creator, event.TaskId, "set pull request state error")
 	}
 
 	h.logOperation(ctx, "merge_completed", map[string]interface{}{

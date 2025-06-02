@@ -235,3 +235,20 @@ func (g GitopiaProxy) RepositoryPackfile(ctx context.Context, repositoryId uint6
 
 	return resp.Packfile, nil
 }
+
+func (g GitopiaProxy) MergePullRequest(ctx context.Context, repositoryId uint64, pullRequestIid uint64, mergeCommitSha string, taskId uint64) error {
+	msg := &storagetypes.MsgMergePullRequest{
+		Creator:        g.gc.Address().String(),
+		RepositoryId:   repositoryId,
+		PullRequestIid: pullRequestIid,
+		MergeCommitSha: mergeCommitSha,
+		TaskId:         taskId,
+	}
+
+	err := g.gc.BroadcastTxAndWait(ctx, msg)
+	if err != nil {
+		return errors.WithMessage(err, "error sending tx")
+	}
+
+	return nil
+}

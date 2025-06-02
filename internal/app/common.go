@@ -30,7 +30,7 @@ func (s *Server) CacheRepository(repoId uint64) error {
 	}
 
 	// Attempt to fetch and cache packfile if it exists on chain or if it's a forked repo
-	if (packfileResp != nil && packfileResp.Packfile.Cid != "") || repoResp.Repository.Parent != 0 {
+	if (packfileResp != nil && packfileResp.Packfile.Cid != "") || repoResp.Repository.Fork == true {
 		// Check if packfile exists in objects/pack directory
 		cached := false
 		repoPath := filepath.Join(s.Config.Dir, fmt.Sprintf("%d.git", repoId))
