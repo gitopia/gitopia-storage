@@ -6,6 +6,138 @@ Storage provider and git apis for [gitopia](https://gitopia.org/)
 
 - [git](https://git-scm.com/)
 - [go](https://golang.org/) 1.23 or later
+- [IPFS Kubo](https://docs.ipfs.tech/install/command-line/) - IPFS daemon
+- [IPFS Cluster](https://ipfscluster.io/documentation/deployment/setup/) - IPFS Cluster daemon
+
+### IPFS and IPFS Cluster Setup
+
+#### 1. IPFS Setup
+
+1. Install IPFS Kubo following the [official installation guide](https://docs.ipfs.tech/install/command-line/)
+
+2. Initialize IPFS with server profile for production use:
+```sh
+ipfs init --profile=server
+```
+
+3. Configure IPFS for production use:
+```sh
+# Increase connection manager limits
+ipfs config Swarm.ConnMgr.HighWater 10000
+ipfs config Swarm.ConnMgr.LowWater 2500
+ipfs config Swarm.ConnMgr.GracePeriod 20s
+
+# Enable experimental DHT providing
+ipfs config --bool Experimental.AcceleratedDHTClient true
+
+# Set file descriptor limit
+export IPFS_FD_MAX=8192
+
+# Configure datastore for better performance
+ipfs config Datastore.BloomFilterSize 1048576
+ipfs config Datastore.StorageMax "100GB" # Adjust based on your disk size
+```
+
+4. Start IPFS daemon:
+```sh
+ipfs daemon
+```
+
+#### 2. IPFS Cluster Setup
+
+1. Install IPFS Cluster following the [official installation guide](https://ipfscluster.io/documentation/deployment/setup/)
+
+2. Initialize IPFS Cluster:
+```sh
+ipfs-cluster-service init
+```
+
+3. Configure IPFS Cluster to join the Gitopia storage network:
+```sh
+# Edit the service.json configuration file
+# Location: ~/.ipfs-cluster/service.json
+
+{
+  "cluster": {
+    "peername": "your-peer-name",
+    "secret": "your-cluster-secret", # Get this from Gitopia team
+    "trusted_peers": ["*"], # Trust all peers in the cluster
+    "ipfs_connector": {
+      "ipfshttp": {
+        "node_multiaddress": "/ip4/127.0.0.1/tcp/5001"
+      }
+    },
+    "restapi": {
+      "http_listen_multiaddress": "/ip4/0.0.0.0/tcp/9094"
+    },
+    "monitor": {
+      "ping_interval": "2s"
+    }
+  }
+}
+```
+
+4. Start IPFS Cluster service:
+```sh
+ipfs-cluster-service daemon
+```
+
+5. Verify cluster connection:
+```sh
+ipfs-cluster-ctl peers ls
+```
+
+#### 3. Docker Setup
+
+##### Single Provider Setup
+
+1. Create a `.env` file with required environment variables:
+```sh
+CLUSTER_SECRET=your-cluster-secret  # Required - Get from Gitopia team
+CLUSTER_PEERNAME=your-peer-name     # Optional - Defaults to 'storage-provider'
+ENABLE_EXTERNAL_PINNING=false       # Optional - Enable Pinata pinning
+PINATA_API_KEY=your-pinata-key      # Optional - Required if ENABLE_EXTERNAL_PINNING is true
+PINATA_SECRET_KEY=your-pinata-secret # Optional - Required if ENABLE_EXTERNAL_PINNING is true
+```
+
+2. Create necessary directories:
+```sh
+mkdir -p data/{ipfs,cluster,repos,attachments,lfs-objects}
+```
+
+3. Start the services:
+```sh
+docker-compose up -d
+```
+
+##### Test Environment Setup (Multiple Providers)
+
+For local testing and development, you can set up multiple storage providers using the test environment configuration:
+
+1. Create the test network:
+```sh
+docker network create storage-provider-test
+```
+
+2. Create a `.env` file with required environment variables:
+```sh
+CLUSTER_SECRET=your-test-secret  # Required - Use any secret for local testing
+ENABLE_EXTERNAL_PINNING=false    # Optional - Enable Pinata pinning
+PINATA_API_KEY=your-pinata-key   # Optional - Required if ENABLE_EXTERNAL_PINNING is true
+PINATA_SECRET_KEY=your-pinata-secret # Optional - Required if ENABLE_EXTERNAL_PINNING is true
+```
+
+3. Create necessary directories:
+```sh
+mkdir -p compose/{ipfs0,ipfs1,ipfs2,cluster0,cluster1,cluster2,gitopia-storage0,gitopia-storage1,gitopia-storage2}
+```
+
+4. Start the test environment:
+```sh
+docker-compose -f docker-compose.test.yml up -d
+```
+
+This will start 3 storage providers with their respective IPFS and Cluster peers, all connected in a test network.
 
 ### Build
 
@@ -92,7 +224,6 @@ gitopia-storaged start --from gitopia-storage --keyring-backend test
 1. Create necessary directories and set permissions:
 ```sh
 mkdir -p /var/repos /var/attachments /var/lfs-objects
-chmod 755 /var/repos /var/attachments /var/lfs-objects
 ```
 
 2. Start the container:
