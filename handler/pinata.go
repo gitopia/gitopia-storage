@@ -31,10 +31,20 @@ type PinataResponse struct {
 }
 
 type PinataListResponse struct {
-	Files []struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-	} `json:"files"`
+	Data struct {
+		Files []struct {
+			ID            string      `json:"id"`
+			Name          string      `json:"name"`
+			Cid           string      `json:"cid"`
+			Size          int         `json:"size"`
+			NumberOfFiles int         `json:"number_of_files"`
+			MimeType      string      `json:"mime_type"`
+			GroupID       interface{} `json:"group_id"`
+			KeyValues     interface{} `json:"keyvalues"`
+			CreatedAt     string      `json:"created_at"`
+		} `json:"files"`
+		NextPageToken string `json:"next_page_token"`
+	} `json:"data"`
 }
 
 func NewPinataClient(jwtToken string) *PinataClient {
@@ -103,7 +113,7 @@ func (p *PinataClient) PinFile(ctx context.Context, filePath, name string) (*Pin
 
 func (p *PinataClient) UnpinFile(ctx context.Context, fileName string) error {
 	// First list files to get the file ID
-	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("https://api.pinata.cloud/v3/files?name=%s", fileName), nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("https://api.pinata.cloud/v3/files/public?name=%s", fileName), nil)
 	if err != nil {
 		return errors.Wrap(err, "failed to create list request")
 	}
@@ -126,12 +136,12 @@ func (p *PinataClient) UnpinFile(ctx context.Context, fileName string) error {
 		return errors.Wrap(err, "failed to decode list response")
 	}
 
-	if len(listResp.Files) == 0 {
+	if len(listResp.Data.Files) == 0 {
 		return errors.New("no file found with the given name")
 	}
 
 	// Delete the file using its ID
-	deleteReq, err := http.NewRequestWithContext(ctx, "DELETE", fmt.Sprintf("https://api.pinata.cloud/v3/files/%s", listResp.Files[0].ID), nil)
+	deleteReq, err := http.NewRequestWithContext(ctx, "DELETE", fmt.Sprintf("https://api.pinata.cloud/v3/files/public/%s", listResp.Data.Files[0].ID), nil)
 	if err != nil {
 		return errors.Wrap(err, "failed to create delete request")
 	}

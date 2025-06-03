@@ -143,7 +143,7 @@ func (h *ReleaseAssetUpdatedEventHandler) Process(ctx context.Context, event Rel
 		}
 
 		releaseAssetPath := path.Join(cacheDir, event.NewSha256)
-		name := fmt.Sprintf("%d-%s-%s-%s", event.RepositoryId, event.Tag, event.Name, event.NewSha256)
+		name := fmt.Sprintf("release-%d-%s-%s-%s", event.RepositoryId, event.Tag, event.Name, event.NewSha256)
 		resp, err := h.pinataClient.PinFile(ctx, releaseAssetPath, name)
 		if err != nil {
 			logger.FromContext(ctx).WithError(err).Error("failed to pin file to Pinata")
@@ -158,7 +158,7 @@ func (h *ReleaseAssetUpdatedEventHandler) Process(ctx context.Context, event Rel
 
 	// Unpin old packfile from Pinata if enabled
 	if h.pinataClient != nil && event.OldCid != "" && event.OldCid != event.NewCid {
-		name := fmt.Sprintf("%d-%s-%s-%s", event.RepositoryId, event.Tag, event.Name, event.OldSha256)
+		name := fmt.Sprintf("release-%d-%s-%s-%s", event.RepositoryId, event.Tag, event.Name, event.OldSha256)
 		err := h.pinataClient.UnpinFile(ctx, name)
 		if err != nil {
 			logger.FromContext(ctx).WithError(err).Error("failed to unpin file from Pinata")
