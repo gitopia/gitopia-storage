@@ -225,7 +225,7 @@ func CommitAndSignNoAuthor(pr types.PullRequest, message, signArg, quarantineRep
 
 func RunMergeCommand(prHead types.PullRequestHead, prBase types.PullRequestBase, cmd *exec.Cmd, quarantineRepoPath string) error {
 	cmd.Dir = quarantineRepoPath
-	out, err := cmd.Output()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		// Merge will leave a MERGE_HEAD file in the .git folder if there is a conflict
 		if _, statErr := os.Stat(filepath.Join(quarantineRepoPath, ".git", "MERGE_HEAD")); statErr == nil {

@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -50,6 +51,16 @@ func IsRepoCached(id uint64, cacheDir string) (bool, error) {
 }
 
 func DownloadRepo(id uint64, cacheDir string) error {
+	isRepoCached, err := IsRepoCached(id, cacheDir)
+	if err != nil {
+		return errors.Wrap(err, "error checking if repo is cached")
+	}
+
+	// if repo is cached, return
+	if isRepoCached {
+		return nil
+	}
+
 	queryClient, err := gitopia.GetQueryClient(viper.GetString("GITOPIA_ADDR"))
 	if err != nil {
 		return errors.Wrap(err, "error connecting to gitopia")
@@ -63,6 +74,14 @@ func DownloadRepo(id uint64, cacheDir string) error {
 	}
 
 	repoDir := filepath.Join(cacheDir, fmt.Sprintf("%d.git", res.Repository.Id))
+
+	// Initialize repository if it doesn't exist
+	if _, err := os.Stat(filepath.Join(repoDir, "objects")); os.IsNotExist(err) {
+		cmd := exec.Command("git", "init", "--bare", repoDir)
+		if err := cmd.Run(); err != nil {
+			return errors.Wrap(err, "failed to initialize repository")
+		}
+	}
 
 	// download parent repos first
 	if res.Repository.Fork {

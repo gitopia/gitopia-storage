@@ -29,8 +29,8 @@ func (s *Server) CacheRepository(repoId uint64) error {
 		return fmt.Errorf("failed to get repo from chain: %v", err)
 	}
 
-	// Attempt to fetch and cache packfile if it exists on chain or if it's a forked repo
-	if (packfileResp != nil && packfileResp.Packfile.Cid != "") || repoResp.Repository.Fork == true {
+	// Attempt to fetch and cache packfile if it exists on chain or if it's a new forked repo
+	if (packfileResp != nil && packfileResp.Packfile.Cid != "") || repoResp.Repository.Fork {
 		// Check if packfile exists in objects/pack directory
 		cached := false
 		repoPath := filepath.Join(s.Config.Dir, fmt.Sprintf("%d.git", repoId))
@@ -44,8 +44,6 @@ func (s *Server) CacheRepository(repoId uint64) error {
 		if !cached {
 			if packfileResp != nil && packfileResp.Packfile.Cid != "" {
 				utils.LogInfo("info", fmt.Sprintf("Packfile with cid %s not found for repo %d, downloading from IPFS cluster", packfileResp.Packfile.Cid, repoId))
-			} else {
-				utils.LogInfo("info", fmt.Sprintf("Forked repo %d, downloading from IPFS cluster", repoId))
 			}
 
 			// Fetch packfile from IPFS and place in objects/pack directory

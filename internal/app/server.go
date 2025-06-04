@@ -34,6 +34,7 @@ import (
 	ipfspath "github.com/ipfs/boxo/path"
 	"github.com/ipfs/kubo/client/rpc"
 	_ "github.com/mattn/go-sqlite3"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -632,6 +633,14 @@ func (s *Server) PostRPC(service string, w http.ResponseWriter, r *Request) {
 			fail500(w, logContext, fmt.Errorf("failed to update repository packfile: %w", err))
 			return
 		}
+
+		log.WithFields(log.Fields{
+			"operation":     "git push",
+			"repository_id": repoId,
+			"packfile_name": filepath.Base(packfileName),
+			"cid":           cid,
+			"root_hash":     rootHash,
+		}).Info("successfully updated packfile")
 	}
 }
 
