@@ -227,27 +227,15 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 
 // prepareRepositories ensures repositories are cached and available
 func (h *InvokeMergePullRequestEventHandler) prepareRepositories(ctx context.Context, resp types.PullRequest, cacheDir string) error {
-	// Check and cache head repository
-	isCached, err := utils.IsRepoCached(resp.Head.RepositoryId, cacheDir)
-	if err != nil {
-		return err
-	}
-	if !isCached {
-		if err := utils.DownloadRepo(resp.Head.RepositoryId, cacheDir); err != nil {
-			return err
-		}
+	// Cache head repository
+	if err := utils.CacheRepository(resp.Head.RepositoryId, cacheDir); err != nil {
+		return errors.Wrap(err, "error caching head repository")
 	}
 
-	// Check and cache base repository if different
+	// Cache base repository if different
 	if resp.Base.RepositoryId != resp.Head.RepositoryId {
-		isCached, err := utils.IsRepoCached(resp.Base.RepositoryId, cacheDir)
-		if err != nil {
-			return err
-		}
-		if !isCached {
-			if err := utils.DownloadRepo(resp.Base.RepositoryId, cacheDir); err != nil {
-				return err
-			}
+		if err := utils.CacheRepository(resp.Base.RepositoryId, cacheDir); err != nil {
+			return errors.Wrap(err, "error caching base repository")
 		}
 	}
 	return nil

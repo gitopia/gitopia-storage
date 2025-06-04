@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/cosmos/cosmos-sdk/types/query"
 	"github.com/gitopia/gitopia-go"
@@ -20,7 +21,18 @@ import (
 	"github.com/spf13/viper"
 )
 
-func IsRepoCached(id uint64, cacheDir string) (bool, error) {
+// repoMutexes provides synchronization for individual repositories
+var (
+	repoMutexes sync.Map // map[uint64]*sync.Mutex
+)
+
+// getRepoMutex returns a mutex for the given repository ID
+func getRepoMutex(repoID uint64) *sync.Mutex {
+	mutex, _ := repoMutexes.LoadOrStore(repoID, &sync.Mutex{})
+	return mutex.(*sync.Mutex)
+}
+
+func IsRepositoryPackfileCached(id uint64, cacheDir string) (bool, error) {
 	queryClient, err := gitopia.GetQueryClient(viper.GetString("GITOPIA_ADDR"))
 	if err != nil {
 		return false, errors.Wrap(err, "error connecting to gitopia")
@@ -50,16 +62,31 @@ func IsRepoCached(id uint64, cacheDir string) (bool, error) {
 	return false, nil
 }
 
-func DownloadRepo(id uint64, cacheDir string) error {
-	isRepoCached, err := IsRepoCached(id, cacheDir)
+// CacheRepository caches a repository by downloading its packfile and syncing its refs
+func CacheRepository(id uint64, cacheDir string) error {
+	isRepoCached, err := IsRepositoryPackfileCached(id, cacheDir)
 	if err != nil {
 		return errors.Wrap(err, "error checking if repo is cached")
 	}
 
-	// if repo is cached, return
-	if isRepoCached {
-		return nil
+	if !isRepoCached {
+		if err := DownloadRepositoryPackfile(id, cacheDir); err != nil {
+			return errors.Wrap(err, "error downloading repository packfile")
+		}
 	}
+
+	if err := SyncRepositoryRefs(id, cacheDir); err != nil {
+		return errors.Wrap(err, "error syncing repository refs")
+	}
+
+	return nil
+}
+
+func DownloadRepositoryPackfile(id uint64, cacheDir string) error {
+	// Get repository-specific mutex
+	mutex := getRepoMutex(id)
+	mutex.Lock()
+	defer mutex.Unlock()
 
 	queryClient, err := gitopia.GetQueryClient(viper.GetString("GITOPIA_ADDR"))
 	if err != nil {
@@ -85,7 +112,7 @@ func DownloadRepo(id uint64, cacheDir string) error {
 
 	// download parent repos first
 	if res.Repository.Fork {
-		err := DownloadRepo(res.Repository.Parent, cacheDir)
+		err := DownloadRepositoryPackfile(res.Repository.Parent, cacheDir)
 		if err != nil {
 			return errors.Wrap(err, "error downloading parent repo")
 		}
@@ -118,9 +145,6 @@ func DownloadRepo(id uint64, cacheDir string) error {
 			return errors.Wrap(err, "error downloading packfile")
 		}
 	}
-
-	// create refs on the server
-	createBranchesAndTags(queryClient, res.Repository.Owner.Id, res.Repository.Name, repoDir)
 
 	return nil
 }
@@ -176,10 +200,27 @@ func downloadPackfile(cid string, packfileName string, repoDir string) error {
 	return nil
 }
 
-func createBranchesAndTags(queryClient gitopia.Query, repoOwner string, repoName string, repoDir string) error {
+func SyncRepositoryRefs(id uint64, cacheDir string) error {
+	// Get repository-specific mutex
+	mutex := getRepoMutex(id)
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	queryClient, err := gitopia.GetQueryClient(viper.GetString("GITOPIA_ADDR"))
+	if err != nil {
+		return errors.Wrap(err, "error connecting to gitopia")
+	}
+
+	res, err := queryClient.Gitopia.Repository(context.Background(), &gitopiatypes.QueryGetRepositoryRequest{
+		Id: id,
+	})
+	if err != nil {
+		return err
+	}
+
 	branchAllRes, err := queryClient.Gitopia.RepositoryBranchAll(context.Background(), &gitopiatypes.QueryAllRepositoryBranchRequest{
-		Id:             repoOwner,
-		RepositoryName: repoName,
+		Id:             res.Repository.Owner.Id,
+		RepositoryName: res.Repository.Name,
 		Pagination: &query.PageRequest{
 			Limit: math.MaxUint64,
 		},
@@ -187,8 +228,10 @@ func createBranchesAndTags(queryClient gitopia.Query, repoOwner string, repoName
 	if err != nil {
 		return err
 	}
+
+	repoDir := filepath.Join(cacheDir, fmt.Sprintf("%d.git", id))
 	for _, branch := range branchAllRes.Branch {
-		cmd, outPipe := GitCommand("git", "branch", branch.Name, branch.Sha)
+		cmd, outPipe := GitCommand("git", "branch", "-f", branch.Name, branch.Sha)
 		cmd.Dir = repoDir
 		if err := cmd.Start(); err != nil {
 			return err
@@ -206,8 +249,8 @@ func createBranchesAndTags(queryClient gitopia.Query, repoOwner string, repoName
 	}
 
 	tagAllRes, err := queryClient.Gitopia.RepositoryTagAll(context.Background(), &gitopiatypes.QueryAllRepositoryTagRequest{
-		Id:             repoOwner,
-		RepositoryName: repoName,
+		Id:             res.Repository.Owner.Id,
+		RepositoryName: res.Repository.Name,
 		Pagination: &query.PageRequest{
 			Limit: math.MaxUint64,
 		},
@@ -216,7 +259,7 @@ func createBranchesAndTags(queryClient gitopia.Query, repoOwner string, repoName
 		return err
 	}
 	for _, tag := range tagAllRes.Tag {
-		cmd, outPipe := GitCommand("git", "tag", tag.Name, tag.Sha)
+		cmd, outPipe := GitCommand("git", "tag", "-f", tag.Name, tag.Sha)
 		cmd.Dir = repoDir
 		if err := cmd.Start(); err != nil {
 			return err

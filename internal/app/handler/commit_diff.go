@@ -29,19 +29,11 @@ func CommitDiffHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// check if repository is cached
+		// cache repo
 		cacheDir := viper.GetString("GIT_DIR")
-		isCached, err := utils.IsRepoCached(body.RepositoryID, cacheDir)
-		if err != nil {
+		if err := utils.CacheRepository(body.RepositoryID, cacheDir); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
-		}
-		if !isCached {
-			err = utils.DownloadRepo(body.RepositoryID, cacheDir)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
 		}
 
 		repoPath := path.Join(cacheDir, fmt.Sprintf("%d.git", body.RepositoryID))

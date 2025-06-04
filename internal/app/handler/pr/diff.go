@@ -33,34 +33,18 @@ func PullDiffHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// check if  base repository is cached
+		// cache repo
 		cacheDir := viper.GetString("GIT_DIR")
-		isCached, err := utils.IsRepoCached(body.BaseRepositoryID, cacheDir)
-		if err != nil {
+		if err := utils.CacheRepository(body.BaseRepositoryID, cacheDir); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		if !isCached {
-			err = utils.DownloadRepo(body.BaseRepositoryID, cacheDir)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-		}
 
 		if body.HeadRepositoryID != body.BaseRepositoryID {
-			// check if head repository is cached
-			isCached, err := utils.IsRepoCached(body.HeadRepositoryID, cacheDir)
-			if err != nil {
+			// cache repo
+			if err := utils.CacheRepository(body.HeadRepositoryID, cacheDir); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
-			}
-			if !isCached {
-				err = utils.DownloadRepo(body.HeadRepositoryID, cacheDir)
-				if err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-					return
-				}
 			}
 		}
 

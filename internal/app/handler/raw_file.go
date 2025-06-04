@@ -89,19 +89,11 @@ func GetRawFileHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// check if repository is cached
+		// cache repo
 		cacheDir := viper.GetString("GIT_DIR")
-		isCached, err := utils.IsRepoCached(branch.RepositoryId, cacheDir)
-		if err != nil {
+		if err := utils.CacheRepository(branch.RepositoryId, cacheDir); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
-		}
-		if !isCached {
-			err = utils.DownloadRepo(branch.RepositoryId, cacheDir)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
 		}
 
 		repoPath := path.Join(cacheDir, fmt.Sprintf("%v.git", branch.RepositoryId))

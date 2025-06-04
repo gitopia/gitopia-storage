@@ -113,16 +113,9 @@ func (h *PackfileUpdatedEventHandler) Process(ctx context.Context, event Packfil
 	if h.pinataClient != nil && event.NewCid != "" {
 		cacheDir := viper.GetString("GIT_DIR")
 
-		// check if repo is cached
-		isCached, err := utils.IsRepoCached(event.RepositoryId, cacheDir)
-		if err != nil {
+		// cache repo
+		if err := utils.CacheRepository(event.RepositoryId, cacheDir); err != nil {
 			return err
-		}
-		if !isCached {
-			err = utils.DownloadRepo(event.RepositoryId, cacheDir)
-			if err != nil {
-				return err
-			}
 		}
 
 		packfilePath := path.Join(cacheDir, fmt.Sprintf("%v.git/objects/pack/", event.RepositoryId), event.NewName)
