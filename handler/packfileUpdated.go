@@ -132,8 +132,10 @@ func (h *PackfileUpdatedEventHandler) Process(ctx context.Context, event Packfil
 			// Don't fail the process, just log the error
 		} else {
 			logger.FromContext(ctx).WithFields(logrus.Fields{
-				"cid":       event.NewCid,
-				"pinata_id": resp.Data.ID,
+				"repository_id": event.RepositoryId,
+				"packfile_name": event.NewName,
+				"cid":           event.NewCid,
+				"pinata_id":     resp.Data.ID,
 			}).Info("successfully pinned to Pinata")
 		}
 	}
@@ -144,6 +146,11 @@ func (h *PackfileUpdatedEventHandler) Process(ctx context.Context, event Packfil
 		if err != nil {
 			logger.FromContext(ctx).WithError(err).Error("failed to unpin file from Pinata")
 		}
+		logger.FromContext(ctx).WithFields(logrus.Fields{
+			"repository_id": event.RepositoryId,
+			"old_name":      event.OldName,
+			"old_cid":       event.OldCid,
+		}).Info("unpinned file from Pinata")
 	}
 	return nil
 }

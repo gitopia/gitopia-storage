@@ -24,17 +24,17 @@ func NewGitopiaProxy(g gitopia.Client) GitopiaProxy {
 	return GitopiaProxy{g}
 }
 
-func (g GitopiaProxy) UpdateTask(ctx context.Context, creator string, id uint64, state types.TaskState, message string) error {
+func (g GitopiaProxy) UpdateTask(ctx context.Context, id uint64, state types.TaskState, message string) error {
 	msg := &types.MsgUpdateTask{
-		Creator: creator,
+		Creator: g.gc.Address().String(),
 		Id:      id,
 		State:   state,
 		Message: message,
 	}
 
-	err := g.gc.AuthorizedBroadcastTx(ctx, msg)
+	err := g.gc.BroadcastTxAndWait(ctx, msg)
 	if err != nil {
-		return errors.WithMessage(err, "error sending authorized tx")
+		return errors.WithMessage(err, "error sending tx")
 	}
 
 	return nil
