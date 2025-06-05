@@ -165,6 +165,16 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 		return h.handleError(ctx, err, event.TaskId, "repository preparation error")
 	}
 
+	// Acquire global lock for repository operations
+	utils.LockRepository(resp.Base.RepositoryId)
+	defer utils.UnlockRepository(resp.Base.RepositoryId)
+
+	// If head and base repositories are different, lock both
+	if resp.Base.RepositoryId != resp.Head.RepositoryId {
+		utils.LockRepository(resp.Head.RepositoryId)
+		defer utils.UnlockRepository(resp.Head.RepositoryId)
+	}
+
 	// Get repository name
 	headRepositoryName, err := h.gc.RepositoryName(ctx, resp.Head.RepositoryId)
 	if err != nil {

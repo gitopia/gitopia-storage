@@ -21,7 +21,6 @@ import (
 	"github.com/spf13/viper"
 )
 
-// repoMutexes provides synchronization for individual repositories
 var (
 	repoMutexes sync.Map // map[uint64]*sync.Mutex
 )
@@ -30,6 +29,16 @@ var (
 func getRepoMutex(repoID uint64) *sync.Mutex {
 	mutex, _ := repoMutexes.LoadOrStore(repoID, &sync.Mutex{})
 	return mutex.(*sync.Mutex)
+}
+
+// LockRepository acquires the repository-specific lock
+func LockRepository(repoID uint64) {
+	getRepoMutex(repoID).Lock()
+}
+
+// UnlockRepository releases the repository-specific lock
+func UnlockRepository(repoID uint64) {
+	getRepoMutex(repoID).Unlock()
 }
 
 func IsRepositoryPackfileCached(id uint64, cacheDir string) (bool, error) {
@@ -64,6 +73,9 @@ func IsRepositoryPackfileCached(id uint64, cacheDir string) (bool, error) {
 
 // CacheRepository caches a repository by downloading its packfile and syncing its refs
 func CacheRepository(id uint64, cacheDir string) error {
+	LockRepository(id)
+	defer UnlockRepository(id)
+
 	isRepoCached, err := IsRepositoryPackfileCached(id, cacheDir)
 	if err != nil {
 		return errors.Wrap(err, "error checking if repo is cached")
@@ -83,11 +95,6 @@ func CacheRepository(id uint64, cacheDir string) error {
 }
 
 func DownloadRepositoryPackfile(id uint64, cacheDir string) error {
-	// Get repository-specific mutex
-	mutex := getRepoMutex(id)
-	mutex.Lock()
-	defer mutex.Unlock()
-
 	queryClient, err := gitopia.GetQueryClient(viper.GetString("GITOPIA_ADDR"))
 	if err != nil {
 		return errors.Wrap(err, "error connecting to gitopia")
@@ -207,11 +214,6 @@ func downloadPackfile(cid string, packfileName string, repoDir string) error {
 }
 
 func SyncRepositoryRefs(id uint64, cacheDir string) error {
-	// Get repository-specific mutex
-	mutex := getRepoMutex(id)
-	mutex.Lock()
-	defer mutex.Unlock()
-
 	queryClient, err := gitopia.GetQueryClient(viper.GetString("GITOPIA_ADDR"))
 	if err != nil {
 		return errors.Wrap(err, "error connecting to gitopia")

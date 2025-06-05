@@ -490,6 +490,10 @@ func (s *Server) PostRPC(service string, w http.ResponseWriter, r *Request) {
 		return
 	}
 
+	// Acquire global lock for repository operations
+	utils.LockRepository(repoId)
+	defer utils.UnlockRepository(repoId)
+
 	if err := s.CacheRepository(repoId); err != nil {
 		fail500(w, logContext, fmt.Errorf("failed to cache repository: %v", err))
 		return
