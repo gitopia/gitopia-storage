@@ -1,6 +1,6 @@
 WEB_SERVER_PORT = 5000
 GITOPIA_ADDR = "gitopia-grpc.polkachu.com:11390"
-GIT_DIR = "/var/repos"
+GIT_REPOS_DIR = "/var/repos"
 LFS_OBJECTS_DIR = "/var/lfs-objects"
 GIT_SERVER_EXTERNAL_ADDR = "https://server.gitopia.com"
 ATTACHMENT_DIR = "/var/attachments"

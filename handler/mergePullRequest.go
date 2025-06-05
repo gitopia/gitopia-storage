@@ -180,11 +180,11 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 	}
 	defer os.RemoveAll(quarantineRepoPath)
 
-	// cmd := exec.Command("git", "read-tree", "HEAD")
-	// cmd.Dir = quarantineRepoPath
-	// if err := h.runGitCommandWithTimeout(ctx, cmd, defaultTimeout); err != nil {
-	// 	return errors.WithMessage(err, "git read-tree error")
-	// }
+	cmd := exec.Command("git", "read-tree", "HEAD")
+	cmd.Dir = quarantineRepoPath
+	if err := h.runGitCommandWithTimeout(ctx, cmd, defaultTimeout); err != nil {
+		return errors.WithMessage(err, "git read-tree error")
+	}
 
 	// Prepare environment variables
 	env := h.prepareGitEnv(event.Creator)
@@ -363,7 +363,13 @@ func (h *InvokeMergePullRequestEventHandler) runGitCommandWithTimeout(ctx contex
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	// Store original command settings
+	originalDir := cmd.Dir
+	originalEnv := cmd.Env
+
 	cmd = exec.CommandContext(ctx, cmd.Path, cmd.Args[1:]...)
+	cmd.Dir = originalDir
+	cmd.Env = originalEnv
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%v: %s", err, string(out))
