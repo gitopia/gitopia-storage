@@ -30,7 +30,7 @@ func CommitDiffHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// cache repo
-		cacheDir := viper.GetString("GIT_DIR")
+		cacheDir := viper.GetString("GIT_REPOS_DIR")
 		if err := utils.CacheRepository(body.RepositoryID, cacheDir); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

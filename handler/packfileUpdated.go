@@ -111,7 +111,7 @@ func (h *PackfileUpdatedEventHandler) Process(ctx context.Context, event Packfil
 
 	// Pin to Pinata if enabled
 	if h.pinataClient != nil && event.NewCid != "" {
-		cacheDir := viper.GetString("GIT_DIR")
+		cacheDir := viper.GetString("GIT_REPOS_DIR")
 
 		// cache repo
 		if err := utils.CacheRepository(event.RepositoryId, cacheDir); err != nil {

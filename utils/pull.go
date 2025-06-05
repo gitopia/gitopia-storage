@@ -83,13 +83,13 @@ func addCacheRepo(staging, cache string) error {
 }
 
 func CreateQuarantineRepo(baseRepositoryID uint64, headRepositoryID uint64, baseBranch string, headBranch string) (string, error) {
-	// Clone base repo
-	tmpBasePath, err := ioutil.TempDir(os.TempDir(), "merge-")
+	// Create temporary directory
+	tmpBasePath, err := os.MkdirTemp("", "merge-")
 	if err != nil {
-		log.Fatal(err) // TODO: fix crash on request specific failure
+		return "", err
 	}
 
-	gitDir := viper.GetString("GIT_DIR")
+	gitDir := viper.GetString("GIT_REPOS_DIR")
 	baseRepoPath := path.Join(gitDir, fmt.Sprintf("%v.git", baseRepositoryID))
 	headRepoPath := path.Join(gitDir, fmt.Sprintf("%v.git", headRepositoryID))
 
@@ -174,7 +174,7 @@ func CreateReadOnlyQuarantineRepo(baseRepositoryID uint64, headRepositoryID uint
 		log.Fatal(err)
 	}
 
-	gitDir := viper.GetString("GIT_DIR")
+	gitDir := viper.GetString("GIT_REPOS_DIR")
 	baseRepoPath := path.Join(gitDir, fmt.Sprintf("%v.git", baseRepositoryID))
 	headRepoPath := path.Join(gitDir, fmt.Sprintf("%v.git", headRepositoryID))
 

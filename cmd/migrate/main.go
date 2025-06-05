@@ -84,11 +84,11 @@ func main() {
 				return errors.Wrap(err, "failed to create IPFS API")
 			}
 
-			// Get all repositories from GIT_DIR
-			gitDir := viper.GetString("GIT_DIR")
+			// Get all repositories from GIT_REPOS_DIR
+			gitDir := viper.GetString("GIT_REPOS_DIR")
 			entries, err := os.ReadDir(gitDir)
 			if err != nil {
-				return errors.Wrap(err, "failed to read GIT_DIR")
+				return errors.Wrap(err, "failed to read GIT_REPOS_DIR")
 			}
 
 			for _, entry := range entries {
@@ -318,7 +318,7 @@ func main() {
 	rootCmd.Flags().String("working-dir", "", "Working directory")
 
 	// Bind flags to viper
-	viper.BindPFlag("GIT_DIR", rootCmd.Flags().Lookup("git-dir"))
+	viper.BindPFlag("GIT_REPOS_DIR", rootCmd.Flags().Lookup("git-dir"))
 	viper.BindPFlag("ATTACHMENT_DIR", rootCmd.Flags().Lookup("attachment-dir"))
 	viper.BindPFlag("IPFS_CLUSTER_PEER_HOST", rootCmd.Flags().Lookup("ipfs-cluster-peer-host"))
 	viper.BindPFlag("IPFS_CLUSTER_PEER_PORT", rootCmd.Flags().Lookup("ipfs-cluster-peer-port"))

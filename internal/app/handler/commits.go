@@ -33,7 +33,7 @@ func CommitsHandler(w http.ResponseWriter, r *http.Request) {
 		blocks := strings.Split(r.URL.Path, "/")
 
 		if len(blocks) == 3 {
-			RepoPath := path.Join(viper.GetString("GIT_DIR"), fmt.Sprintf("%d.git", body.RepositoryID))
+			RepoPath := path.Join(viper.GetString("GIT_REPOS_DIR"), fmt.Sprintf("%d.git", body.RepositoryID))
 			repo, err := git.PlainOpen(RepoPath)
 			if err != nil {
 				http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
@@ -66,7 +66,7 @@ func CommitsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// cache repo
-		cacheDir := viper.GetString("GIT_DIR")
+		cacheDir := viper.GetString("GIT_REPOS_DIR")
 		if err := utils.CacheRepository(body.RepositoryID, cacheDir); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

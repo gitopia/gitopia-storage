@@ -30,6 +30,7 @@ func ComputePackfileMerkleRoot(file files.File, chunkSize int) ([]byte, error) {
 	// Pre-compute hashes by reading one chunk at a time
 	chunkHashes := make([][]byte, 0, numChunks)
 	buffer := make([]byte, chunkSize)
+	hasher := sha256.New()
 
 	for offset := int64(0); offset < fileSize; {
 		// Calculate actual chunk size (might be smaller for the last chunk)
@@ -39,11 +40,7 @@ func ComputePackfileMerkleRoot(file files.File, chunkSize int) ([]byte, error) {
 		chunk := buffer[:currentChunkSize]
 
 		// Read chunk
-		_, err = file.Seek(offset, io.SeekStart)
-		if err != nil {
-			return nil, fmt.Errorf("failed to seek to offset %d: %w", offset, err)
-		}
-		n, err := file.Read(chunk)
+		n, err := io.ReadFull(file, chunk)
 		if err != nil && err != io.EOF {
 			return nil, fmt.Errorf("failed to read chunk at offset %d: %w", offset, err)
 		}
@@ -51,9 +48,11 @@ func ComputePackfileMerkleRoot(file files.File, chunkSize int) ([]byte, error) {
 			return nil, fmt.Errorf("short read: got %d bytes, expected %d", n, currentChunkSize)
 		}
 
-		// Hash the chunk
-		hash := sha256.Sum256(chunk)
-		chunkHashes = append(chunkHashes, hash[:])
+		// Hash the chunk on the fly
+		hasher.Reset()
+		hasher.Write(chunk)
+		hash := hasher.Sum(nil)
+		chunkHashes = append(chunkHashes, hash)
 
 		// Move to next chunk
 		offset += int64(currentChunkSize)
@@ -90,6 +89,7 @@ func GenerateChunkProof(file files.File, chunkIndex uint64, chunkSize int) (*mer
 	// Compute all chunk hashes with a single pass
 	chunkHashes := make([][]byte, 0, numChunks)
 	buffer := make([]byte, chunkSize)
+	hasher := sha256.New()
 
 	for offset := int64(0); offset < fileSize; {
 		currentChunkSize := int(min(int64(chunkSize), fileSize-offset))
@@ -98,11 +98,7 @@ func GenerateChunkProof(file files.File, chunkIndex uint64, chunkSize int) (*mer
 		chunk := buffer[:currentChunkSize]
 
 		// Read chunk
-		_, err = file.Seek(offset, io.SeekStart)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to seek to offset %d: %w", offset, err)
-		}
-		n, err := file.Read(chunk)
+		n, err := io.ReadFull(file, chunk)
 		if err != nil && err != io.EOF {
 			return nil, nil, nil, fmt.Errorf("failed to read chunk at offset %d: %w", offset, err)
 		}
@@ -110,9 +106,11 @@ func GenerateChunkProof(file files.File, chunkIndex uint64, chunkSize int) (*mer
 			return nil, nil, nil, fmt.Errorf("short read: got %d bytes, expected %d", n, currentChunkSize)
 		}
 
-		// Hash the chunk
-		hash := sha256.Sum256(chunk)
-		chunkHashes = append(chunkHashes, hash[:])
+		// Hash the chunk on the fly
+		hasher.Reset()
+		hasher.Write(chunk)
+		hash := hasher.Sum(nil)
+		chunkHashes = append(chunkHashes, hash)
 
 		// Move to next chunk
 		offset += int64(currentChunkSize)

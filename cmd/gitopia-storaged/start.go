@@ -57,7 +57,7 @@ func validateConfig() error {
 		"IPFS_CLUSTER_PEER_HOST",
 		"IPFS_CLUSTER_PEER_PORT",
 		"WEB_SERVER_PORT",
-		"GIT_DIR",
+		"GIT_REPOS_DIR",
 	}
 
 	for _, config := range requiredConfigs {
@@ -71,7 +71,7 @@ func validateConfig() error {
 
 func setupWebServer(cmd *cobra.Command) (*http.Server, error) {
 	server, err := internalapp.New(cmd, utils.Config{
-		Dir:        viper.GetString("GIT_DIR"),
+		Dir:        viper.GetString("GIT_REPOS_DIR"),
 		AutoCreate: true,
 		Auth:       true,
 		AutoHooks:  true,
@@ -85,7 +85,7 @@ func setupWebServer(cmd *cobra.Command) (*http.Server, error) {
 	}
 
 	// Ensure cache directory exists
-	if err := os.MkdirAll(viper.GetString("GIT_DIR"), os.ModePerm); err != nil {
+	if err := os.MkdirAll(viper.GetString("GIT_REPOS_DIR"), os.ModePerm); err != nil {
 		return nil, err
 	}
 

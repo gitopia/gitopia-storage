@@ -112,23 +112,29 @@ func DownloadRepositoryPackfile(id uint64, cacheDir string) error {
 
 	// download parent repos first
 	if res.Repository.Fork {
-		err := DownloadRepositoryPackfile(res.Repository.Parent, cacheDir)
+		// Check if parent repo is cached
+		isParentCached, err := IsRepositoryPackfileCached(res.Repository.Parent, cacheDir)
 		if err != nil {
-			return errors.Wrap(err, "error downloading parent repo")
+			return errors.Wrap(err, "error checking if parent repo is cached")
 		}
 
-		// Create alternates file to link with parent repo
-		alternatesDir := filepath.Join(repoDir, "objects", "info")
-		if err := os.MkdirAll(alternatesDir, 0755); err != nil {
-			return fmt.Errorf("failed to create alternates directory: %v", err)
+		if !isParentCached {
+			err := DownloadRepositoryPackfile(res.Repository.Parent, cacheDir)
+			if err != nil {
+				return errors.Wrap(err, "error downloading parent repo")
+			}
 		}
 
-		// Write parent repo objects path to alternates file
-		alternatesPath := filepath.Join(alternatesDir, "alternates")
-		parentObjectsPath := filepath.Join(cacheDir, fmt.Sprintf("%d.git", res.Repository.Parent), "objects")
-		if err := os.WriteFile(alternatesPath, []byte(parentObjectsPath+"\n"), 0644); err != nil {
-			return fmt.Errorf("failed to write alternates file: %v", err)
+		// Check link to parent repo in alternates file
+		alternatesPath := filepath.Join(repoDir, "objects", "info", "alternates")
+		if _, err := os.Stat(alternatesPath); os.IsNotExist(err) {
+			// Create alternates file to link with parent repo
+			parentObjectsPath := filepath.Join(cacheDir, fmt.Sprintf("%d.git", res.Repository.Parent), "objects")
+			if err := os.WriteFile(alternatesPath, []byte(parentObjectsPath+"\n"), 0644); err != nil {
+				return fmt.Errorf("failed to write alternates file: %v", err)
+			}
 		}
+
 	}
 
 	packfileRes, err := queryClient.Storage.RepositoryPackfile(context.Background(), &storagetypes.QueryRepositoryPackfileRequest{

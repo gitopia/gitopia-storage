@@ -159,13 +159,8 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 		return h.handleError(ctx, err, event.TaskId, "pull request query error")
 	}
 
-	// Validate repository state
-	if err := h.validateRepositoryState(ctx, resp); err != nil {
-		return h.handleError(ctx, err, event.TaskId, "repository validation error")
-	}
-
 	// Prepare repositories
-	cacheDir := viper.GetString("GIT_DIR")
+	cacheDir := viper.GetString("GIT_REPOS_DIR")
 	if err := h.prepareRepositories(ctx, resp, cacheDir); err != nil {
 		return h.handleError(ctx, err, event.TaskId, "repository preparation error")
 	}
@@ -184,6 +179,12 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 		return h.handleError(ctx, err, event.TaskId, "create quarantine repo error")
 	}
 	defer os.RemoveAll(quarantineRepoPath)
+
+	// cmd := exec.Command("git", "read-tree", "HEAD")
+	// cmd.Dir = quarantineRepoPath
+	// if err := h.runGitCommandWithTimeout(ctx, cmd, defaultTimeout); err != nil {
+	// 	return errors.WithMessage(err, "git read-tree error")
+	// }
 
 	// Prepare environment variables
 	env := h.prepareGitEnv(event.Creator)
@@ -363,35 +364,10 @@ func (h *InvokeMergePullRequestEventHandler) runGitCommandWithTimeout(ctx contex
 	defer cancel()
 
 	cmd = exec.CommandContext(ctx, cmd.Path, cmd.Args[1:]...)
-	cmd.Dir = cmd.Dir
-	cmd.Env = cmd.Env
-	return cmd.Run()
-}
-
-// validateRepositoryState checks if the repository is in a valid state for merging
-func (h *InvokeMergePullRequestEventHandler) validateRepositoryState(ctx context.Context, resp types.PullRequest) error {
-	// Check if branches exist
-	if err := h.validateBranches(ctx, resp); err != nil {
-		return err
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%v: %s", err, string(out))
 	}
-
-	// Check if repository is still accessible
-	if err := h.validateRepositoryAccess(ctx, resp); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// validateBranches checks if the required branches exist
-func (h *InvokeMergePullRequestEventHandler) validateBranches(ctx context.Context, resp types.PullRequest) error {
-	// TODO: Implement branch validation
-	return nil
-}
-
-// validateRepositoryAccess checks if the repository is still accessible
-func (h *InvokeMergePullRequestEventHandler) validateRepositoryAccess(ctx context.Context, resp types.PullRequest) error {
-	// TODO: Implement repository access validation
 	return nil
 }
 

@@ -174,7 +174,7 @@ The storage provider can be configured using a TOML configuration file. Here's t
 ```toml
 # Server Configuration
 WEB_SERVER_PORT = 5000
-GIT_DIR = "/var/repos"
+GIT_REPOS_DIR = "/var/repos"
 LFS_OBJECTS_DIR = "/var/lfs-objects"
 ATTACHMENT_DIR = "/var/attachments"
 WORKING_DIR = "/home/ubuntu/gitopia-storage/"
@@ -237,7 +237,7 @@ docker run -it \
 ```
 
 > **Important**  
-> Make sure that `source`, `target` in the docker run command and the `GIT_DIR` in the configuration file have the same path. This is required because forked repositories link to parent repositories via the git alternates mechanism wherein the absolute path of the parent repository is stored in the forked repository's alternates file.
+> Make sure that `source`, `target` in the docker run command and the `GIT_REPOS_DIR` in the configuration file have the same path. This is required because forked repositories link to parent repositories via the git alternates mechanism wherein the absolute path of the parent repository is stored in the forked repository's alternates file.
 
 The server will be listening at port `5000`
 
