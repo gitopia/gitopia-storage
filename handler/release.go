@@ -82,12 +82,18 @@ func (e *ReleaseEvent) UnMarshal(eventBuf []byte) error {
 type ReleaseEventHandler struct {
 	gc                app.GitopiaProxy
 	ipfsClusterClient ipfsclusterclient.Client
+	pinataClient      *PinataClient
 }
 
 func NewReleaseEventHandler(g app.GitopiaProxy, ipfsClusterClient ipfsclusterclient.Client) ReleaseEventHandler {
+	var pinataClient *PinataClient
+	if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
+		pinataClient = NewPinataClient(viper.GetString("PINATA_JWT"))
+	}
 	return ReleaseEventHandler{
 		gc:                g,
 		ipfsClusterClient: ipfsClusterClient,
+		pinataClient:      pinataClient,
 	}
 }
 
@@ -230,19 +236,31 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 		for _, attachment := range event.Attachments {
 			cid, err := h.pinAttachment(ctx, attachment)
 			if err != nil {
-				logger.FromContext(ctx).WithError(err).WithField("attachment", attachment.Name).Error("failed to pin attachment")
+				logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
+					"attachment":    attachment.Name,
+					"repository_id": event.RepositoryId,
+					"tag":           event.Tag,
+				}).Error("failed to pin attachment")
 				continue
 			}
 
 			rootHash, err := h.calculateMerkleRoot(ctx, attachment)
 			if err != nil {
-				logger.FromContext(ctx).WithError(err).WithField("attachment", attachment.Name).Error("failed to calculate merkle root")
+				logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
+					"attachment":    attachment.Name,
+					"repository_id": event.RepositoryId,
+					"tag":           event.Tag,
+				}).Error("failed to calculate merkle root")
 				continue
 			}
 
 			err = h.gc.UpdateReleaseAsset(ctx, event.RepositoryId, event.Tag, attachment.Name, cid, rootHash, int64(attachment.Size_), attachment.Sha)
 			if err != nil {
-				logger.FromContext(ctx).WithError(err).WithField("attachment", attachment.Name).Error("failed to update release asset")
+				logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
+					"attachment":    attachment.Name,
+					"repository_id": event.RepositoryId,
+					"tag":           event.Tag,
+				}).Error("failed to update release asset")
 			}
 		}
 
@@ -259,7 +277,11 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 			}
 			if !found {
 				if err := h.unpinAttachment(ctx, existingAsset); err != nil {
-					logger.FromContext(ctx).WithError(err).WithField("asset", existingAsset.Name).Error("failed to unpin attachment")
+					logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
+						"asset":         existingAsset.Name,
+						"repository_id": event.RepositoryId,
+						"tag":           event.Tag,
+					}).Error("failed to unpin attachment")
 				}
 			}
 		}
@@ -271,7 +293,11 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 				// Pin the new attachment
 				newCid, err := h.pinAttachment(ctx, attachment)
 				if err != nil {
-					logger.FromContext(ctx).WithError(err).WithField("attachment", attachment.Name).Error("failed to pin attachment")
+					logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
+						"attachment":    attachment.Name,
+						"repository_id": event.RepositoryId,
+						"tag":           event.Tag,
+					}).Error("failed to pin attachment")
 					continue
 				}
 
@@ -279,39 +305,63 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 				if newCid != existingAsset.Cid {
 					// Unpin old attachment
 					if err := h.unpinAttachment(ctx, existingAsset); err != nil {
-						logger.FromContext(ctx).WithError(err).WithField("asset", existingAsset.Name).Error("failed to unpin old attachment")
+						logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
+							"asset":         existingAsset.Name,
+							"repository_id": event.RepositoryId,
+							"tag":           event.Tag,
+						}).Error("failed to unpin old attachment")
 					}
 
 					rootHash, err := h.calculateMerkleRoot(ctx, attachment)
 					if err != nil {
-						logger.FromContext(ctx).WithError(err).WithField("attachment", attachment.Name).Error("failed to calculate merkle root")
+						logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
+							"attachment":    attachment.Name,
+							"repository_id": event.RepositoryId,
+							"tag":           event.Tag,
+						}).Error("failed to calculate merkle root")
 						continue
 					}
 
 					// Update the release asset with new CID and merkle root
 					err = h.gc.UpdateReleaseAsset(ctx, event.RepositoryId, event.Tag, attachment.Name, newCid, rootHash, int64(attachment.Size_), attachment.Sha)
 					if err != nil {
-						logger.FromContext(ctx).WithError(err).WithField("attachment", attachment.Name).Error("failed to update release asset")
+						logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
+							"attachment":    attachment.Name,
+							"repository_id": event.RepositoryId,
+							"tag":           event.Tag,
+						}).Error("failed to update release asset")
 					}
 				}
 			} else {
 				// This is a completely new attachment
 				newCid, err := h.pinAttachment(ctx, attachment)
 				if err != nil {
-					logger.FromContext(ctx).WithError(err).WithField("attachment", attachment.Name).Error("failed to pin attachment")
+					logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
+						"attachment":    attachment.Name,
+						"repository_id": event.RepositoryId,
+						"tag":           event.Tag,
+					}).Error("failed to pin attachment")
 					continue
 				}
 
 				rootHash, err := h.calculateMerkleRoot(ctx, attachment)
 				if err != nil {
-					logger.FromContext(ctx).WithError(err).WithField("attachment", attachment.Name).Error("failed to calculate merkle root")
+					logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
+						"attachment":    attachment.Name,
+						"repository_id": event.RepositoryId,
+						"tag":           event.Tag,
+					}).Error("failed to calculate merkle root")
 					continue
 				}
 
 				// Update the release asset with new CID and merkle root
 				err = h.gc.UpdateReleaseAsset(ctx, event.RepositoryId, event.Tag, attachment.Name, newCid, rootHash, int64(attachment.Size_), attachment.Sha)
 				if err != nil {
-					logger.FromContext(ctx).WithError(err).WithField("attachment", attachment.Name).Error("failed to update release asset")
+					logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
+						"attachment":    attachment.Name,
+						"repository_id": event.RepositoryId,
+						"tag":           event.Tag,
+					}).Error("failed to update release asset")
 				}
 			}
 		}
@@ -320,8 +370,37 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 		// Unpin all attachments
 		for _, existingAsset := range existingAssets {
 			if err := h.unpinAttachment(ctx, existingAsset); err != nil {
-				logger.FromContext(ctx).WithError(err).WithField("asset", existingAsset.Name).Error("failed to unpin attachment")
+				logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
+					"asset":         existingAsset.Name,
+					"repository_id": event.RepositoryId,
+					"tag":           event.Tag,
+				}).Error("failed to unpin attachment")
 			}
+
+			// Unpin from Pinata if external pinning is enabled
+			if h.pinataClient != nil && existingAsset.Cid != "" {
+				name := fmt.Sprintf("release-%d-%s-%s-%s", event.RepositoryId, event.Tag, existingAsset.Name, existingAsset.Sha256)
+				err := h.pinataClient.UnpinFile(ctx, name)
+				if err != nil {
+					logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
+						"asset":         existingAsset.Name,
+						"repository_id": event.RepositoryId,
+						"tag":           event.Tag,
+					}).Error("failed to unpin file from Pinata")
+				} else {
+					logger.FromContext(ctx).WithFields(logrus.Fields{
+						"asset":         existingAsset.Name,
+						"repository_id": event.RepositoryId,
+						"tag":           event.Tag,
+					}).Info("successfully unpinned from Pinata")
+				}
+			}
+
+			logger.FromContext(ctx).WithFields(logrus.Fields{
+				"asset":         existingAsset.Name,
+				"repository_id": event.RepositoryId,
+				"tag":           event.Tag,
+			}).Info("unpinned attachment")
 		}
 	}
 
