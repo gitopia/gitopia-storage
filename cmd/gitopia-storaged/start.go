@@ -36,6 +36,7 @@ const (
 	CreateReleaseQuery             = "tm.event='Tx' AND message.action='CreateRelease'"
 	UpdateReleaseQuery             = "tm.event='Tx' AND message.action='UpdateRelease'"
 	DeleteReleaseQuery             = "tm.event='Tx' AND message.action='DeleteRelease'"
+	DaoCreateReleaseQuery          = "tm.event='Tx' AND message.action='DaoCreateRelease'"
 )
 
 func NewStartCmd() *cobra.Command {
@@ -214,6 +215,7 @@ func start(cmd *cobra.Command, args []string) error {
 		packfileUpdatedHandler := handler.NewPackfileUpdatedEventHandler(gp)
 		releaseAssetUpdatedHandler := handler.NewReleaseAssetUpdatedEventHandler(gp)
 		releaseHandler := handler.NewReleaseEventHandler(gp, cl)
+		daoReleaseHandler := handler.NewDaoCreateReleaseEventHandler(gp, cl)
 
 		mergeDone, mergeSubscribeErr := mtmc.Subscribe(ctx, mergeHandler.Handle)
 		daoMergeDone, daoMergeSubscribeErr := dmtmc.Subscribe(ctx, daoMergeHandler.Handle)
@@ -228,6 +230,13 @@ func start(cmd *cobra.Command, args []string) error {
 		createReleaseDone, createReleaseSubscribeErr := createReleaseTMC.Subscribe(ctx, func(ctx context.Context, eventBuf []byte) error {
 			return releaseHandler.Handle(ctx, eventBuf, handler.EventCreateReleaseType)
 		})
+
+		daoCreateReleaseTMC, err := gitopia.NewWSEvents(ctx, DaoCreateReleaseQuery)
+		if err != nil {
+			eventErrChan <- errors.WithMessage(err, "create dao release tm error")
+			return
+		}
+		daoCreateReleaseDone, daoCreateReleaseSubscribeErr := daoCreateReleaseTMC.Subscribe(ctx, daoReleaseHandler.Handle)
 
 		updateReleaseTMC, err := gitopia.NewWSEvents(ctx, UpdateReleaseQuery)
 		if err != nil {
@@ -288,6 +297,10 @@ func start(cmd *cobra.Command, args []string) error {
 			eventErrChan <- errors.WithMessage(err, "create release tm subscribe error")
 		case <-createReleaseDone:
 			logger.FromContext(ctx).Info("create release done")
+		case err = <-daoCreateReleaseSubscribeErr:
+			eventErrChan <- errors.WithMessage(err, "create dao release tm subscribe error")
+		case <-daoCreateReleaseDone:
+			logger.FromContext(ctx).Info("create dao release done")
 		case err = <-updateReleaseSubscribeErr:
 			eventErrChan <- errors.WithMessage(err, "update release tm subscribe error")
 		case <-updateReleaseDone:

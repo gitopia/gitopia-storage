@@ -213,11 +213,13 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 		// Query existing release assets
 		for _, attachment := range event.Attachments {
 			asset, err := h.gc.RepositoryReleaseAsset(ctx, event.RepositoryId, event.Tag, attachment.Name)
-			if err != nil {
+			if err != nil && !strings.Contains(err.Error(), "release asset not found") {
 				return errors.WithMessage(err, "error querying release assets")
 			}
 
-			existingAssets[asset.Name] = asset
+			if asset.Name != "" {
+				existingAssets[asset.Name] = asset
+			}
 		}
 	}
 
