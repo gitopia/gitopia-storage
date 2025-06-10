@@ -13,43 +13,48 @@ Storage provider and git apis for [gitopia](https://gitopia.org/)
 
 #### 1. IPFS Setup
 
-1. Install IPFS Kubo following the [official installation guide](https://docs.ipfs.tech/install/command-line/)
+1. Install IPFS Kubo following the [official installation guide](https://docs.ipfs.tech/install/command-line/) or use the following commands for Linux:
+
+```sh
+# Download and install IPFS Kubo v0.35.0
+wget https://dist.ipfs.tech/kubo/v0.35.0/kubo_v0.35.0_linux-amd64.tar.gz
+tar -xvzf kubo_v0.35.0_linux-amd64.tar.gz
+cd kubo
+sudo bash install.sh
+
+# Verify installation
+ipfs --version
+# Should output: ipfs version 0.35.0
+```
 
 2. Initialize IPFS with server profile for production use:
 ```sh
 ipfs init --profile=server
 ```
 
-3. Configure IPFS for production use:
-```sh
-# Increase connection manager limits
-ipfs config Swarm.ConnMgr.HighWater 10000
-ipfs config Swarm.ConnMgr.LowWater 2500
-ipfs config Swarm.ConnMgr.GracePeriod 20s
-
-# Enable experimental DHT providing
-ipfs config --bool Experimental.AcceleratedDHTClient true
-
-# Set file descriptor limit
-export IPFS_FD_MAX=8192
-
-# Configure datastore for better performance
-ipfs config Datastore.BloomFilterSize 1048576
-ipfs config Datastore.StorageMax "100GB" # Adjust based on your disk size
-```
-
-4. Start IPFS daemon:
+3. Start IPFS daemon:
 ```sh
 ipfs daemon
 ```
 
 #### 2. IPFS Cluster Setup
 
-1. Install IPFS Cluster following the [official installation guide](https://ipfscluster.io/documentation/deployment/setup/)
+1. Install IPFS Cluster following the [official installation guide](https://ipfscluster.io/documentation/deployment/setup/) or use the following commands for Linux:
+
+```sh
+# Download and install IPFS Cluster Service v1.1.4
+wget https://dist.ipfs.tech/ipfs-cluster-service/v1.1.4/ipfs-cluster-service_v1.1.4_linux-amd64.tar.gz
+tar xvzf ipfs-cluster-service_v1.1.4_linux-amd64.tar.gz
+
+# Download and install IPFS Cluster Control v1.1.4
+wget https://dist.ipfs.tech/ipfs-cluster-ctl/v1.1.4/ipfs-cluster-ctl_v1.1.4_linux-amd64.tar.gz
+tar xvzf ipfs-cluster-ctl_v1.1.4_linux-amd64.tar.gz
+```
 
 2. Initialize IPFS Cluster:
 ```sh
 ipfs-cluster-service init
+# This will create configuration files in ~/.ipfs-cluster/
 ```
 
 3. Configure IPFS Cluster to join the Gitopia storage network:
@@ -61,7 +66,7 @@ ipfs-cluster-service init
   "cluster": {
     "peername": "your-peer-name",
     "secret": "your-cluster-secret", # Get this from Gitopia team
-    "trusted_peers": ["*"], # Trust all peers in the cluster
+    "trusted_peers": ["peer-multiaddress1","peer-multiaddress2"], # Trust peers in the cluster
     "ipfs_connector": {
       "ipfshttp": {
         "node_multiaddress": "/ip4/127.0.0.1/tcp/5001"
@@ -79,12 +84,16 @@ ipfs-cluster-service init
 
 4. Start IPFS Cluster service:
 ```sh
-ipfs-cluster-service daemon
+ipfs-cluster-service daemon --bootstrap <peer-multiaddress1,peer-multiaddress2>
 ```
 
-5. Verify cluster connection:
+5. Verify cluster connection and status:
 ```sh
+# Check cluster peers
 ipfs-cluster-ctl peers ls
+
+# Verify the cluster is ready by checking logs
+# You should see: "INFO    cluster: ** IPFS Cluster is READY **"
 ```
 
 #### 3. Docker Setup
