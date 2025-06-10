@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cosmos/cosmos-sdk/client"
+	"github.com/cosmos/cosmos-sdk/client/keys"
 	"github.com/cosmos/cosmos-sdk/client/tx"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/query"
@@ -87,8 +88,12 @@ func saveProgress(progress *MigrationProgress) error {
 
 func main() {
 	rootCmd := &cobra.Command{
-		Use:   "migrate",
-		Short: "Migrate existing repositories and releases to IPFS",
+		Use:               "migrate",
+		Short:             "Migrate existing repositories and releases to IPFS",
+		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			return gc.CommandInit(cmd, AppName)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Load progress
 			progress, err := loadProgress()
@@ -104,13 +109,6 @@ func main() {
 				return errors.Wrap(err, "error initializing tx factory")
 			}
 			txf = txf.WithGasAdjustment(app.GAS_ADJUSTMENT)
-
-			gc.WithAppName(AppName)
-			gc.WithChainId(viper.GetString("CHAIN_ID"))
-			gc.WithGasPrices(viper.GetString("GAS_PRICES"))
-			gc.WithGitopiaAddr(viper.GetString("GITOPIA_ADDR"))
-			gc.WithTmAddr(viper.GetString("TM_ADDR"))
-			gc.WithWorkingDir(viper.GetString("WORKING_DIR"))
 
 			gitopiaClient, err := gc.NewClient(ctx, clientCtx, txf)
 			if err != nil {
@@ -149,8 +147,7 @@ func main() {
 			for {
 				repositories, err := gitopiaClient.QueryClient().Gitopia.RepositoryAll(ctx, &gitopiatypes.QueryAllRepositoryRequest{
 					Pagination: &query.PageRequest{
-						Key:   nextKey,
-						Limit: 100, // Process 100 repositories at a time
+						Key: nextKey,
 					},
 				})
 				if err != nil {
@@ -195,7 +192,7 @@ func main() {
 					// clone repository
 					repoDir := filepath.Join(gitDir, fmt.Sprintf("%d.git", repository.Id))
 					remoteUrl := fmt.Sprintf("gitopia://%s/%s", repository.Owner.Id, repository.Name)
-					cmd := exec.Command("git", "clone", remoteUrl, repoDir)
+					cmd := exec.Command("git", "clone", "--bare", remoteUrl, repoDir)
 					if err := cmd.Run(); err != nil {
 						progress.FailedRepos[repository.Id] = err.Error()
 						progress.LastFailedRepo = repository.Id
@@ -228,7 +225,7 @@ func main() {
 						}
 						return errors.Wrapf(err, "error checking branch ref for repo %d", repository.Id)
 					}
-					if strings.TrimSpace(string(output)) != branch.Branch.Name {
+					if strings.TrimSpace(string(output)) != branch.Branch.Sha {
 						err := errors.Errorf("branch ref for repo %d does not match: %s", repository.Id, branch.Branch.Name)
 						progress.FailedRepos[repository.Id] = err.Error()
 						progress.LastFailedRepo = repository.Id
@@ -357,8 +354,7 @@ func main() {
 			for {
 				releases, err := gitopiaClient.QueryClient().Gitopia.ReleaseAll(ctx, &gitopiatypes.QueryAllReleaseRequest{
 					Pagination: &query.PageRequest{
-						Key:   nextKey,
-						Limit: 100, // Process 100 releases at a time
+						Key: nextKey,
 					},
 				})
 				if err != nil {
@@ -404,7 +400,7 @@ func main() {
 
 						// Download release asset
 						attachmentUrl := fmt.Sprintf("%s/releases/%s/%s/%s/%s",
-							viper.GetString("GITOPIA_SERVER"),
+							viper.GetString("GIT_SERVER_HOST"),
 							repository.Repository.Owner.Id,
 							repository.Repository.Name,
 							release.TagName,
@@ -580,35 +576,9 @@ func main() {
 	}
 
 	// Add flags
-	rootCmd.Flags().String("git-dir", "", "Directory containing git repositories")
-	rootCmd.Flags().String("attachment-dir", "", "Directory containing release attachments")
-	rootCmd.Flags().String("ipfs-cluster-peer-host", "", "IPFS cluster peer host")
-	rootCmd.Flags().String("ipfs-cluster-peer-port", "", "IPFS cluster peer port")
-	rootCmd.Flags().String("ipfs-host", "", "IPFS host")
-	rootCmd.Flags().String("ipfs-port", "", "IPFS port")
 	rootCmd.Flags().String("from", "", "Name or address of private key with which to sign")
 	rootCmd.Flags().String("keyring-backend", "", "Select keyring's backend (os|file|kwallet|pass|test|memory)")
 	rootCmd.Flags().String("fees", "", "Fees to pay along with transaction; eg: 10ulore")
-	rootCmd.Flags().String("chain-id", "", "Chain ID")
-	rootCmd.Flags().String("gas-prices", "", "Gas prices")
-	rootCmd.Flags().String("gitopia-addr", "", "Gitopia address")
-	rootCmd.Flags().String("tm-addr", "", "Tendermint address")
-	rootCmd.Flags().String("working-dir", "", "Working directory")
-	rootCmd.Flags().String("gitopia-server", "https://server.gitopia.com", "Gitopia server URL")
-
-	// Bind flags to viper
-	viper.BindPFlag("GIT_REPOS_DIR", rootCmd.Flags().Lookup("git-dir"))
-	viper.BindPFlag("ATTACHMENT_DIR", rootCmd.Flags().Lookup("attachment-dir"))
-	viper.BindPFlag("IPFS_CLUSTER_PEER_HOST", rootCmd.Flags().Lookup("ipfs-cluster-peer-host"))
-	viper.BindPFlag("IPFS_CLUSTER_PEER_PORT", rootCmd.Flags().Lookup("ipfs-cluster-peer-port"))
-	viper.BindPFlag("IPFS_HOST", rootCmd.Flags().Lookup("ipfs-host"))
-	viper.BindPFlag("IPFS_PORT", rootCmd.Flags().Lookup("ipfs-port"))
-	viper.BindPFlag("CHAIN_ID", rootCmd.Flags().Lookup("chain-id"))
-	viper.BindPFlag("GAS_PRICES", rootCmd.Flags().Lookup("gas-prices"))
-	viper.BindPFlag("GITOPIA_ADDR", rootCmd.Flags().Lookup("gitopia-addr"))
-	viper.BindPFlag("TM_ADDR", rootCmd.Flags().Lookup("tm-addr"))
-	viper.BindPFlag("WORKING_DIR", rootCmd.Flags().Lookup("working-dir"))
-	viper.BindPFlag("GITOPIA_SERVER", rootCmd.Flags().Lookup("gitopia-server"))
 
 	conf := sdk.GetConfig()
 	conf.SetBech32PrefixForAccount(AccountAddressPrefix, AccountPubKeyPrefix)
@@ -618,6 +588,18 @@ func main() {
 	ctx = context.WithValue(ctx, client.ClientContextKey, &client.Context{})
 
 	logger.FromContext(ctx).SetOutput(os.Stdout)
+
+	viper.SetConfigFile("config.toml")
+	viper.ReadInConfig()
+
+	gc.WithAppName(AppName)
+	gc.WithChainId(viper.GetString("CHAIN_ID"))
+	gc.WithGasPrices(viper.GetString("GAS_PRICES"))
+	gc.WithGitopiaAddr(viper.GetString("GITOPIA_ADDR"))
+	gc.WithTmAddr(viper.GetString("TM_ADDR"))
+	gc.WithWorkingDir(viper.GetString("WORKING_DIR"))
+
+	rootCmd.AddCommand(keys.Commands(viper.GetString("WORKING_DIR")))
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		fmt.Println(err)

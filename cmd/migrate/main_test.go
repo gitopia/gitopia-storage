@@ -1,75 +1,57 @@
 package main
 
 import (
-	"os"
+	"fmt"
 	"os/exec"
-	"path/filepath"
+	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
 func TestMigration(t *testing.T) {
-	// Create temporary directories for test data
-	tempDir, err := os.MkdirTemp("", "migration-test-*")
+	// Initialize test key
+	mnemonic := "prize cycle gravity trumpet force initial print pulp correct maze mechanic what gallery debris ice announce chunk curtain gate deliver walk resist forest grid"
+	cmd := exec.Command("go", "run", "main.go", "keys", "add", "gitopia-storage", "--keyring-backend", "test", "--recover")
+	cmd.Stdin = strings.NewReader(mnemonic)
+	output, err := cmd.CombinedOutput()
+	fmt.Println(string(output))
 	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
 
-	gitDir := filepath.Join(tempDir, "git")
-	attachmentDir := filepath.Join(tempDir, "attachments")
-	require.NoError(t, os.MkdirAll(gitDir, 0755))
-	require.NoError(t, os.MkdirAll(attachmentDir, 0755))
-
-	// Create multiple test repositories
-	repoIDs := []string{"123", "456", "789"}
-	for _, repoID := range repoIDs {
-		repoPath := filepath.Join(gitDir, repoID+".git")
-		require.NoError(t, os.MkdirAll(repoPath, 0755))
-
-		// Initialize git repository
-		cmd := exec.Command("git", "init", "--bare")
-		cmd.Dir = repoPath
-		require.NoError(t, cmd.Run())
-
-		// Create test files in the repository
-		testFile := filepath.Join(repoPath, "test.txt")
-		require.NoError(t, os.WriteFile(testFile, []byte("test content for repo "+repoID), 0644))
+	gitConfigs := []struct {
+		key   string
+		value string
+	}{
+		{"gitopia.tmAddr", "http://localhost:26667"},
+		{"gitopia.grpcHost", "localhost:9100"},
+		{"gitopia.gitServerHost", "http://localhost:5001"},
+		{"gitopia.chainId", "chain-NMh8oi"},
 	}
 
-	// Set environment variables for IPFS and IPFS cluster
-	// Note: These should be running locally for the test
-	os.Setenv("IPFS_CLUSTER_PEER_HOST", "localhost")
-	os.Setenv("IPFS_CLUSTER_PEER_PORT", "9094")
-	os.Setenv("IPFS_HOST", "localhost")
-	os.Setenv("IPFS_PORT", "5001")
+	for _, config := range gitConfigs {
+		cmd := exec.Command("git", "config", "--global", config.key, config.value)
+		err := cmd.Run()
+		require.NoError(t, err)
+	}
+
+	// Cleanup function to remove git configs
+	defer func() {
+		for _, config := range gitConfigs {
+			cmd := exec.Command("git", "config", "--unset", "--global", config.key)
+			_ = cmd.Run()
+		}
+	}()
 
 	// Run the migration script
-	cmd := exec.Command("go", "run", "main.go",
-		"--git-dir", gitDir,
-		"--attachment-dir", attachmentDir,
-		"--ipfs-cluster-peer-host", "localhost",
-		"--ipfs-cluster-peer-port", "9094",
-		"--ipfs-host", "localhost",
-		"--ipfs-port", "5001",
-		"--chain-id", "chain-xnW2vC",
-		"--gas-prices", "0.001ulore",
-		"--gitopia-addr", "localhost:9100",
-		"--tm-addr", "http://localhost:26667",
-		"--working-dir", tempDir,
+	cmd = exec.Command("go", "run", "main.go",
+		"--from", "gitopia-storage",
+		"--keyring-backend", "test",
+		"--fees", "200ulore",
 	)
 
-	output, err := cmd.CombinedOutput()
+	output, err = cmd.CombinedOutput()
 	if err != nil {
 		t.Logf("Migration output: %s", output)
 		t.Fatalf("Migration failed: %v", err)
 	}
-
-	// Wait a bit for IPFS to process the files
-	time.Sleep(5 * time.Second)
-
-	// Verify that the repositories were migrated
-	// Note: In a real test, you would verify the on-chain state
-	// For now, we'll just check that the command completed successfully
-	t.Logf("Migration completed successfully for %d repositories", len(repoIDs))
 }

@@ -15,42 +15,38 @@ This tool helps migrate existing Gitopia repositories and their releases to IPFS
 - IPFS node
 - IPFS Cluster
 - Gitopia blockchain node access
+- git-remote-gitopia
 
 ## Configuration
 
-The tool requires several configuration parameters:
+Make changes to config.toml
 
-```bash
-# Git directories
---git-dir              # Directory containing git repositories
---attachment-dir       # Directory containing release attachments
+config.toml
+```yaml
+GITOPIA_ADDR = "localhost:9100"
+GIT_REPOS_DIR = "var/repos"
+ATTACHMENT_DIR = "var/attachments"
+TM_ADDR = "http://localhost:26667"
+WORKING_DIR = "/tmp/test"
+GAS_PRICES = "0.001ulore"
+CHAIN_ID = "gitopia"
+GIT_SERVER_HOST = "http://localhost:5001"
 
 # IPFS Configuration
---ipfs-cluster-peer-host  # IPFS cluster peer host
---ipfs-cluster-peer-port  # IPFS cluster peer port
---ipfs-host            # IPFS host
---ipfs-port            # IPFS port
-
-# Gitopia Configuration
---chain-id            # Chain ID
---gas-prices          # Gas prices
---gitopia-addr        # Gitopia address
---tm-addr             # Tendermint address
---working-dir         # Working directory
+IPFS_CLUSTER_PEER_HOST = "localhost"
+IPFS_CLUSTER_PEER_PORT = "9094"
+IPFS_HOST = "localhost"
+IPFS_PORT = "5003"
 ```
 
 ## Usage
 
+Setup the key
 ```bash
-migrate --git-dir /path/to/repos \
-        --attachment-dir /path/to/attachments \
-        --ipfs-cluster-peer-host localhost \
-        --ipfs-cluster-peer-port 9094 \
-        --ipfs-host localhost \
-        --ipfs-port 5001 \
-        --chain-id your-chain-id \
-        --gas-prices 0.1ulore \
-        --gitopia-addr http://localhost:1317 \
-        --tm-addr http://localhost:26657 \
-        --working-dir /path/to/working/dir
+migrate keys add gitopia-storage --keyring-backend test --recover
+```
+
+Run the migration
+```bash
+migrate --from gitopia-storage --keyring-backend test
 ```
