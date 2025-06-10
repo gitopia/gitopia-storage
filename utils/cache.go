@@ -22,13 +22,30 @@ import (
 )
 
 var (
-	repoMutexes sync.Map // map[uint64]*sync.Mutex
+	repoMutexes  sync.Map // map[uint64]*sync.Mutex
+	assetMutexes sync.Map // map[string]*sync.Mutex
 )
 
 // getRepoMutex returns a mutex for the given repository ID
 func getRepoMutex(repoID uint64) *sync.Mutex {
 	mutex, _ := repoMutexes.LoadOrStore(repoID, &sync.Mutex{})
 	return mutex.(*sync.Mutex)
+}
+
+// getAssetMutex returns a mutex for the given asset SHA
+func getAssetMutex(sha string) *sync.Mutex {
+	mutex, _ := assetMutexes.LoadOrStore(sha, &sync.Mutex{})
+	return mutex.(*sync.Mutex)
+}
+
+// LockAsset acquires the asset-specific lock
+func LockAsset(sha string) {
+	getAssetMutex(sha).Lock()
+}
+
+// UnlockAsset releases the asset-specific lock
+func UnlockAsset(sha string) {
+	getAssetMutex(sha).Unlock()
 }
 
 // LockRepository acquires the repository-specific lock
@@ -320,5 +337,36 @@ func DownloadReleaseAsset(cid, sha256, cacheDir string) error {
 		return fmt.Errorf("failed to write attachment file: %v", err)
 	}
 
+	return nil
+}
+
+func CacheReleaseAsset(repositoryId uint64, tag, name string, cacheDir string) error {
+	queryClient, err := gitopia.GetQueryClient(viper.GetString("GITOPIA_ADDR"))
+	if err != nil {
+		return errors.Wrap(err, "error connecting to gitopia")
+	}
+
+	res, err := queryClient.Storage.RepositoryReleaseAsset(context.Background(), &storagetypes.QueryRepositoryReleaseAssetRequest{
+		RepositoryId: repositoryId,
+		Tag:          tag,
+		Name:         name,
+	})
+	if err != nil {
+		return errors.Wrap(err, "error getting release asset")
+	}
+
+	LockAsset(res.ReleaseAsset.Sha256)
+	defer UnlockAsset(res.ReleaseAsset.Sha256)
+
+	isCached, err := IsReleaseAssetCached(res.ReleaseAsset.Sha256, cacheDir)
+	if err != nil {
+		return errors.Wrap(err, "error checking if release asset is cached")
+	}
+	if !isCached {
+		err = DownloadReleaseAsset(res.ReleaseAsset.Cid, res.ReleaseAsset.Sha256, cacheDir)
+		if err != nil {
+			return errors.Wrap(err, "error downloading release asset")
+		}
+	}
 	return nil
 }

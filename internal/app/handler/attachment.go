@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/cosmos/cosmos-sdk/codec"
+	"github.com/gitopia/gitopia-storage/utils"
 	"github.com/gitopia/gitopia/v6/x/gitopia/types"
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
@@ -79,6 +80,11 @@ func UploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 		attachmentDir := viper.GetString("ATTACHMENT_DIR")
 		shaString := hex.EncodeToString(sha.Sum(nil))
 		filePath := fmt.Sprintf("%s/%s", attachmentDir, shaString)
+
+		// Lock the asset mutex before writing the file
+		utils.LockAsset(shaString)
+		defer utils.UnlockAsset(shaString)
+
 		localFile, err := os.Create(filePath)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -156,6 +162,12 @@ func GetAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		err = utils.CacheReleaseAsset(res.Release.RepositoryId, res.Release.TagName, fileName, viper.GetString("ATTACHMENT_DIR"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
 		sha := res.Release.Attachments[i].Sha
 		filePath := fmt.Sprintf("%s/%s", viper.GetString("ATTACHMENT_DIR"), sha)
 		file, err := os.Open(filePath)
@@ -171,5 +183,4 @@ func GetAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 	}
-	return
 }

@@ -131,15 +131,9 @@ func (h *ReleaseAssetUpdatedEventHandler) Process(ctx context.Context, event Rel
 		cacheDir := viper.GetString("ATTACHMENT_DIR")
 
 		// check if release asset is cached
-		isCached, err := utils.IsReleaseAssetCached(event.NewSha256, cacheDir)
+		err := utils.CacheReleaseAsset(event.RepositoryId, event.Tag, event.Name, cacheDir)
 		if err != nil {
-			return err
-		}
-		if !isCached {
-			err = utils.DownloadReleaseAsset(event.NewCid, event.NewSha256, cacheDir)
-			if err != nil {
-				return err
-			}
+			logger.FromContext(ctx).WithError(err).Error("failed to cache release asset")
 		}
 
 		releaseAssetPath := path.Join(cacheDir, event.NewSha256)
