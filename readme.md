@@ -96,61 +96,7 @@ ipfs-cluster-ctl peers ls
 # You should see: "INFO    cluster: ** IPFS Cluster is READY **"
 ```
 
-#### 3. Docker Setup
-
-##### Single Provider Setup
-
-1. Create a `.env` file with required environment variables:
-```sh
-CLUSTER_SECRET=your-cluster-secret  # Required - Get from Gitopia team
-CLUSTER_PEERNAME=your-peer-name     # Optional - Defaults to 'storage-provider'
-ENABLE_EXTERNAL_PINNING=false       # Optional - Enable Pinata pinning
-PINATA_API_KEY=your-pinata-key      # Optional - Required if ENABLE_EXTERNAL_PINNING is true
-PINATA_SECRET_KEY=your-pinata-secret # Optional - Required if ENABLE_EXTERNAL_PINNING is true
-```
-
-2. Create necessary directories:
-```sh
-mkdir -p data/{ipfs,cluster,repos,attachments,lfs-objects}
-```
-
-3. Start the services:
-```sh
-docker-compose up -d
-```
-
-##### Test Environment Setup (Multiple Providers)
-
-For local testing and development, you can set up multiple storage providers using the test environment configuration:
-
-1. Create the test network:
-```sh
-docker network create storage-provider-test
-```
-
-2. Create a `.env` file with required environment variables:
-```sh
-CLUSTER_SECRET=your-test-secret  # Required - Use any secret for local testing
-ENABLE_EXTERNAL_PINNING=false    # Optional - Enable Pinata pinning
-PINATA_API_KEY=your-pinata-key   # Optional - Required if ENABLE_EXTERNAL_PINNING is true
-PINATA_SECRET_KEY=your-pinata-secret # Optional - Required if ENABLE_EXTERNAL_PINNING is true
-```
-
-3. Create necessary directories:
-```sh
-mkdir -p compose/{ipfs0,ipfs1,ipfs2,cluster0,cluster1,cluster2,gitopia-storage0,gitopia-storage1,gitopia-storage2}
-```
-
-4. Start the test environment:
-```sh
-docker-compose -f docker-compose.test.yml up -d
-```
-
-This will start 3 storage providers with their respective IPFS and Cluster peers, all connected in a test network.
-
 ### Build
-
-#### Local Build
 
 To build the services locally:
 
@@ -167,14 +113,6 @@ The build process will create the following binaries in the `build/` directory:
 - `gitopia-pre-receive`: Git pre-receive hook
 - `gitopia-post-receive`: Git post-receive hook
 - `migrate`: Storage migration tool
-
-#### Docker Build
-
-By default, gitopia-storaged is built with production configurations. If you want to build with `local` or `dev` configurations, set GITOPIA_ENV to respective value.
-
-```sh
-make docker-build-gitopia-storage
-```
 
 ### Configuration
 
@@ -206,8 +144,6 @@ PINATA_JWT = "your-pinata-jwt"  # Required if ENABLE_EXTERNAL_PINNING is true
 
 ### Usage
 
-#### Local Usage
-
 1. Create necessary directories and set permissions:
 ```sh
 mkdir -p /var/repos /var/attachments /var/lfs-objects
@@ -227,28 +163,6 @@ gitopia-storaged register-provider http://localhost:5000 1000000000000ulore --fr
 ```sh
 gitopia-storaged start --from gitopia-storage --keyring-backend test
 ```
-
-#### Docker Usage
-
-1. Create necessary directories and set permissions:
-```sh
-mkdir -p /var/repos /var/attachments /var/lfs-objects
-```
-
-2. Start the container:
-```sh
-docker run -it \
-  --name gitopia-storage \
-  --mount type=bind,source=/var/attachments,target=/var/attachments \
-  --mount type=bind,source=/var/repos,target=/var/repos \
-  -p 5000:5000 \
-  gitopia/gitopia-storage
-```
-
-> **Important**  
-> Make sure that `source`, `target` in the docker run command and the `GIT_REPOS_DIR` in the configuration file have the same path. This is required because forked repositories link to parent repositories via the git alternates mechanism wherein the absolute path of the parent repository is stored in the forked repository's alternates file.
-
-The server will be listening at port `5000`
 
 ### Available APIs
 

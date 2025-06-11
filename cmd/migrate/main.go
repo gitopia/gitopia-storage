@@ -95,6 +95,17 @@ func main() {
 			return gc.CommandInit(cmd, AppName)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Create required directories if they don't exist
+			gitDir := viper.GetString("GIT_REPOS_DIR")
+			if err := os.MkdirAll(gitDir, 0755); err != nil {
+				return errors.Wrap(err, "failed to create git repositories directory")
+			}
+
+			attachmentDir := viper.GetString("ATTACHMENT_DIR")
+			if err := os.MkdirAll(attachmentDir, 0755); err != nil {
+				return errors.Wrap(err, "failed to create attachments directory")
+			}
+
 			// Load progress
 			progress, err := loadProgress()
 			if err != nil {
@@ -135,8 +146,6 @@ func main() {
 			if err != nil {
 				return errors.Wrap(err, "failed to create IPFS API")
 			}
-
-			gitDir := viper.GetString("GIT_REPOS_DIR")
 
 			// Process repositories
 			var processedCount int
@@ -405,20 +414,22 @@ func main() {
 							repository.Repository.Name,
 							release.TagName,
 							attachment.Name)
+
 						filePath := filepath.Join(attachmentDir, attachment.Sha)
 						cmd := exec.Command("wget", attachmentUrl, "-O", filePath)
-						if err := cmd.Run(); err != nil {
+						output, err := cmd.CombinedOutput()
+						if err != nil {
 							progress.FailedReleases[release.Id] = err.Error()
 							progress.LastFailedRelease = release.Id
 							if err := saveProgress(progress); err != nil {
 								return errors.Wrap(err, "failed to save progress")
 							}
-							return errors.Wrap(err, "error downloading release asset")
+							return errors.Wrapf(err, "error downloading release asset: %s", string(output))
 						}
 
 						// verify sha256
 						cmd = exec.Command("sha256sum", filePath)
-						output, err := cmd.Output()
+						output, err = cmd.Output()
 						if err != nil {
 							progress.FailedReleases[release.Id] = err.Error()
 							progress.LastFailedRelease = release.Id
@@ -427,8 +438,10 @@ func main() {
 							}
 							return errors.Wrap(err, "error verifying sha256 for attachment")
 						}
-						if strings.TrimSpace(string(output)) != attachment.Sha {
-							err := errors.Errorf("SHA256 mismatch for attachment %s: %s != %s", attachment.Name, strings.TrimSpace(string(output)), attachment.Sha)
+						// Extract just the hash part (first 64 characters before the space)
+						calculatedHash := strings.Fields(string(output))[0]
+						if calculatedHash != attachment.Sha {
+							err := errors.Errorf("SHA256 mismatch for attachment %s: %s != %s", attachment.Name, calculatedHash, attachment.Sha)
 							progress.FailedReleases[release.Id] = err.Error()
 							progress.LastFailedRelease = release.Id
 							if err := saveProgress(progress); err != nil {
