@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/pkg/errors"
@@ -43,10 +42,6 @@ const (
 	branchPrefix                 = "refs/heads/"
 	tagPrefix                    = "refs/tags/"
 	LARGE_OBJECT_THRESHOLD int64 = 1024 * 1024
-)
-
-var (
-	CacheMutex sync.RWMutex // Mutex to synchronize cache access
 )
 
 type QueryService interface {
@@ -258,6 +253,12 @@ func New(cmd *cobra.Command, cfg utils.Config) (*Server, error) {
 	}
 	s.IPFSClusterClient = cl
 
+	// Initialize cache manager
+	s.CacheManager = utils.NewCacheManager()
+	if err := s.CacheManager.Start(); err != nil {
+		return nil, errors.Wrap(err, "failed to start cache manager")
+	}
+
 	return &s, nil
 }
 
@@ -413,10 +414,6 @@ func (s *Server) GetInfoRefs(_ string, w http.ResponseWriter, r *Request) {
 		utils.LogError(context, err)
 		return
 	}
-
-	// blocking
-	// ideally just make sure no cleanup is scheduled during
-	// cacheMutex.Unlock()
 }
 
 func initRepo(name string, config *utils.Config) error {
@@ -459,6 +456,7 @@ type Server struct {
 	QueryService      QueryService
 	GitopiaProxy      app.GitopiaProxy
 	IPFSClusterClient ipfsclusterclient.Client
+	CacheManager      *utils.CacheManager
 }
 
 type ServerWrapper struct {
