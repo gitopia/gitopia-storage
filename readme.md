@@ -96,6 +96,30 @@ ipfs-cluster-ctl peers ls
 # You should see: "INFO    cluster: ** IPFS Cluster is READY **"
 ```
 
+### Git Hooks Configuration
+
+The git hooks (`gitopia-pre-receive` and `gitopia-post-receive`) are essential components that integrate with Git's hook system to handle repository operations. These hooks need to be properly configured and available in your system's PATH.
+
+1. Configure the gRPC host for gitopia-pre-receive:
+   - The gRPC host is configured in `hooks/gitopia-pre-receive/config/config_prod.go`
+   - For production, it's set to `gitopia-grpc.polkachu.com:11390`
+   - You can modify this if you're using a different gRPC endpoint
+
+2. Make the hooks available in PATH:
+```sh
+# After building, copy the hooks to a directory in your PATH
+sudo cp build/gitopia-pre-receive /usr/local/bin/
+sudo cp build/gitopia-post-receive /usr/local/bin/
+
+# Verify the hooks are available
+which gitopia-pre-receive
+which gitopia-post-receive
+```
+
+Purpose of the hooks:
+- `gitopia-pre-receive`: Runs before changes are accepted into the repository. It validates pushes by checking if force pushes are allowed for the target branch. If force pushes are not allowed, it will reject non-fast-forward pushes to protect repository history.
+- `gitopia-post-receive`: Runs after changes are accepted. It handles post-push operations by creating dangling references for force pushes and deletions. This ensures that even when history is rewritten or branches are deleted, the previous state is preserved in the repository's reference history.
+
 ### Build
 
 To build the services locally:
