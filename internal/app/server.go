@@ -383,6 +383,9 @@ func (s *Server) GetInfoRefs(_ string, w http.ResponseWriter, r *Request) {
 		return
 	}
 
+	utils.LockRepository(repoId)
+	defer utils.UnlockRepository(repoId)
+
 	if err := s.CacheRepository(repoId); err != nil {
 		utils.LogError(context, err)
 		return

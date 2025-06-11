@@ -34,6 +34,9 @@ func PullDiffHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// cache repo
+		utils.LockRepository(body.BaseRepositoryID)
+		defer utils.UnlockRepository(body.BaseRepositoryID)
+
 		cacheDir := viper.GetString("GIT_REPOS_DIR")
 		if err := utils.CacheRepository(body.BaseRepositoryID, cacheDir); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -42,6 +45,9 @@ func PullDiffHandler(w http.ResponseWriter, r *http.Request) {
 
 		if body.HeadRepositoryID != body.BaseRepositoryID {
 			// cache repo
+			utils.LockRepository(body.HeadRepositoryID)
+			defer utils.UnlockRepository(body.HeadRepositoryID)
+
 			if err := utils.CacheRepository(body.HeadRepositoryID, cacheDir); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return

@@ -90,9 +90,6 @@ func IsRepositoryPackfileCached(id uint64, cacheDir string) (bool, error) {
 
 // CacheRepository caches a repository by downloading its packfile and syncing its refs
 func CacheRepository(id uint64, cacheDir string) error {
-	LockRepository(id)
-	defer UnlockRepository(id)
-
 	isRepoCached, err := IsRepositoryPackfileCached(id, cacheDir)
 	if err != nil {
 		return errors.Wrap(err, "error checking if repo is cached")
@@ -354,9 +351,6 @@ func CacheReleaseAsset(repositoryId uint64, tag, name string, cacheDir string) e
 	if err != nil {
 		return errors.Wrap(err, "error getting release asset")
 	}
-
-	LockAsset(res.ReleaseAsset.Sha256)
-	defer UnlockAsset(res.ReleaseAsset.Sha256)
 
 	isCached, err := IsReleaseAssetCached(res.ReleaseAsset.Sha256, cacheDir)
 	if err != nil {

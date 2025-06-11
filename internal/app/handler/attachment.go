@@ -162,6 +162,9 @@ func GetAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		utils.LockAsset(res.Release.Attachments[i].Sha)
+		defer utils.UnlockAsset(res.Release.Attachments[i].Sha)
+
 		err = utils.CacheReleaseAsset(res.Release.RepositoryId, res.Release.TagName, fileName, viper.GetString("ATTACHMENT_DIR"))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)

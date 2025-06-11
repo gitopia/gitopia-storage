@@ -45,6 +45,9 @@ func ContentHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// cache repo
+		utils.LockRepository(body.RepositoryID)
+		defer utils.UnlockRepository(body.RepositoryID)
+
 		cacheDir := viper.GetString("GIT_REPOS_DIR")
 		if err := utils.CacheRepository(body.RepositoryID, cacheDir); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)

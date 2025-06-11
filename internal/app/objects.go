@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gitopia/gitopia-storage/utils"
 	git "github.com/gitopia/go-git/v5"
 	"github.com/gitopia/go-git/v5/plumbing"
 	"github.com/gitopia/go-git/v5/plumbing/format/objfile"
@@ -36,6 +37,9 @@ func (s *Server) ObjectsHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
 			return
 		}
+
+		utils.LockRepository(repoId)
+		defer utils.UnlockRepository(repoId)
 
 		if err := s.CacheRepository(repoId); err != nil {
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
