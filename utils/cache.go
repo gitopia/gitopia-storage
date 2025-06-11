@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/cosmos/cosmos-sdk/types/query"
 	"github.com/gitopia/gitopia-go"
@@ -21,41 +23,103 @@ import (
 	"github.com/spf13/viper"
 )
 
+// RefCountedMutex is a mutex wrapper that tracks both lock state and reference count
+type RefCountedMutex struct {
+	mu        sync.Mutex
+	refCount  int32
+	lastUsed  time.Time
+	cleanupCh chan struct{}
+}
+
 var (
-	repoMutexes  sync.Map // map[uint64]*sync.Mutex
-	assetMutexes sync.Map // map[string]*sync.Mutex
+	repoMutexes  sync.Map // map[uint64]*RefCountedMutex
+	assetMutexes sync.Map // map[string]*RefCountedMutex
 )
 
-// getRepoMutex returns a mutex for the given repository ID
-func getRepoMutex(repoID uint64) *sync.Mutex {
-	mutex, _ := repoMutexes.LoadOrStore(repoID, &sync.Mutex{})
-	return mutex.(*sync.Mutex)
+// getRepoMutex returns a reference-counted mutex for the given repository ID
+func getRepoMutex(repoID uint64) *RefCountedMutex {
+	mutex, _ := repoMutexes.LoadOrStore(repoID, &RefCountedMutex{
+		cleanupCh: make(chan struct{}),
+	})
+	return mutex.(*RefCountedMutex)
 }
 
-// getAssetMutex returns a mutex for the given asset SHA
-func getAssetMutex(sha string) *sync.Mutex {
-	mutex, _ := assetMutexes.LoadOrStore(sha, &sync.Mutex{})
-	return mutex.(*sync.Mutex)
+// getAssetMutex returns a reference-counted mutex for the given asset SHA
+func getAssetMutex(sha string) *RefCountedMutex {
+	mutex, _ := assetMutexes.LoadOrStore(sha, &RefCountedMutex{
+		cleanupCh: make(chan struct{}),
+	})
+	return mutex.(*RefCountedMutex)
 }
 
-// LockAsset acquires the asset-specific lock
+// LockAsset acquires the asset-specific lock and increments reference count
 func LockAsset(sha string) {
-	getAssetMutex(sha).Lock()
+	mutex := getAssetMutex(sha)
+	atomic.AddInt32(&mutex.refCount, 1)
+	mutex.mu.Lock()
+	mutex.lastUsed = time.Now()
 }
 
-// UnlockAsset releases the asset-specific lock
+// UnlockAsset releases the asset-specific lock and decrements reference count
 func UnlockAsset(sha string) {
-	getAssetMutex(sha).Unlock()
+	mutex := getAssetMutex(sha)
+	mutex.mu.Unlock()
+	if atomic.AddInt32(&mutex.refCount, -1) == 0 {
+		// If no more references, schedule cleanup
+		go func() {
+			select {
+			case <-mutex.cleanupCh:
+				// Wait for cleanup signal
+			case <-time.After(5 * time.Minute):
+				// If no activity for 5 minutes, remove from map
+				assetMutexes.Delete(sha)
+			}
+		}()
+	}
 }
 
-// LockRepository acquires the repository-specific lock
+// LockRepository acquires the repository-specific lock and increments reference count
 func LockRepository(repoID uint64) {
-	getRepoMutex(repoID).Lock()
+	mutex := getRepoMutex(repoID)
+	atomic.AddInt32(&mutex.refCount, 1)
+	mutex.mu.Lock()
+	mutex.lastUsed = time.Now()
 }
 
-// UnlockRepository releases the repository-specific lock
+// UnlockRepository releases the repository-specific lock and decrements reference count
 func UnlockRepository(repoID uint64) {
-	getRepoMutex(repoID).Unlock()
+	mutex := getRepoMutex(repoID)
+	mutex.mu.Unlock()
+	if atomic.AddInt32(&mutex.refCount, -1) == 0 {
+		// If no more references, schedule cleanup
+		go func() {
+			select {
+			case <-mutex.cleanupCh:
+				// Wait for cleanup signal
+			case <-time.After(5 * time.Minute):
+				// If no activity for 5 minutes, remove from map
+				repoMutexes.Delete(repoID)
+			}
+		}()
+	}
+}
+
+// IsRepositoryInUse checks if a repository is currently locked/in use
+func IsRepositoryInUse(repoID uint64) bool {
+	if mutex, exists := repoMutexes.Load(repoID); exists {
+		rm := mutex.(*RefCountedMutex)
+		return atomic.LoadInt32(&rm.refCount) > 0
+	}
+	return false
+}
+
+// IsAssetInUse checks if an asset is currently locked/in use
+func IsAssetInUse(sha string) bool {
+	if mutex, exists := assetMutexes.Load(sha); exists {
+		rm := mutex.(*RefCountedMutex)
+		return atomic.LoadInt32(&rm.refCount) > 0
+	}
+	return false
 }
 
 func IsRepositoryPackfileCached(id uint64, cacheDir string) (bool, error) {

@@ -104,14 +104,12 @@ func (cm *CacheManager) clearCache() error {
 
 // isRepositoryInUse checks if a repository is currently locked/in use
 func (cm *CacheManager) isRepositoryInUse(repoID uint64) bool {
-	_, exists := repoMutexes.Load(repoID)
-	return exists
+	return IsRepositoryInUse(repoID)
 }
 
 // isAssetInUse checks if an asset is currently locked/in use
 func (cm *CacheManager) isAssetInUse(sha string) bool {
-	_, exists := assetMutexes.Load(sha)
-	return exists
+	return IsAssetInUse(sha)
 }
 
 // clearRepositoryCache clears old repository caches based on age and size
