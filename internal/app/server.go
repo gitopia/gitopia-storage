@@ -18,6 +18,8 @@ import (
 
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/tx"
+	sdk "github.com/cosmos/cosmos-sdk/types"
+	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	gc "github.com/gitopia/gitopia-go"
 	"github.com/gitopia/gitopia-storage/app"
 	lfsutil "github.com/gitopia/gitopia-storage/lfs"
@@ -49,6 +51,9 @@ type QueryService interface {
 	GitopiaRepositoryBranches(ctx context.Context, req *gitopiatypes.QueryAllRepositoryBranchRequest) (*gitopiatypes.QueryAllRepositoryBranchResponse, error)
 	GitopiaRepositoryTags(ctx context.Context, req *gitopiatypes.QueryAllRepositoryTagRequest) (*gitopiatypes.QueryAllRepositoryTagResponse, error)
 	GitopiaRepository(ctx context.Context, req *gitopiatypes.QueryGetRepositoryRequest) (*gitopiatypes.QueryGetRepositoryResponse, error)
+	GitopiaUserQuota(ctx context.Context, req *gitopiatypes.QueryUserQuotaRequest) (*gitopiatypes.QueryUserQuotaResponse, error)
+	StorageParams(ctx context.Context, req *storagetypes.QueryParamsRequest) (*storagetypes.QueryParamsResponse, error)
+	CosmosBankBalance(ctx context.Context, req *banktypes.QueryBalanceRequest) (*banktypes.QueryBalanceResponse, error)
 }
 
 type QueryServiceImpl struct {
@@ -69,6 +74,18 @@ func (qs *QueryServiceImpl) GitopiaRepositoryTags(ctx context.Context, req *gito
 
 func (qs *QueryServiceImpl) GitopiaRepository(ctx context.Context, req *gitopiatypes.QueryGetRepositoryRequest) (*gitopiatypes.QueryGetRepositoryResponse, error) {
 	return qs.Query.Gitopia.Repository(ctx, req)
+}
+
+func (qs *QueryServiceImpl) GitopiaUserQuota(ctx context.Context, req *gitopiatypes.QueryUserQuotaRequest) (*gitopiatypes.QueryUserQuotaResponse, error) {
+	return qs.Query.Gitopia.UserQuota(ctx, req)
+}
+
+func (qs *QueryServiceImpl) StorageParams(ctx context.Context, req *storagetypes.QueryParamsRequest) (*storagetypes.QueryParamsResponse, error) {
+	return qs.Query.Storage.Params(ctx, req)
+}
+
+func (qs *QueryServiceImpl) CosmosBankBalance(ctx context.Context, req *banktypes.QueryBalanceRequest) (*banktypes.QueryBalanceResponse, error) {
+	return qs.Query.Bank.Balance(ctx, req)
 }
 
 type SaveToArweavePostBody struct {
@@ -472,6 +489,43 @@ type Request struct {
 	RepoPath string
 }
 
+// StorageCostInfo contains information about storage costs and usage
+type StorageCostInfo struct {
+	StorageCharge sdk.Coin
+	CurrentUsage  uint64
+	NewUsage      uint64
+	FreeLimit     uint64
+}
+
+// calculateStorageCost calculates the storage cost based on current usage, new usage, and storage parameters
+func calculateStorageCost(currentUsage, storageDelta uint64, storageParams *storagetypes.QueryParamsResponse) (*StorageCostInfo, error) {
+	freeStorageBytes := storageParams.Params.FreeStorageMb * 1024 * 1024 // Convert MB to bytes
+	newUsage := currentUsage + storageDelta
+
+	var storageCharge sdk.Coin
+	if currentUsage > freeStorageBytes {
+		// If current usage is already above free limit, charge for the entire diff
+		if storageDelta > 0 {
+			diffMb := float64(storageDelta) / (1024 * 1024)
+			chargeAmount := sdk.NewDec(int64(diffMb)).Mul(sdk.NewDecFromInt(storageParams.Params.StoragePricePerMb.Amount))
+			storageCharge = sdk.NewCoin(storageParams.Params.StoragePricePerMb.Denom, chargeAmount.TruncateInt())
+		}
+	} else if newUsage > freeStorageBytes {
+		// Calculate charge for the portion that exceeds free limit
+		excessBytes := newUsage - freeStorageBytes
+		excessMb := float64(excessBytes) / (1024 * 1024)
+		chargeAmount := sdk.NewDec(int64(excessMb)).Mul(sdk.NewDecFromInt(storageParams.Params.StoragePricePerMb.Amount))
+		storageCharge = sdk.NewCoin(storageParams.Params.StoragePricePerMb.Denom, chargeAmount.TruncateInt())
+	}
+
+	return &StorageCostInfo{
+		StorageCharge: storageCharge,
+		CurrentUsage:  currentUsage,
+		NewUsage:      newUsage,
+		FreeLimit:     freeStorageBytes,
+	}, nil
+}
+
 func (s *Server) PostRPC(service string, w http.ResponseWriter, r *Request) {
 	logContext := "post-rpc"
 	body := r.Body
@@ -562,6 +616,85 @@ func (s *Server) PostRPC(service string, w http.ResponseWriter, r *Request) {
 			return
 		}
 
+		// Get packfile size before pinning
+		packfileInfo, err := os.Stat(packfileName)
+		if err != nil {
+			fail500(w, logContext, fmt.Errorf("failed to get packfile size: %w", err))
+			return
+		}
+
+		// Get repository owner
+		repoResp, err := s.QueryService.GitopiaRepository(context.Background(), &gitopiatypes.QueryGetRepositoryRequest{
+			Id: repoId,
+		})
+		if err != nil {
+			fail500(w, logContext, fmt.Errorf("failed to get repository: %w", err))
+			return
+		}
+
+		// Get current packfile size
+		var currentSize int64
+		packfileResp, err := s.QueryService.GitopiaRepositoryPackfile(context.Background(), &storagetypes.QueryRepositoryPackfileRequest{
+			RepositoryId: repoId,
+		})
+		if err == nil && packfileResp != nil {
+			currentSize = int64(packfileResp.Packfile.Size_)
+		}
+
+		// Calculate storage delta
+		storageDelta := packfileInfo.Size() - currentSize
+
+		// Check storage quota
+		userQuotaResp, err := s.QueryService.GitopiaUserQuota(context.Background(), &gitopiatypes.QueryUserQuotaRequest{
+			Address: repoResp.Repository.Owner.Id,
+		})
+		if err != nil {
+			fail500(w, logContext, fmt.Errorf("failed to get user quota: %w", err))
+			return
+		}
+
+		// Get storage params
+		storageParams, err := s.QueryService.StorageParams(context.Background(), &storagetypes.QueryParamsRequest{})
+		if err != nil {
+			fail500(w, logContext, fmt.Errorf("failed to get storage params: %w", err))
+			return
+		}
+
+		// Calculate storage cost
+		costInfo, err := calculateStorageCost(
+			uint64(userQuotaResp.UserQuota.StorageUsed),
+			uint64(storageDelta),
+			storageParams,
+		)
+		if err != nil {
+			fail500(w, logContext, fmt.Errorf("failed to calculate storage cost: %w", err))
+			return
+		}
+
+		// If there is a storage charge, check if user has sufficient balance
+		if !costInfo.StorageCharge.IsZero() {
+			balance, err := s.QueryService.CosmosBankBalance(context.Background(), &banktypes.QueryBalanceRequest{
+				Address: repoResp.Repository.Owner.Id,
+				Denom:   costInfo.StorageCharge.Denom,
+			})
+			if err != nil {
+				fail500(w, logContext, fmt.Errorf("failed to get user balance: %w", err))
+				return
+			}
+
+			if balance.Balance.Amount.LT(costInfo.StorageCharge.Amount) {
+				// rollback local repository cache
+				err = os.RemoveAll(r.RepoPath)
+				if err != nil {
+					fail500(w, logContext, fmt.Errorf("failed to rollback local repository cache: %w", err))
+					return
+				}
+
+				http.Error(w, "Insufficient balance for storage charge", http.StatusPaymentRequired)
+				return
+			}
+		}
+
 		cid, err := utils.PinFile(s.IPFSClusterClient, packfileName)
 		if err != nil {
 			fail500(w, logContext, fmt.Errorf("failed to pin packfile to IPFS cluster: %w", err))
@@ -597,24 +730,6 @@ func (s *Server) PostRPC(service string, w http.ResponseWriter, r *Request) {
 		if err != nil {
 			fail500(w, logContext, fmt.Errorf("failed to compute packfile merkle root: %w", err))
 			return
-		}
-
-		// Get packfile size
-		packfileInfo, err := os.Stat(packfileName)
-		if err != nil {
-			fail500(w, logContext, fmt.Errorf("failed to get packfile size: %w", err))
-			return
-		}
-
-		// fetch older packfile details from gitopia
-		packfileResp, err := s.QueryService.GitopiaRepositoryPackfile(context.Background(), &storagetypes.QueryRepositoryPackfileRequest{
-			RepositoryId: repoId,
-		})
-		if err != nil {
-			if !strings.Contains(err.Error(), "packfile not found") {
-				fail500(w, logContext, fmt.Errorf("failed to get packfile details: %w", err))
-				return
-			}
 		}
 
 		if packfileResp != nil && packfileResp.Packfile.Cid != "" {
