@@ -18,7 +18,6 @@ import (
 
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/tx"
-	sdk "github.com/cosmos/cosmos-sdk/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	gc "github.com/gitopia/gitopia-go"
 	"github.com/gitopia/gitopia-storage/app"
@@ -489,43 +488,6 @@ type Request struct {
 	RepoPath string
 }
 
-// StorageCostInfo contains information about storage costs and usage
-type StorageCostInfo struct {
-	StorageCharge sdk.Coin
-	CurrentUsage  uint64
-	NewUsage      uint64
-	FreeLimit     uint64
-}
-
-// calculateStorageCost calculates the storage cost based on current usage, new usage, and storage parameters
-func calculateStorageCost(currentUsage, storageDelta uint64, storageParams *storagetypes.QueryParamsResponse) (*StorageCostInfo, error) {
-	freeStorageBytes := storageParams.Params.FreeStorageMb * 1024 * 1024 // Convert MB to bytes
-	newUsage := currentUsage + storageDelta
-
-	storageCharge := sdk.NewCoin(storageParams.Params.StoragePricePerMb.Denom, sdk.NewInt(0))
-	if currentUsage > freeStorageBytes {
-		// If current usage is already above free limit, charge for the entire diff
-		if storageDelta > 0 {
-			diffMb := float64(storageDelta) / (1024 * 1024)
-			chargeAmount := sdk.NewDec(int64(diffMb)).Mul(sdk.NewDecFromInt(storageParams.Params.StoragePricePerMb.Amount))
-			storageCharge = sdk.NewCoin(storageParams.Params.StoragePricePerMb.Denom, chargeAmount.TruncateInt())
-		}
-	} else if newUsage > freeStorageBytes {
-		// Calculate charge for the portion that exceeds free limit
-		excessBytes := newUsage - freeStorageBytes
-		excessMb := float64(excessBytes) / (1024 * 1024)
-		chargeAmount := sdk.NewDec(int64(excessMb)).Mul(sdk.NewDecFromInt(storageParams.Params.StoragePricePerMb.Amount))
-		storageCharge = sdk.NewCoin(storageParams.Params.StoragePricePerMb.Denom, chargeAmount.TruncateInt())
-	}
-
-	return &StorageCostInfo{
-		StorageCharge: storageCharge,
-		CurrentUsage:  currentUsage,
-		NewUsage:      newUsage,
-		FreeLimit:     freeStorageBytes,
-	}, nil
-}
-
 func (s *Server) PostRPC(service string, w http.ResponseWriter, r *Request) {
 	logContext := "post-rpc"
 	body := r.Body
@@ -661,10 +623,10 @@ func (s *Server) PostRPC(service string, w http.ResponseWriter, r *Request) {
 		}
 
 		// Calculate storage cost
-		costInfo, err := calculateStorageCost(
+		costInfo, err := utils.CalculateStorageCost(
 			uint64(userQuotaResp.UserQuota.StorageUsed),
 			uint64(storageDelta),
-			storageParams,
+			storageParams.Params,
 		)
 		if err != nil {
 			fail500(w, logContext, fmt.Errorf("failed to calculate storage cost: %w", err))

@@ -307,6 +307,69 @@ func (h *InvokeMergePullRequestEventHandler) handlePostMergeOperations(ctx conte
 		return errors.WithMessage(err, "get packfile name error")
 	}
 
+	// Get packfile size before pinning
+	packfileInfo, err := os.Stat(packfileName)
+	if err != nil {
+		return errors.WithMessage(err, "get packfile size error")
+	}
+
+	// Get repository owner
+	repo, err := h.gc.Repository(ctx, resp.Base.RepositoryId)
+	if err != nil {
+		return errors.WithMessage(err, "failed to get repository")
+	}
+
+	// Get current packfile size
+	var currentSize int64
+	packfile, err := h.gc.RepositoryPackfile(ctx, resp.Base.RepositoryId)
+	if err == nil {
+		currentSize = int64(packfile.Size_)
+	}
+
+	// Calculate storage delta
+	storageDelta := packfileInfo.Size() - currentSize
+
+	// Check storage quota
+	userQuota, err := h.gc.UserQuota(ctx, repo.Owner.Id)
+	if err != nil {
+		return errors.WithMessage(err, "failed to get user quota")
+	}
+
+	// Get storage params
+	storageParams, err := h.gc.StorageParams(ctx)
+	if err != nil {
+		return errors.WithMessage(err, "failed to get storage params")
+	}
+
+	// Calculate storage cost
+	costInfo, err := utils.CalculateStorageCost(
+		uint64(userQuota.StorageUsed),
+		uint64(storageDelta),
+		storageParams,
+	)
+	if err != nil {
+		return errors.WithMessage(err, "failed to calculate storage cost")
+	}
+
+	// If there is a storage charge, check if user has sufficient balance
+	if !costInfo.StorageCharge.IsZero() {
+		balance, err := h.gc.CosmosBankBalance(ctx, repo.Owner.Id, costInfo.StorageCharge.Denom)
+		if err != nil {
+			return errors.WithMessage(err, "failed to get user balance")
+		}
+
+		if balance.Amount.LT(costInfo.StorageCharge.Amount) {
+			// rollback local repository cache
+			err = os.RemoveAll(baseRepoPath)
+			if err != nil {
+				return errors.WithMessage(err, "failed to rollback local repository cache")
+			}
+
+			// TODO: log insufficient balance for storage charge
+			return nil
+		}
+	}
+
 	// Handle IPFS operations
 	cid, err := h.handleIPFSOperations(ctx, packfileName, resp.Base.RepositoryId)
 	if err != nil {
@@ -337,12 +400,6 @@ func (h *InvokeMergePullRequestEventHandler) handlePostMergeOperations(ctx conte
 	rootHash, err := merkleproof.ComputePackfileMerkleRoot(file, merkleChunkSize)
 	if err != nil {
 		return errors.WithMessage(err, "compute packfile merkle root error")
-	}
-
-	// Get packfile size
-	packfileInfo, err := os.Stat(packfileName)
-	if err != nil {
-		return errors.WithMessage(err, "get packfile size error")
 	}
 
 	return h.gc.UpdateRepositoryPackfile(ctx, resp.Base.RepositoryId, filepath.Base(packfileName), cid, rootHash, packfileInfo.Size())
