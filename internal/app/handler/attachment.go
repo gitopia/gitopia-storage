@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -11,11 +12,14 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/cosmos/cosmos-sdk/codec"
 	"github.com/gitopia/gitopia-storage/utils"
+	gitopia "github.com/gitopia/gitopia/v6/app"
 	"github.com/gitopia/gitopia/v6/x/gitopia/types"
+	offchaintypes "github.com/gitopia/gitopia/v6/x/offchain/types"
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -26,6 +30,13 @@ const MAX_UPLOAD_SIZE = 2 * 1024 * 1024 * 1024 // 2GB
 type uploadAttachmentResponse struct {
 	Sha  string `json:"sha"`
 	Size int64  `json:"size"`
+}
+
+type signData struct {
+	RepositoryId string `json:"repositoryId"`
+	Name         string `json:"name"`
+	Size         int64  `json:"size"`
+	Sha256       string `json:"sha256"`
 }
 
 func ReleaseAttachmentExists(attachments []*types.Attachment, name string) (int, bool) {
@@ -55,6 +66,76 @@ func UploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Get signature from form data
+		signature := r.MultipartForm.Value["signature"][0]
+		if signature == "" {
+			http.Error(w, "Signature is required", http.StatusBadRequest)
+			return
+		}
+
+		// convert base64 string to bytes
+		txBytes, err := base64.StdEncoding.DecodeString(signature)
+		if err != nil {
+			http.Error(w, "Error decoding base64 signature string: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		// Verify transaction and permissions
+		encConf := gitopia.MakeEncodingConfig()
+		offchaintypes.RegisterInterfaces(encConf.InterfaceRegistry)
+		offchaintypes.RegisterLegacyAminoCodec(encConf.Amino)
+
+		verifier := offchaintypes.NewVerifier(encConf.TxConfig.SignModeHandler())
+		txDecoder := encConf.TxConfig.TxDecoder()
+
+		decodedTx, err := txDecoder(txBytes)
+		if err != nil {
+			http.Error(w, "Error decoding transaction: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		msgs := decodedTx.GetMsgs()
+		if len(msgs) != 1 || len(msgs[0].GetSigners()) != 1 {
+			http.Error(w, "Invalid signature", http.StatusBadRequest)
+			return
+		}
+
+		address := msgs[0].GetSigners()[0].String()
+
+		// decode the byte message
+		msg := msgs[0].(*offchaintypes.MsgSignData)
+
+		var data signData
+		err = json.Unmarshal(msg.Data, &data)
+		if err != nil {
+			http.Error(w, "Invalid sign data", http.StatusBadRequest)
+			return
+		}
+
+		repoId, err := strconv.ParseUint(data.RepositoryId, 10, 64)
+		if err != nil {
+			http.Error(w, "Invalid repository ID", http.StatusBadRequest)
+			return
+		}
+
+		havePushPermission, err := utils.HavePushPermission(repoId, address)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error checking push permission: %s", err.Error()), http.StatusInternalServerError)
+			return
+		}
+
+		if !havePushPermission {
+			http.Error(w, "User does not have push permission", http.StatusUnauthorized)
+			return
+		}
+
+		// Verify signature
+		err = verifier.Verify(decodedTx)
+		if err != nil {
+			http.Error(w, "Invalid signature", http.StatusBadRequest)
+			return
+		}
+
 		file, handler, err := r.FormFile("file")
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -80,6 +161,18 @@ func UploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 		attachmentDir := viper.GetString("ATTACHMENT_DIR")
 		shaString := hex.EncodeToString(sha.Sum(nil))
 		filePath := fmt.Sprintf("%s/%s", attachmentDir, shaString)
+
+		// verify the size
+		if handler.Size != data.Size {
+			http.Error(w, "Invalid size", http.StatusBadRequest)
+			return
+		}
+
+		// verify the sha256
+		if shaString != data.Sha256 {
+			http.Error(w, "Invalid sha256", http.StatusBadRequest)
+			return
+		}
 
 		// Lock the asset mutex before writing the file
 		utils.LockAsset(shaString)

@@ -502,7 +502,7 @@ func calculateStorageCost(currentUsage, storageDelta uint64, storageParams *stor
 	freeStorageBytes := storageParams.Params.FreeStorageMb * 1024 * 1024 // Convert MB to bytes
 	newUsage := currentUsage + storageDelta
 
-	var storageCharge sdk.Coin
+	storageCharge := sdk.NewCoin(storageParams.Params.StoragePricePerMb.Denom, sdk.NewInt(0))
 	if currentUsage > freeStorageBytes {
 		// If current usage is already above free limit, charge for the entire diff
 		if storageDelta > 0 {
