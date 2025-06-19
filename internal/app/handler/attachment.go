@@ -16,10 +16,13 @@ import (
 	"strings"
 
 	"github.com/cosmos/cosmos-sdk/codec"
+	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
+	"github.com/gitopia/gitopia-go"
 	"github.com/gitopia/gitopia-storage/utils"
-	gitopia "github.com/gitopia/gitopia/v6/app"
+	gitopiaapp "github.com/gitopia/gitopia/v6/app"
 	"github.com/gitopia/gitopia/v6/x/gitopia/types"
 	offchaintypes "github.com/gitopia/gitopia/v6/x/offchain/types"
+	storagetypes "github.com/gitopia/gitopia/v6/x/storage/types"
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -33,7 +36,9 @@ type uploadAttachmentResponse struct {
 }
 
 type signData struct {
+	Action       string `json:"action"`
 	RepositoryId string `json:"repositoryId"`
+	TagName      string `json:"tagName"`
 	Name         string `json:"name"`
 	Size         int64  `json:"size"`
 	Sha256       string `json:"sha256"`
@@ -81,7 +86,7 @@ func UploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Verify transaction and permissions
-		encConf := gitopia.MakeEncodingConfig()
+		encConf := gitopiaapp.MakeEncodingConfig()
 		offchaintypes.RegisterInterfaces(encConf.InterfaceRegistry)
 		offchaintypes.RegisterLegacyAminoCodec(encConf.Amino)
 
@@ -172,6 +177,77 @@ func UploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 		if shaString != data.Sha256 {
 			http.Error(w, "Invalid sha256", http.StatusBadRequest)
 			return
+		}
+
+		queryClient, err := gitopia.GetQueryClient(viper.GetString("GITOPIA_ADDR"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		userQuotaRes, err := queryClient.Gitopia.UserQuota(context.Background(), &types.QueryUserQuotaRequest{
+			Address: address,
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		storageParamsRes, err := queryClient.Storage.Params(context.Background(), &storagetypes.QueryParamsRequest{})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		var oldSize int64
+		if data.Action == "new-release" {
+
+		} else if data.Action == "update-release" {
+			// check asset with same name already exists
+			res, err := queryClient.Storage.RepositoryReleaseAsset(context.Background(), &storagetypes.QueryRepositoryReleaseAssetRequest{
+				RepositoryId: repoId,
+				Tag:          data.TagName,
+				Name:         data.Name,
+			})
+			if err != nil && !strings.Contains(err.Error(), "release asset not found") {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			oldSize = int64(res.ReleaseAsset.Size_)
+		}
+
+		repoRes, err := queryClient.Gitopia.Repository(context.Background(), &types.QueryGetRepositoryRequest{
+			Id: repoId,
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// Calculate storage delta
+		storageDelta := handler.Size - oldSize
+
+		costInfo, err := utils.CalculateStorageCost(uint64(userQuotaRes.UserQuota.StorageUsed), uint64(storageDelta), storageParamsRes.Params)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// If there is a storage charge, check if user has sufficient balance
+		if !costInfo.StorageCharge.IsZero() {
+			balanceRes, err := queryClient.Bank.Balance(context.Background(), &banktypes.QueryBalanceRequest{
+				Address: repoRes.Repository.Owner.Id,
+				Denom:   costInfo.StorageCharge.Denom,
+			})
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			if balanceRes.Balance.Amount.LT(costInfo.StorageCharge.Amount) {
+				http.Error(w, "insufficient balance for storage charge", http.StatusUnauthorized)
+				return
+			}
 		}
 
 		// Lock the asset mutex before writing the file
