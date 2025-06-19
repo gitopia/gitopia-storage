@@ -12,8 +12,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cosmos/cosmos-sdk/codec"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
@@ -29,6 +31,19 @@ import (
 )
 
 const MAX_UPLOAD_SIZE = 2 * 1024 * 1024 * 1024 // 2GB
+const PENDING_UPLOAD_EXPIRY = 1 * time.Hour    // 1 hour
+
+// PendingUpload tracks uploads that haven't been associated with a release yet
+type PendingUpload struct {
+	Address      string    `json:"address"`
+	RepositoryId uint64    `json:"repository_id"`
+	TagName      string    `json:"tag_name"`
+	FileName     string    `json:"file_name"`
+	Size         int64     `json:"size"`
+	Sha256       string    `json:"sha256"`
+	CreatedAt    time.Time `json:"created_at"`
+	ExpiresAt    time.Time `json:"expires_at"`
+}
 
 type uploadAttachmentResponse struct {
 	Sha  string `json:"sha"`
@@ -52,6 +67,8 @@ func ReleaseAttachmentExists(attachments []*types.Attachment, name string) (int,
 	}
 	return 0, false
 }
+
+var pendingUploads = make(map[string]*PendingUpload)
 
 func UploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("request: %s\n", r.Method+" "+r.Host+r.URL.String())
@@ -179,6 +196,9 @@ func UploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Clean up expired pending uploads first
+		cleanupExpiredUploads()
+
 		queryClient, err := gitopia.GetQueryClient(viper.GetString("GITOPIA_ADDR"))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -199,10 +219,11 @@ func UploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		var oldSize int64
-		if data.Action == "new-release" {
+		// Calculate current pending uploads for this user
+		pendingSize := calculatePendingUploadsSize(address)
 
-		} else if data.Action == "update-release" {
+		var oldSize int64
+		if data.Action == "update-release" {
 			// check asset with same name already exists
 			res, err := queryClient.Storage.RepositoryReleaseAsset(context.Background(), &storagetypes.QueryRepositoryReleaseAssetRequest{
 				RepositoryId: repoId,
@@ -224,10 +245,11 @@ func UploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Calculate storage delta
+		// Calculate storage delta including pending uploads
 		storageDelta := handler.Size - oldSize
+		projectedUsage := uint64(userQuotaRes.UserQuota.StorageUsed) + uint64(pendingSize)
 
-		costInfo, err := utils.CalculateStorageCost(uint64(userQuotaRes.UserQuota.StorageUsed), uint64(storageDelta), storageParamsRes.Params)
+		costInfo, err := utils.CalculateStorageCost(projectedUsage, uint64(storageDelta), storageParamsRes.Params)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -268,6 +290,24 @@ func UploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 			log.Printf("cannot copy from temp file to attachment dir, %s", err.Error())
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
+
+		// Create upload token and track pending upload
+		uploadToken := generateUploadToken(address, shaString)
+		expiresAt := time.Now().Add(PENDING_UPLOAD_EXPIRY)
+
+		pendingUpload := &PendingUpload{
+			Address:      address,
+			RepositoryId: repoId,
+			TagName:      data.TagName,
+			FileName:     data.Name,
+			Size:         handler.Size,
+			Sha256:       shaString,
+			CreatedAt:    time.Now(),
+			ExpiresAt:    expiresAt,
+		}
+
+		// Store pending upload
+		storePendingUpload(uploadToken, pendingUpload)
 
 		w.Header().Set("Content-Type", "application/json")
 
@@ -355,4 +395,47 @@ func GetAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 	}
+}
+
+// Helper functions for pending upload management
+
+func generateUploadToken(address, sha string) string {
+	tokenData := fmt.Sprintf("%s:%s:%d", address, sha, time.Now().UnixNano())
+	hash := sha256.Sum256([]byte(tokenData))
+	return hex.EncodeToString(hash[:])
+}
+
+func storePendingUpload(token string, upload *PendingUpload) {
+	pendingUploads[token] = upload
+}
+
+func calculatePendingUploadsSize(address string) int64 {
+	var totalSize int64
+	for _, upload := range pendingUploads {
+		if upload.Address == address && time.Now().Before(upload.ExpiresAt) {
+			totalSize += upload.Size
+		}
+	}
+	return totalSize
+}
+
+func cleanupExpiredUploads() {
+	for token, upload := range pendingUploads {
+		if time.Now().After(upload.ExpiresAt) {
+			// Remove file if it exists and no other uploads reference it
+			if !isFileReferencedByOtherUploads(upload.Sha256, token) {
+				os.Remove(filepath.Join(viper.GetString("ATTACHMENT_DIR"), upload.Sha256))
+			}
+			delete(pendingUploads, token)
+		}
+	}
+}
+
+func isFileReferencedByOtherUploads(sha256, excludeToken string) bool {
+	for token, upload := range pendingUploads {
+		if token != excludeToken && upload.Sha256 == sha256 && time.Now().Before(upload.ExpiresAt) {
+			return true
+		}
+	}
+	return false
 }
