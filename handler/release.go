@@ -82,18 +82,12 @@ func (e *ReleaseEvent) UnMarshal(eventBuf []byte) error {
 type ReleaseEventHandler struct {
 	gc                app.GitopiaProxy
 	ipfsClusterClient ipfsclusterclient.Client
-	pinataClient      *PinataClient
 }
 
 func NewReleaseEventHandler(g app.GitopiaProxy, ipfsClusterClient ipfsclusterclient.Client) ReleaseEventHandler {
-	var pinataClient *PinataClient
-	if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
-		pinataClient = NewPinataClient(viper.GetString("PINATA_JWT"))
-	}
 	return ReleaseEventHandler{
 		gc:                g,
 		ipfsClusterClient: ipfsClusterClient,
-		pinataClient:      pinataClient,
 	}
 }
 
@@ -244,6 +238,12 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 				continue
 			}
 
+			logger.FromContext(ctx).WithFields(logrus.Fields{
+				"attachment":    attachment.Name,
+				"repository_id": event.RepositoryId,
+				"tag":           event.Tag,
+			}).Info("pinned release attachment")
+
 			rootHash, err := h.calculateMerkleRoot(ctx, attachment)
 			if err != nil {
 				logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
@@ -261,7 +261,15 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 					"repository_id": event.RepositoryId,
 					"tag":           event.Tag,
 				}).Error("failed to update release asset")
+				continue
 			}
+
+			logger.FromContext(ctx).WithFields(logrus.Fields{
+				"attachment":    attachment.Name,
+				"repository_id": event.RepositoryId,
+				"tag":           event.Tag,
+			}).Info("updated release asset")
+
 		}
 
 	case EventUpdateReleaseType:
@@ -276,12 +284,47 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 				}
 			}
 			if !found {
-				if err := h.unpinAttachment(ctx, existingAsset); err != nil {
+				// Delete attachment
+				err := h.gc.DeleteReleaseAsset(ctx, event.RepositoryId, event.Tag, existingAsset.Name)
+				if err != nil {
 					logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
 						"asset":         existingAsset.Name,
 						"repository_id": event.RepositoryId,
 						"tag":           event.Tag,
-					}).Error("failed to unpin attachment")
+					}).Error("failed to delete attachment")
+					continue
+				}
+
+				logger.FromContext(ctx).WithFields(logrus.Fields{
+					"asset":         existingAsset.Name,
+					"repository_id": event.RepositoryId,
+					"tag":           event.Tag,
+				}).Info("deleted release attachment")
+
+				// Get attachment reference count
+				refCount, err := h.gc.StorageCidReferenceCount(ctx, existingAsset.Cid)
+				if err != nil {
+					logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
+						"asset":         existingAsset.Name,
+						"repository_id": event.RepositoryId,
+						"tag":           event.Tag,
+					}).Error("failed to get attachment reference count")
+				}
+				if refCount == 0 {
+					if err := h.unpinAttachment(ctx, existingAsset); err != nil {
+						logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
+							"asset":         existingAsset.Name,
+							"repository_id": event.RepositoryId,
+							"tag":           event.Tag,
+						}).Error("failed to unpin attachment")
+						continue
+					}
+
+					logger.FromContext(ctx).WithFields(logrus.Fields{
+						"asset":         existingAsset.Name,
+						"repository_id": event.RepositoryId,
+						"tag":           event.Tag,
+					}).Info("unpinned release attachment")
 				}
 			}
 		}
@@ -297,21 +340,18 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 						"attachment":    attachment.Name,
 						"repository_id": event.RepositoryId,
 						"tag":           event.Tag,
-					}).Error("failed to pin attachment")
+					}).Error("failed to pin release attachment")
 					continue
 				}
 
+				logger.FromContext(ctx).WithFields(logrus.Fields{
+					"attachment":    attachment.Name,
+					"repository_id": event.RepositoryId,
+					"tag":           event.Tag,
+				}).Info("pinned release attachment")
+
 				// If CID is different, unpin old one and update
 				if newCid != existingAsset.Cid {
-					// Unpin old attachment
-					if err := h.unpinAttachment(ctx, existingAsset); err != nil {
-						logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
-							"asset":         existingAsset.Name,
-							"repository_id": event.RepositoryId,
-							"tag":           event.Tag,
-						}).Error("failed to unpin old attachment")
-					}
-
 					rootHash, err := h.calculateMerkleRoot(ctx, attachment)
 					if err != nil {
 						logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
@@ -330,6 +370,39 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 							"repository_id": event.RepositoryId,
 							"tag":           event.Tag,
 						}).Error("failed to update release asset")
+						continue
+					}
+
+					logger.FromContext(ctx).WithFields(logrus.Fields{
+						"attachment":    attachment.Name,
+						"repository_id": event.RepositoryId,
+						"tag":           event.Tag,
+					}).Info("updated release asset")
+
+					// Check reference count
+					refCount, err := h.gc.StorageCidReferenceCount(ctx, existingAsset.Cid)
+					if err != nil {
+						logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
+							"asset":         existingAsset.Name,
+							"repository_id": event.RepositoryId,
+							"tag":           event.Tag,
+						}).Error("failed to get release attachment reference count")
+					}
+					if refCount == 0 {
+						if err := h.unpinAttachment(ctx, existingAsset); err != nil {
+							logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
+								"asset":         existingAsset.Name,
+								"repository_id": event.RepositoryId,
+								"tag":           event.Tag,
+							}).Error("failed to unpin old release attachment")
+							continue
+						}
+
+						logger.FromContext(ctx).WithFields(logrus.Fields{
+							"attachment":    attachment.Name,
+							"repository_id": event.RepositoryId,
+							"tag":           event.Tag,
+						}).Info("unpinned old release attachment")
 					}
 				}
 			} else {
@@ -343,6 +416,12 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 					}).Error("failed to pin attachment")
 					continue
 				}
+
+				logger.FromContext(ctx).WithFields(logrus.Fields{
+					"attachment":    attachment.Name,
+					"repository_id": event.RepositoryId,
+					"tag":           event.Tag,
+				}).Info("pinned release attachment")
 
 				rootHash, err := h.calculateMerkleRoot(ctx, attachment)
 				if err != nil {
@@ -362,45 +441,64 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 						"repository_id": event.RepositoryId,
 						"tag":           event.Tag,
 					}).Error("failed to update release asset")
+					continue
 				}
+
+				logger.FromContext(ctx).WithFields(logrus.Fields{
+					"attachment":    attachment.Name,
+					"repository_id": event.RepositoryId,
+					"tag":           event.Tag,
+				}).Info("updated release asset")
 			}
 		}
 
 	case EventDeleteReleaseType:
 		// Unpin all attachments
 		for _, existingAsset := range existingAssets {
-			if err := h.unpinAttachment(ctx, existingAsset); err != nil {
+			// Delete the release asset
+			err := h.gc.DeleteReleaseAsset(ctx, event.RepositoryId, event.Tag, existingAsset.Name)
+			if err != nil {
 				logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
 					"asset":         existingAsset.Name,
 					"repository_id": event.RepositoryId,
 					"tag":           event.Tag,
-				}).Error("failed to unpin attachment")
-			}
-
-			// Unpin from Pinata if external pinning is enabled
-			if h.pinataClient != nil && existingAsset.Cid != "" {
-				name := fmt.Sprintf("release-%d-%s-%s-%s", event.RepositoryId, event.Tag, existingAsset.Name, existingAsset.Sha256)
-				err := h.pinataClient.UnpinFile(ctx, name)
-				if err != nil {
-					logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
-						"asset":         existingAsset.Name,
-						"repository_id": event.RepositoryId,
-						"tag":           event.Tag,
-					}).Error("failed to unpin file from Pinata")
-				} else {
-					logger.FromContext(ctx).WithFields(logrus.Fields{
-						"asset":         existingAsset.Name,
-						"repository_id": event.RepositoryId,
-						"tag":           event.Tag,
-					}).Info("successfully unpinned from Pinata")
-				}
+				}).Error("failed to delete release asset")
+				continue
 			}
 
 			logger.FromContext(ctx).WithFields(logrus.Fields{
 				"asset":         existingAsset.Name,
 				"repository_id": event.RepositoryId,
 				"tag":           event.Tag,
-			}).Info("unpinned attachment")
+			}).Info("deleted release asset")
+
+			// Check reference count
+			refCount, err := h.gc.StorageCidReferenceCount(ctx, existingAsset.Cid)
+			if err != nil {
+				logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
+					"asset":         existingAsset.Name,
+					"repository_id": event.RepositoryId,
+					"tag":           event.Tag,
+				}).Error("failed to get release attachment reference count")
+				continue
+			}
+			if refCount == 0 {
+				// Unpin from IPFS cluster
+				if err := h.unpinAttachment(ctx, existingAsset); err != nil {
+					logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
+						"asset":         existingAsset.Name,
+						"repository_id": event.RepositoryId,
+						"tag":           event.Tag,
+					}).Error("failed to unpin release attachment")
+					continue
+				}
+
+				logger.FromContext(ctx).WithFields(logrus.Fields{
+					"asset":         existingAsset.Name,
+					"repository_id": event.RepositoryId,
+					"tag":           event.Tag,
+				}).Info("unpinned release attachment")
+			}
 		}
 	}
 

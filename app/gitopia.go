@@ -275,3 +275,30 @@ func (g GitopiaProxy) CosmosBankBalance(ctx context.Context, address, denom stri
 
 	return *resp.Balance, nil
 }
+
+func (g GitopiaProxy) StorageCidReferenceCount(ctx context.Context, cid string) (uint64, error) {
+	resp, err := g.gc.QueryClient().Storage.CidReferenceCount(ctx, &storagetypes.QueryCidReferenceCountRequest{
+		Cid: cid,
+	})
+	if err != nil {
+		return 0, errors.WithMessage(err, "query error")
+	}
+
+	return resp.Count, nil
+}
+
+func (g GitopiaProxy) DeleteReleaseAsset(ctx context.Context, repositoryId uint64, tag string, name string) error {
+	msg := &storagetypes.MsgDeleteReleaseAsset{
+		Creator:      g.gc.Address().String(),
+		RepositoryId: repositoryId,
+		Tag:          tag,
+		Name:         name,
+	}
+
+	err := g.gc.BroadcastTxAndWait(ctx, msg)
+	if err != nil {
+		return errors.WithMessage(err, "error sending tx")
+	}
+
+	return nil
+}

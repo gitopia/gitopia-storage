@@ -53,6 +53,7 @@ type QueryService interface {
 	GitopiaUserQuota(ctx context.Context, req *gitopiatypes.QueryUserQuotaRequest) (*gitopiatypes.QueryUserQuotaResponse, error)
 	StorageParams(ctx context.Context, req *storagetypes.QueryParamsRequest) (*storagetypes.QueryParamsResponse, error)
 	CosmosBankBalance(ctx context.Context, req *banktypes.QueryBalanceRequest) (*banktypes.QueryBalanceResponse, error)
+	StorageCidReferenceCount(ctx context.Context, req *storagetypes.QueryCidReferenceCountRequest) (*storagetypes.QueryCidReferenceCountResponse, error)
 }
 
 type QueryServiceImpl struct {
@@ -87,11 +88,8 @@ func (qs *QueryServiceImpl) CosmosBankBalance(ctx context.Context, req *banktype
 	return qs.Query.Bank.Balance(ctx, req)
 }
 
-type SaveToArweavePostBody struct {
-	RepositoryID     uint64 `json:"repository_id"`
-	RemoteRefName    string `json:"remote_ref_name"`
-	NewRemoteRefSha  string `json:"new_remote_ref_sha"`
-	PrevRemoteRefSha string `json:"prev_remote_ref_sha"`
+func (qs *QueryServiceImpl) StorageCidReferenceCount(ctx context.Context, req *storagetypes.QueryCidReferenceCountRequest) (*storagetypes.QueryCidReferenceCountResponse, error) {
+	return qs.Query.Storage.CidReferenceCount(ctx, req)
 }
 
 type QueryClient interface{}
@@ -663,6 +661,13 @@ func (s *Server) PostRPC(service string, w http.ResponseWriter, r *Request) {
 			return
 		}
 
+		log.WithFields(log.Fields{
+			"operation":     "pin packfile",
+			"repository_id": repoId,
+			"packfile_name": filepath.Base(packfileName),
+			"cid":           cid,
+		}).Info("successfully pinned packfile")
+
 		// Get packfile from IPFS cluster
 		ipfsHttpApi, err := rpc.NewURLApiWithClient(fmt.Sprintf("http://%s:%s", viper.GetString("IPFS_HOST"), viper.GetString("IPFS_PORT")), &http.Client{})
 		if err != nil {
@@ -694,14 +699,6 @@ func (s *Server) PostRPC(service string, w http.ResponseWriter, r *Request) {
 			return
 		}
 
-		if packfileResp != nil && packfileResp.Packfile.Cid != "" {
-			err = utils.UnpinFile(s.IPFSClusterClient, packfileResp.Packfile.Cid)
-			if err != nil {
-				fail500(w, logContext, fmt.Errorf("failed to unpin packfile from IPFS cluster: %w", err))
-				return
-			}
-		}
-
 		// After successfully pinning to IPFS
 		err = s.GitopiaProxy.UpdateRepositoryPackfile(
 			context.Background(),
@@ -714,6 +711,33 @@ func (s *Server) PostRPC(service string, w http.ResponseWriter, r *Request) {
 		if err != nil {
 			fail500(w, logContext, fmt.Errorf("failed to update repository packfile: %w", err))
 			return
+		}
+
+		// Unpin old packfile from IPFS cluster
+		if packfileResp != nil && packfileResp.Packfile.Cid != "" {
+			// Get packfile reference count
+			refCountResp, err := s.QueryService.StorageCidReferenceCount(context.Background(), &storagetypes.QueryCidReferenceCountRequest{
+				Cid: packfileResp.Packfile.Cid,
+			})
+			if err != nil {
+				fail500(w, logContext, fmt.Errorf("failed to get packfile reference count: %w", err))
+				return
+			}
+
+			if refCountResp.Count == 0 {
+				err = utils.UnpinFile(s.IPFSClusterClient, packfileResp.Packfile.Cid)
+				if err != nil {
+					fail500(w, logContext, fmt.Errorf("failed to unpin packfile from IPFS cluster: %w", err))
+					return
+				}
+
+				log.WithFields(log.Fields{
+					"operation":     "unpin packfile",
+					"repository_id": repoId,
+					"packfile_name": filepath.Base(packfileName),
+					"cid":           packfileResp.Packfile.Cid,
+				}).Info("successfully unpinned packfile")
+			}
 		}
 
 		log.WithFields(log.Fields{
