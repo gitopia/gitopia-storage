@@ -16,3 +16,10 @@ IPFS_HOST = "host.docker.internal"
 IPFS_PORT = "5001"
 ENABLE_EXTERNAL_PINNING = false
 PINATA_JWT = ""
+
+# Cache Configuration
+CACHE_REPO_MAX_AGE = "10m"
+CACHE_REPO_MAX_SIZE = 10737418240  # 10GB in bytes
+CACHE_ASSET_MAX_AGE = "10m"       # 10 minutes
+CACHE_ASSET_MAX_SIZE = 5368709120  # 5GB in bytes
+CACHE_CLEAR_INTERVAL = "1m"

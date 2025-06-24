@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 
+	sdk "github.com/cosmos/cosmos-sdk/types"
+	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	"github.com/gitopia/gitopia-go"
 	"github.com/gitopia/gitopia/v6/x/gitopia/types"
 	storagetypes "github.com/gitopia/gitopia/v6/x/storage/types"
@@ -251,4 +253,25 @@ func (g GitopiaProxy) MergePullRequest(ctx context.Context, repositoryId uint64,
 	}
 
 	return nil
+}
+
+func (g GitopiaProxy) StorageParams(ctx context.Context) (storagetypes.Params, error) {
+	resp, err := g.gc.QueryClient().Storage.Params(ctx, &storagetypes.QueryParamsRequest{})
+	if err != nil {
+		return storagetypes.Params{}, errors.WithMessage(err, "query error")
+	}
+
+	return resp.Params, nil
+}
+
+func (g GitopiaProxy) CosmosBankBalance(ctx context.Context, address, denom string) (sdk.Coin, error) {
+	resp, err := g.gc.QueryClient().Bank.Balance(ctx, &banktypes.QueryBalanceRequest{
+		Address: address,
+		Denom:   denom,
+	})
+	if err != nil {
+		return sdk.Coin{}, err
+	}
+
+	return *resp.Balance, nil
 }

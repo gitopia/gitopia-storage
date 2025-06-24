@@ -205,8 +205,16 @@ func UploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		repoRes, err := queryClient.Gitopia.Repository(context.Background(), &types.QueryGetRepositoryRequest{
+			Id: repoId,
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
 		userQuotaRes, err := queryClient.Gitopia.UserQuota(context.Background(), &types.QueryUserQuotaRequest{
-			Address: address,
+			Address: repoRes.Repository.Owner.Id,
 		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -219,11 +227,8 @@ func UploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Calculate current pending uploads for this user
-		pendingSize := calculatePendingUploadsSize(address)
-
 		var oldSize int64
-		if data.Action == "update-release" {
+		if data.Action == "edit-release" {
 			// check asset with same name already exists
 			res, err := queryClient.Storage.RepositoryReleaseAsset(context.Background(), &storagetypes.QueryRepositoryReleaseAssetRequest{
 				RepositoryId: repoId,
@@ -235,15 +240,26 @@ func UploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			oldSize = int64(res.ReleaseAsset.Size_)
+
+			releaseRes, err := queryClient.Gitopia.RepositoryRelease(context.Background(), &types.QueryGetRepositoryReleaseRequest{
+				Id:             repoRes.Repository.Owner.Id,
+				RepositoryName: repoRes.Repository.Name,
+				TagName:        data.TagName,
+			})
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			// remove confirmed uploads from pending uploads
+			for _, attachment := range releaseRes.Release.Attachments {
+				token := generateUploadToken(address, attachment.Sha)
+				delete(pendingUploads, token)
+			}
 		}
 
-		repoRes, err := queryClient.Gitopia.Repository(context.Background(), &types.QueryGetRepositoryRequest{
-			Id: repoId,
-		})
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
+		// Calculate current pending uploads for this user
+		pendingSize := calculatePendingUploadsSize(address, repoId, data.TagName)
 
 		// Calculate storage delta including pending uploads
 		storageDelta := handler.Size - oldSize
@@ -400,7 +416,7 @@ func GetAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 // Helper functions for pending upload management
 
 func generateUploadToken(address, sha string) string {
-	tokenData := fmt.Sprintf("%s:%s:%d", address, sha, time.Now().UnixNano())
+	tokenData := fmt.Sprintf("%s:%s", address, sha)
 	hash := sha256.Sum256([]byte(tokenData))
 	return hex.EncodeToString(hash[:])
 }
@@ -409,10 +425,10 @@ func storePendingUpload(token string, upload *PendingUpload) {
 	pendingUploads[token] = upload
 }
 
-func calculatePendingUploadsSize(address string) int64 {
+func calculatePendingUploadsSize(address string, repoId uint64, tagName string) int64 {
 	var totalSize int64
 	for _, upload := range pendingUploads {
-		if upload.Address == address && time.Now().Before(upload.ExpiresAt) {
+		if upload.Address == address && upload.RepositoryId == repoId && upload.TagName == tagName && time.Now().Before(upload.ExpiresAt) {
 			totalSize += upload.Size
 		}
 	}
