@@ -227,6 +227,18 @@ func (g GitopiaProxy) RepositoryReleaseAsset(ctx context.Context, repositoryId u
 	return resp.ReleaseAsset, nil
 }
 
+func (g GitopiaProxy) RepositoryReleaseAssets(ctx context.Context, repositoryId uint64, tag string) ([]storagetypes.ReleaseAsset, error) {
+	resp, err := g.gc.QueryClient().Storage.RepositoryReleaseAssets(ctx, &storagetypes.QueryRepositoryReleaseAssetsRequest{
+		RepositoryId: repositoryId,
+		Tag:          tag,
+	})
+	if err != nil {
+		return nil, errors.WithMessage(err, "query error")
+	}
+
+	return resp.ReleaseAssets, nil
+}
+
 func (g GitopiaProxy) RepositoryPackfile(ctx context.Context, repositoryId uint64) (storagetypes.Packfile, error) {
 	resp, err := g.gc.QueryClient().Storage.RepositoryPackfile(ctx, &storagetypes.QueryRepositoryPackfileRequest{
 		RepositoryId: repositoryId,

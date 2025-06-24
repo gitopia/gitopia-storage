@@ -211,15 +211,13 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 	existingAssets := make(map[string]storagetypes.ReleaseAsset)
 	if eventType == EventUpdateReleaseType || eventType == EventDeleteReleaseType {
 		// Query existing release assets
-		for _, attachment := range event.Attachments {
-			asset, err := h.gc.RepositoryReleaseAsset(ctx, event.RepositoryId, event.Tag, attachment.Name)
-			if err != nil && !strings.Contains(err.Error(), "release asset not found") {
-				return errors.WithMessage(err, "error querying release assets")
-			}
+		assets, err := h.gc.RepositoryReleaseAssets(ctx, event.RepositoryId, event.Tag)
+		if err != nil && !strings.Contains(err.Error(), "release asset not found") {
+			return errors.WithMessage(err, "error querying release assets")
+		}
 
-			if asset.Name != "" {
-				existingAssets[asset.Name] = asset
-			}
+		for _, asset := range assets {
+			existingAssets[asset.Name] = asset
 		}
 	}
 
@@ -291,7 +289,7 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 						"asset":         existingAsset.Name,
 						"repository_id": event.RepositoryId,
 						"tag":           event.Tag,
-					}).Error("failed to delete attachment")
+					}).Error("failed to delete release attachment")
 					continue
 				}
 
@@ -309,6 +307,7 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 						"repository_id": event.RepositoryId,
 						"tag":           event.Tag,
 					}).Error("failed to get attachment reference count")
+					continue
 				}
 				if refCount == 0 {
 					if err := h.unpinAttachment(ctx, existingAsset); err != nil {
@@ -316,7 +315,7 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 							"asset":         existingAsset.Name,
 							"repository_id": event.RepositoryId,
 							"tag":           event.Tag,
-						}).Error("failed to unpin attachment")
+						}).Error("failed to unpin release attachment")
 						continue
 					}
 
@@ -387,6 +386,7 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 							"repository_id": event.RepositoryId,
 							"tag":           event.Tag,
 						}).Error("failed to get release attachment reference count")
+						continue
 					}
 					if refCount == 0 {
 						if err := h.unpinAttachment(ctx, existingAsset); err != nil {
@@ -413,7 +413,7 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 						"attachment":    attachment.Name,
 						"repository_id": event.RepositoryId,
 						"tag":           event.Tag,
-					}).Error("failed to pin attachment")
+					}).Error("failed to pin release attachment")
 					continue
 				}
 
