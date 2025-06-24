@@ -140,22 +140,42 @@ func (h *ReleaseAssetUpdatedEventHandler) Process(ctx context.Context, event Rel
 		name := fmt.Sprintf("release-%d-%s-%s-%s", event.RepositoryId, event.Tag, event.Name, event.NewSha256)
 		resp, err := h.pinataClient.PinFile(ctx, releaseAssetPath, name)
 		if err != nil {
-			logger.FromContext(ctx).WithError(err).Error("failed to pin file to Pinata")
+			logger.FromContext(ctx).WithFields(logrus.Fields{
+				"repository_id": event.RepositoryId,
+				"tag":           event.Tag,
+				"name":          event.Name,
+				"cid":           event.NewCid,
+			}).WithError(err).Error("failed to pin file to Pinata")
 			// Don't fail the process, just log the error
 		} else {
 			logger.FromContext(ctx).WithFields(logrus.Fields{
-				"cid":       event.NewCid,
-				"pinata_id": resp.Data.ID,
+				"repository_id": event.RepositoryId,
+				"tag":           event.Tag,
+				"name":          event.Name,
+				"cid":           event.NewCid,
+				"pinata_id":     resp.Data.ID,
 			}).Info("successfully pinned to Pinata")
 		}
 	}
 
 	// Unpin old packfile from Pinata if enabled
-	if h.pinataClient != nil && event.OldCid != "" && event.OldCid != event.NewCid {
-		name := fmt.Sprintf("release-%d-%s-%s-%s", event.RepositoryId, event.Tag, event.Name, event.OldSha256)
-		err := h.pinataClient.UnpinFile(ctx, name)
-		if err != nil {
-			logger.FromContext(ctx).WithError(err).Error("failed to unpin file from Pinata")
+	refCount, err := h.gc.StorageCidReferenceCount(ctx, event.OldCid)
+	if err != nil {
+		logger.FromContext(ctx).WithError(err).Error("failed to get attachment reference count")
+		return err
+	}
+	if refCount == 0 {
+		if h.pinataClient != nil && event.OldCid != "" && event.OldCid != event.NewCid {
+			name := fmt.Sprintf("release-%d-%s-%s-%s", event.RepositoryId, event.Tag, event.Name, event.OldSha256)
+			err := h.pinataClient.UnpinFile(ctx, name)
+			if err != nil {
+				logger.FromContext(ctx).WithFields(logrus.Fields{
+					"repository_id": event.RepositoryId,
+					"tag":           event.Tag,
+					"name":          event.Name,
+					"cid":           event.OldCid,
+				}).WithError(err).Error("failed to unpin file from Pinata")
+			}
 		}
 	}
 

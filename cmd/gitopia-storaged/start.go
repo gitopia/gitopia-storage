@@ -33,6 +33,7 @@ const (
 	ChallengeCreatedQuery          = "tm.event='NewBlock' AND gitopia.gitopia.storage.EventChallengeCreated.challenge_id EXISTS"
 	PackfileUpdatedQuery           = "tm.event='Tx' AND gitopia.gitopia.storage.EventPackfileUpdated.repository_id EXISTS"
 	ReleaseAssetUpdatedQuery       = "tm.event='Tx' AND gitopia.gitopia.storage.EventReleaseAssetUpdated.repository_id EXISTS"
+	ReleaseAssetDeletedQuery       = "tm.event='Tx' AND gitopia.gitopia.storage.EventReleaseAssetDeleted.repository_id EXISTS"
 	CreateReleaseQuery             = "tm.event='Tx' AND message.action='CreateRelease'"
 	UpdateReleaseQuery             = "tm.event='Tx' AND message.action='UpdateRelease'"
 	DeleteReleaseQuery             = "tm.event='Tx' AND message.action='DeleteRelease'"
@@ -197,6 +198,12 @@ func start(cmd *cobra.Command, args []string) error {
 			return
 		}
 
+		radtmc, err := gitopia.NewWSEvents(ctx, ReleaseAssetDeletedQuery)
+		if err != nil {
+			eventErrChan <- errors.WithMessage(err, "tm error")
+			return
+		}
+
 		mcc, err := consumer.NewClient("invokeMergePullRequestEvent")
 		if err != nil {
 			eventErrChan <- errors.WithMessage(err, "error creating consumer client")
@@ -214,6 +221,7 @@ func start(cmd *cobra.Command, args []string) error {
 		challengeHandler := handler.NewChallengeEventHandler(gp)
 		packfileUpdatedHandler := handler.NewPackfileUpdatedEventHandler(gp)
 		releaseAssetUpdatedHandler := handler.NewReleaseAssetUpdatedEventHandler(gp)
+		releaseAssetDeletedHandler := handler.NewReleaseAssetDeletedEventHandler(gp)
 		releaseHandler := handler.NewReleaseEventHandler(gp, cl)
 		daoReleaseHandler := handler.NewDaoCreateReleaseEventHandler(gp, cl)
 
@@ -257,11 +265,12 @@ func start(cmd *cobra.Command, args []string) error {
 		})
 
 		// Only subscribe to packfile and release asset events if external pinning is enabled
-		var packfileUpdatedDone, releaseAssetUpdatedDone <-chan struct{}
-		var packfileUpdatedSubscribeErr, releaseAssetUpdatedSubscribeErr <-chan error
+		var packfileUpdatedDone, releaseAssetUpdatedDone, releaseAssetDeletedDone <-chan struct{}
+		var packfileUpdatedSubscribeErr, releaseAssetUpdatedSubscribeErr, releaseAssetDeletedSubscribeErr <-chan error
 		if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
 			packfileUpdatedDone, packfileUpdatedSubscribeErr = putmc.Subscribe(ctx, packfileUpdatedHandler.Handle)
 			releaseAssetUpdatedDone, releaseAssetUpdatedSubscribeErr = rautmc.Subscribe(ctx, releaseAssetUpdatedHandler.Handle)
+			releaseAssetDeletedDone, releaseAssetDeletedSubscribeErr = radtmc.Subscribe(ctx, releaseAssetDeletedHandler.Handle)
 		}
 
 		select {
@@ -292,6 +301,14 @@ func start(cmd *cobra.Command, args []string) error {
 		case <-releaseAssetUpdatedDone:
 			if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
 				logger.FromContext(ctx).Info("release asset updated done")
+			}
+		case err = <-releaseAssetDeletedSubscribeErr:
+			if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
+				eventErrChan <- errors.WithMessage(err, "release asset deleted tm subscribe error")
+			}
+		case <-releaseAssetDeletedDone:
+			if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
+				logger.FromContext(ctx).Info("release asset deleted done")
 			}
 		case err = <-createReleaseSubscribeErr:
 			eventErrChan <- errors.WithMessage(err, "create release tm subscribe error")
