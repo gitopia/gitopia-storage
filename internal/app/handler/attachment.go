@@ -89,6 +89,11 @@ func UploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Get signature from form data
+		if len(r.MultipartForm.Value["signature"]) == 0 {
+			http.Error(w, "Signature is required", http.StatusBadRequest)
+			return
+		}
+
 		signature := r.MultipartForm.Value["signature"][0]
 		if signature == "" {
 			http.Error(w, "Signature is required", http.StatusBadRequest)
