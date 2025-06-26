@@ -1,87 +1,68 @@
-version: '3.4'
-
-# This is an example docker-compose file to quickly test an IPFS Cluster
-# with multiple peers on a contained environment.
-
-# It runs 3 cluster peers (cluster0, cluster1...) attached to kubo daemons
-# (ipfs0, ipfs1...) using the CRDT consensus component. Cluster peers
-# autodiscover themselves using mDNS on the docker internal network.
-#
-# To interact with the cluster use "ipfs-cluster-ctl" (the cluster0 API port is
-# exposed to the locahost. You can also "docker exec -ti cluster0 sh" and run
-# it from the container. "ipfs-cluster-ctl peers ls" should show all 3 peers a few
-# seconds after start.
-#
-# For persistence, a "compose" folder is created and used to store configurations
-# and states. This can be used to edit configurations in subsequent runs. It looks
-# as follows:
-#
-# compose/
-# |-- cluster0
-# |-- cluster1
-# |-- ...
-# |-- ipfs0
-# |-- ipfs1
-# |-- ...
-#
-# During the first start, default configurations are created for all peers.
+version: '3.8'
 
 services:
   ipfs:
     container_name: ipfs
-    image: ipfs/kubo:release
+    image: ipfs/kubo:v0.25.0 # Use a specific version
     ports:
       - "4001:4001" # ipfs swarm
       - "5001:5001" # ipfs api
       - "8080:8080" # ipfs gateway
     volumes:
-      - ./data/ipfs:/data/ipfs
+      - ipfs_data:/data/ipfs
     networks:
-      - gitopia-storage
+      - gitopia-network
 
   cluster:
-    container_name: cluster
-    image: ipfs/ipfs-cluster:latest
+    container_name: ipfs-cluster
+    image: ipfs/ipfs-cluster:v1.1.0 # Use a specific version
     depends_on:
       - ipfs
     environment:
-      CLUSTER_PEERNAME: ${CLUSTER_PEERNAME:-storage-provider}
-      CLUSTER_SECRET: ${CLUSTER_SECRET} # Required - Get from Gitopia team
-      CLUSTER_IPFSHTTP_NODEMULTIADDRESS: /dns4/ipfs/tcp/5001
-      CLUSTER_CRDT_TRUSTEDPEERS: '*' # Trust all peers in Cluster
-      CLUSTER_RESTAPI_HTTPLISTENMULTIADDRESS: /ip4/0.0.0.0/tcp/9094 # Expose API
-      CLUSTER_MONITORPINGINTERVAL: 2s # Speed up peer discovery
+      # Configuration via environment variables. See https://ipfscluster.io/documentation/reference/configuration/
+      - CLUSTER_PEERNAME=${CLUSTER_PEERNAME:-cluster0}
+      - CLUSTER_SECRET=${CLUSTER_SECRET:?err_secret_not_set}
+      - CLUSTER_IPFSHTTP_NODEMULTIADDRESS=/dns4/ipfs/tcp/5001
+      - CLUSTER_CRDT_TRUSTEDPEERS=${CLUSTER_TRUSTED_PEERS:-*}
+      - CLUSTER_RESTAPI_HTTPLISTENMULTIADDRESS=/ip4/0.0.0.0/tcp/9094
     ports:
       - "9094:9094" # Cluster API
-      - "9095:9095" # Cluster IPFS Proxy endpoint
-      - "9096:9096" # Cluster swarm endpoint
+      - "9096:9096" # Cluster swarm
     volumes:
-      - ./data/cluster:/data/ipfs-cluster
+      - cluster_data:/data/ipfs-cluster
     networks:
-      - gitopia-storage
+      - gitopia-network
 
   gitopia-storage:
     container_name: gitopia-storage
-    image: gitopia/gitopia-storage:latest
+    # Build from local Dockerfile or use a pre-built image
+    build: .
+    # image: gitopia/gitopia-storage:latest
     depends_on:
       - cluster
-    environment:
-      - IPFS_CLUSTER_PEER_HOST=cluster
-      - IPFS_CLUSTER_PEER_PORT=9094
-      - IPFS_HOST=ipfs
-      - IPFS_PORT=5001
-      - ENABLE_EXTERNAL_PINNING=${ENABLE_EXTERNAL_PINNING:-false}
-      - PINATA_API_KEY=${PINATA_API_KEY:-}
-      - PINATA_SECRET_KEY=${PINATA_SECRET_KEY:-}
     ports:
-      - "5000:5000"
+      - "5002:5000"
+    environment:
+      # This entrypoint script will import the key on startup
+      - GITOPIA_OPERATOR_MNEMONIC=${GITOPIA_OPERATOR_MNEMONIC:?err_mnemonic_not_set}
     volumes:
+      # Map host directories for persistent git data.
+      # To use an external disk, change the host path. E.g., /mnt/my-disk/repos:/var/repos
       - ./data/repos:/var/repos
       - ./data/attachments:/var/attachments
       - ./data/lfs-objects:/var/lfs-objects
+      # Optional: Mount a custom config file
+      # - ./my_config.toml:/etc/gitopia-storage/config.toml
     networks:
-      - gitopia-storage
+      - gitopia-network
+    # The new entrypoint handles key import, then starts the service
+    entrypoint: supervisord -c /etc/supervisord.conf
+
+
+volumes:
+  ipfs_data:
+  cluster_data:
 
 networks:
-  gitopia-storage:
-    name: gitopia-storage
+  gitopia-network:
+    name: gitopia-network

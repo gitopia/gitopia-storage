@@ -36,4 +36,4 @@ go.sum: go.mod
 		GO111MODULE=on go mod verify
 
 docker-build-gitopia-storage:
-	@docker build --build-arg GITOPIA_ENV=$(GITOPIA_ENV) -t gitopia/gitopia-storage -f Dockerfile .
+	@docker build -t gitopia/gitopia-storage -f Dockerfile .

@@ -8,8 +8,8 @@ require (
 	cosmossdk.io/errors v1.0.1
 	github.com/buger/jsonparser v1.1.1
 	github.com/cosmos/cosmos-sdk v0.47.13
-	github.com/gitopia/gitopia-go v0.6.2
-	github.com/gitopia/gitopia/v6 v6.0.0-rc.1
+	github.com/gitopia/gitopia-go v0.7.0-rc
+	github.com/gitopia/gitopia/v6 v6.0.0-rc.2
 	github.com/gitopia/go-git/v5 v5.4.3-0.20221011074003-f70479dc646c
 	github.com/ipfs-cluster/ipfs-cluster v1.1.2
 	github.com/ipfs/boxo v0.27.4
@@ -348,5 +348,3 @@ require (
 replace golang.org/x/exp => golang.org/x/exp v0.0.0-20230711153332-06a737ee72cb
 
 replace github.com/multiformats/go-multiaddr => github.com/multiformats/go-multiaddr v0.10.1
-
-replace github.com/gitopia/gitopia-go => ../gitopia-go
