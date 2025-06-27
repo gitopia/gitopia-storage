@@ -23,5 +23,6 @@ func NewRootCmd() *cobra.Command {
 	rootCmd.AddCommand(NewStartCmd())
 	rootCmd.AddCommand(keys.Commands(viper.GetString("WORKING_DIR")))
 	rootCmd.AddCommand(registerStorageProviderCmd)
+	rootCmd.AddCommand(NewGetIpfsClusterPeerAddressesCmd())
 	return rootCmd
 }

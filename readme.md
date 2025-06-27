@@ -10,13 +10,25 @@ The Gitopia Storage Provider is a self-hosted server that provides storage for G
 - **Disk:** 4TB
 
 ### Storage
-The data is stored in three main directories:
-- **/var/repos:** Stores the bare Git repositories. This is where all git objects, refs, and hooks reside.
-- **/var/lfs-objects:** Stores Git LFS (Large File Storage) objects.
-- **/var/attachments:** Stores attachments for releases, issues, and pull requests.
+
+The Gitopia Storage Provider leverages a layered storage architecture, with the primary and most significant storage requirement being the IPFS data directory. This ensures all repository content is decentralized, persistent, and content-addressable, while local directories act as caches to optimize performance.
+
+- **IPFS Data Directory:**
+  - The main storage location for all repository data, LFS objects, and attachments is the IPFS data directory (typically `~/.ipfs` inside the container or mapped to a host directory). This directory should be allocated the majority of your disk space, as it is responsible for persisting and pinning all content.
+  - For production, it is strongly recommended to map the IPFS data directory to a dedicated, high-performance external disk (such as an NVMe SSD) for optimal reliability and speed.
+
+- **Cache Directories:**
+  - **/var/repos:** Acts as a cache for bare Git repositories (git objects, refs, and hooks). Storage usage depends on your cache configuration and retention policy.
+  - **/var/lfs-objects:** Stores Git LFS (Large File Storage) objects. This can be configured to point to a preferred directory.
+  - **/var/attachments:** Caches attachments (releases, issues, pull requests). Storage usage is also determined by your cache settings.
+  - These directories are configurable and serve to speed up access and operations. Their disk usage can be tuned by adjusting cache size and retention policies. They do not serve as the main persistent storage.
+
+> **Note:** Only the IPFS data directory is responsible for long-term, reliable storage. The cache directories are secondary and can be sized according to your operational needs.
 
 **Planning for Storage:**
-- **Mounting External Disks:** For production environments, it is strongly recommended to mount a dedicated, high-performance external disk (e.g., NVMe SSD) to the host machine. You can then point the data directories to this mount point. For Docker, you would map the host mount point to the container volumes. For a manual install, you would set `GIT_REPOS_DIR`, `LFS_OBJECTS_DIR`, and `ATTACHMENT_DIR` in your config file to paths on the mounted disk.
+- Allocate most disk space to the IPFS data directory.
+- Adjust cache directory sizes and policies as appropriate for your environment.
+- For Docker, map the relevant host directories to the container volumes. For manual installs, set `GIT_REPOS_DIR`, `LFS_OBJECTS_DIR`, and `ATTACHMENT_DIR` in your config file to desired paths.
 
 ### Software Dependencies
 - [git](httpss://git-scm.com/)
@@ -135,7 +147,26 @@ Install Go, Git, IPFS Kubo, and IPFS Cluster by following their official documen
     }
     ```
     - **`secret`**: A shared secret required to join the cluster. You must get this from the Gitopia team. It prevents unauthorized peers from connecting.
-    - **`trusted_peers`**: An explicit list of peer IDs that are allowed to make changes to the cluster's pinset. This is a crucial security measure. Using `"*"` is **highly discouraged** as it allows *any* peer in the cluster to pin or unpin content. You should get the list of trusted peer multiaddresses from the Gitopia team.
+    - **`trusted_peers`**: An explicit list of peer IDs that are allowed to make changes to the cluster's pinset. This is a crucial security measure. Using `"*"` is **highly discouraged** as it allows *any* peer in the cluster to pin or unpin content.
+
+You can retrieve the multiaddresses of all active storage providers (to use as trusted peers) by running the following command:
+
+```sh
+./gitopia-storaged get-ipfs-cluster-peer-addresses
+```
+
+This command will output a comma-separated list of peer multiaddresses. Copy these addresses and add them to the `trusted_peers` field in your IPFS Cluster configuration file (usually `service.json`).
+
+**Example:**
+
+```
+"trusted_peers": [
+  "/ip4/1.2.3.4/tcp/9096/p2p/12D3KooW...",
+  "/ip4/5.6.7.8/tcp/9096/p2p/12D3KooX..."
+]
+```
+
+Be sure to update this list whenever the set of active storage providers changes.
 
 3.  Start the IPFS Cluster service. We recommend using `systemd`. See the [Production Setup (systemd)](#production-setup-systemd) section. For now, you can start it manually with the bootstrap peers provided by the Gitopia team:
     ```sh

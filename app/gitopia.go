@@ -314,3 +314,12 @@ func (g GitopiaProxy) DeleteReleaseAsset(ctx context.Context, repositoryId uint6
 
 	return nil
 }
+
+func (g GitopiaProxy) ActiveProviders(ctx context.Context) ([]storagetypes.Provider, error) {
+	resp, err := g.gc.QueryClient().Storage.ActiveProviders(ctx, &storagetypes.QueryActiveProvidersRequest{})
+	if err != nil {
+		return nil, errors.WithMessage(err, "query error")
+	}
+
+	return resp.Providers, nil
+}
