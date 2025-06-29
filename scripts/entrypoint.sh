@@ -7,7 +7,5 @@ set -e
 # The variable is mandatory, checked by docker-compose.
 echo "$GITOPIA_OPERATOR_MNEMONIC" | gitopia-storaged keys add gitopia-storage --keyring-backend test --recover
 
-export ENV="PRODUCTION"
-
 # Start the main application
 exec gitopia-storaged start --from gitopia-storage --keyring-backend test "$@"

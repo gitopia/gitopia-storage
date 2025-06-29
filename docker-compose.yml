@@ -35,9 +35,7 @@ services:
 
   gitopia-storage:
     container_name: gitopia-storage
-    # Build from local Dockerfile or use a pre-built image
-    build: .
-    # image: gitopia/gitopia-storage:latest
+    image: gitopia/gitopia-storage:latest
     depends_on:
       - cluster
     ports:

@@ -39,6 +39,10 @@ COPY config_prod.toml /app/config_prod.toml
 COPY scripts/entrypoint.sh /app/entrypoint.sh
 COPY scripts/supervisord.conf /etc/supervisord.conf
 
+RUN chmod +x /app/entrypoint.sh
+
+ENV ENV="PRODUCTION"
+
 # Switch to the non-root user
 USER gitopia
 
