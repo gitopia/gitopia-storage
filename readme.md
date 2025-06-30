@@ -87,9 +87,18 @@ You need to register your provider on the Gitopia blockchain. You only need to d
     ```sh
     # Replace <your-public-domain> with the public address of your server
     # Example: http://storage.mydomain.com:5000
+    # Replace <your-cluster-peer-multiaddress> with the multiaddress of your cluster peer
+    # You can get the multiaddress of your cluster peer by running the following command
+    # ipfs-cluster-ctl id
+    # Example: /ip4/104.244.178.22/tcp/9096/p2p/12D3KooWHWG333xgo3QnZTSP9trGmGBvs37JsqwiUz5XYHjMpgfA
     # The amount 1000000000000ulore is an example stake. Adjust as needed.
 
-    docker-compose exec gitopia-storage gitopia-storaged register-provider http://<your-public-domain>:5000 1000000000000ulore --from gitopia-storage --keyring-backend test --fees 200ulore
+    docker-compose exec gitopia-storage gitopia-storaged register-provider http://<your-public-domain>:5000 "My Provider Description" 1000000000000ulore <your-cluster-peer-multiaddress> --from gitopia-storage --keyring-backend test --fees 200ulore
+    ```
+
+    You can update the provider api url, description and multiaddress by running the following command:
+    ```sh
+    docker-compose exec gitopia-storage gitopia-storaged update-provider http://<your-public-domain>:5000 "New Provider Description" <your-cluster-peer-multiaddress> --from gitopia-storage --keyring-backend test --fees 200ulore
     ```
 
 Your storage provider is now set up and registered.
