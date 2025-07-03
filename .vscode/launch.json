@@ -4,29 +4,14 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-
         {
-            "name": "Launch git-server",
+            "name": "Launch gitopia-storaged",
             "type": "go",
             "request": "launch",
             "mode": "auto",
             "cwd": "${workspaceFolder}",
-            "program": "${workspaceFolder}",
-            "env":{
-                "ENV":"",
-                "PATH":"$PATH:/opt/homebrew/bin:/usr/bin",
-                "LIBRARY_PATH":"/opt/homebrew/lib/",
-                "CGO_ENABLED": "1"
-            }
-        },
-        {
-            "name": "Launch git-server-events",
-            "type": "go",
-            "request": "launch",
-            "mode": "auto",
-            "cwd": "${workspaceFolder}",
-            "program": "${workspaceFolder}/cmd/git-server-events",
-            "args": ["run", "--from", "git-server", "--keyring-backend", "test"]
+            "program": "${workspaceFolder}/cmd/gitopia-storaged",
+            "args": ["run", "--from", "gitopia-storage", "--keyring-backend", "test"]
         }
     ]
 }

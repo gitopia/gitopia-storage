@@ -1,11 +1,25 @@
 WEB_SERVER_PORT = 5000
-GITOPIA_ADDR = "gitopiad:9090"
-GIT_DIR = "/var/repos"
+GITOPIA_ADDR = "host.docker.internal:9100"
+GIT_REPOS_DIR = "/var/repos"
 LFS_OBJECTS_DIR = "/var/lfs-objects"
 GIT_SERVER_EXTERNAL_ADDR = "http://localhost:5001"
 ATTACHMENT_DIR = "/var/attachments"
-TM_ADDR = "http://gitopiad:26657"
+TM_ADDR = "http://host.docker.internal:26667"
 WORKING_DIR = "/src/app/"
 GAS_PRICES = "0.001ulore"
 CHAIN_ID = "localgitopia"
-FEE_GRANTER="gitopia12sjhqc3rqgvu3zpg8ekmwl005rp4ys58ekqg89"
+
+# IPFS Configuration
+IPFS_CLUSTER_PEER_HOST = "host.docker.internal"
+IPFS_CLUSTER_PEER_PORT = "9094"
+IPFS_HOST = "host.docker.internal"
+IPFS_PORT = "5001"
+ENABLE_EXTERNAL_PINNING = false
+PINATA_JWT = ""
+
+# Cache Configuration
+CACHE_REPO_MAX_AGE = "10m"
+CACHE_REPO_MAX_SIZE = 10737418240  # 10GB in bytes
+CACHE_ASSET_MAX_AGE = "10m"       # 10 minutes
+CACHE_ASSET_MAX_SIZE = 5368709120  # 5GB in bytes
+CACHE_CLEAR_INTERVAL = "1m"

@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gitopia/gitopia/v5/x/gitopia/types"
+	"github.com/gitopia/gitopia/v6/x/gitopia/types"
 	git "github.com/gitopia/go-git/v5"
 	"github.com/spf13/viper"
 )
@@ -83,13 +83,13 @@ func addCacheRepo(staging, cache string) error {
 }
 
 func CreateQuarantineRepo(baseRepositoryID uint64, headRepositoryID uint64, baseBranch string, headBranch string) (string, error) {
-	// Clone base repo
-	tmpBasePath, err := ioutil.TempDir(os.TempDir(), "merge-")
+	// Create temporary directory
+	tmpBasePath, err := os.MkdirTemp("", "merge-")
 	if err != nil {
-		log.Fatal(err) // TODO: fix crash on request specific failure
+		return "", err
 	}
 
-	gitDir := viper.GetString("GIT_DIR")
+	gitDir := viper.GetString("GIT_REPOS_DIR")
 	baseRepoPath := path.Join(gitDir, fmt.Sprintf("%v.git", baseRepositoryID))
 	headRepoPath := path.Join(gitDir, fmt.Sprintf("%v.git", headRepositoryID))
 
@@ -174,7 +174,7 @@ func CreateReadOnlyQuarantineRepo(baseRepositoryID uint64, headRepositoryID uint
 		log.Fatal(err)
 	}
 
-	gitDir := viper.GetString("GIT_DIR")
+	gitDir := viper.GetString("GIT_REPOS_DIR")
 	baseRepoPath := path.Join(gitDir, fmt.Sprintf("%v.git", baseRepositoryID))
 	headRepoPath := path.Join(gitDir, fmt.Sprintf("%v.git", headRepositoryID))
 
@@ -225,7 +225,7 @@ func CommitAndSignNoAuthor(pr types.PullRequest, message, signArg, quarantineRep
 
 func RunMergeCommand(prHead types.PullRequestHead, prBase types.PullRequestBase, cmd *exec.Cmd, quarantineRepoPath string) error {
 	cmd.Dir = quarantineRepoPath
-	out, err := cmd.Output()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		// Merge will leave a MERGE_HEAD file in the .git folder if there is a conflict
 		if _, statErr := os.Stat(filepath.Join(quarantineRepoPath, ".git", "MERGE_HEAD")); statErr == nil {

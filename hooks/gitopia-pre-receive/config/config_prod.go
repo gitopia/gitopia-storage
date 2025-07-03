@@ -3,5 +3,5 @@
 package config
 
 const (
-	GRPCHost = "grpc.gitopia.com:9090"
+	GRPCHost = "gitopia-grpc.polkachu.com:11390"
 )

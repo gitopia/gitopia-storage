@@ -3,28 +3,33 @@ package handler
 import (
 	"context"
 	"fmt"
-	"math"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
-	"strings"
-	"sync"
 	"time"
 
 	"github.com/buger/jsonparser"
-	"github.com/cosmos/cosmos-sdk/codec"
-	"github.com/cosmos/cosmos-sdk/types/query"
-	"github.com/cosmos/cosmos-sdk/types/tx"
-	"github.com/gitopia/git-server/app"
-	"github.com/gitopia/git-server/app/consumer"
-	"github.com/gitopia/git-server/utils"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/gitopia/gitopia-go/logger"
-	"github.com/gitopia/gitopia/v5/x/gitopia/types"
+	"github.com/gitopia/gitopia-storage/app"
+	"github.com/gitopia/gitopia-storage/app/consumer"
+	"github.com/gitopia/gitopia-storage/pkg/merkleproof"
+	"github.com/gitopia/gitopia-storage/utils"
+	"github.com/gitopia/gitopia/v6/x/gitopia/types"
+	ipfsclusterclient "github.com/ipfs-cluster/ipfs-cluster/api/rest/client"
+	"github.com/ipfs/boxo/files"
+	ipfspath "github.com/ipfs/boxo/path"
+	"github.com/ipfs/kubo/client/rpc"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+)
+
+const (
+	maxErrorLength  = 255
+	defaultTimeout  = 5 * time.Minute
+	merkleChunkSize = 256 * 1024
 )
 
 type InvokeMergePullRequestEvent struct {
@@ -33,6 +38,7 @@ type InvokeMergePullRequestEvent struct {
 	PullRequestIid uint64
 	TaskId         uint64
 	TxHeight       uint64
+	Provider       string
 }
 
 // tm event codec
@@ -78,11 +84,17 @@ func (e *InvokeMergePullRequestEvent) UnMarshal(eventBuf []byte) error {
 		return errors.Wrap(err, "error parsing height")
 	}
 
+	provider, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+types.EventAttributeProviderKey, "[0]")
+	if err != nil {
+		return errors.Wrap(err, "error parsing provider")
+	}
+
 	e.Creator = creator
 	e.RepositoryId = repositoryId
 	e.PullRequestIid = iid
 	e.TaskId = taskId
 	e.TxHeight = height
+	e.Provider = provider
 
 	return nil
 }
@@ -92,20 +104,14 @@ type InvokeMergePullRequestEventHandler struct {
 
 	cc consumer.Client
 
-	// commit offset only when backfill is complete
-	commitOffset bool
-	// written by backfill routine
-	// read by real time event processor routine
-	commitOffsetMu sync.RWMutex
-	offsetChan     chan uint64
+	ipfsClusterClient ipfsclusterclient.Client
 }
 
-func NewInvokeMergePullRequestEventHandler(g app.GitopiaProxy, c consumer.Client) InvokeMergePullRequestEventHandler {
+func NewInvokeMergePullRequestEventHandler(g app.GitopiaProxy, c consumer.Client, ipfsClusterClient ipfsclusterclient.Client) InvokeMergePullRequestEventHandler {
 	return InvokeMergePullRequestEventHandler{
-		gc:           g,
-		cc:           c,
-		offsetChan:   make(chan uint64),
-		commitOffset: false,
+		gc:                g,
+		cc:                c,
+		ipfsClusterClient: ipfsClusterClient,
 	}
 }
 
@@ -121,482 +127,444 @@ func (h *InvokeMergePullRequestEventHandler) Handle(ctx context.Context, eventBu
 		return errors.WithMessage(err, "error processing event")
 	}
 
-	commitOffset := func() bool {
-		h.commitOffsetMu.RLock()
-		defer h.commitOffsetMu.RUnlock()
-		return h.commitOffset
-	}()
-	if commitOffset {
-		err = h.cc.Commit(event.TxHeight)
-		if err != nil {
-			return errors.WithMessage(err, "error commiting tx height")
-		}
-	} else {
-		// send if there are any receivers listening
-		select {
-		case h.offsetChan <- event.TxHeight:
-		default:
-			// ignore if there are no receivers
-		}
-	}
 	return nil
 }
 
 func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event InvokeMergePullRequestEvent) error {
-	logger.FromContext(ctx).Info("process merge pull request event")
+	// Skip processing if message is not meant for this provider
+	if !h.gc.CheckProvider(event.Provider) {
+		return nil
+	}
 
+	h.logOperation(ctx, "process_merge_pull_request", map[string]interface{}{
+		"creator":          event.Creator,
+		"repository_id":    event.RepositoryId,
+		"pull_request_iid": event.PullRequestIid,
+		"task_id":          event.TaskId,
+		"tx_height":        event.TxHeight,
+	})
+
+	// Check task state
 	res, err := h.gc.Task(ctx, event.TaskId)
 	if err != nil {
-		return err
+		return h.handleError(ctx, err, event.TaskId, "task query error")
 	}
-	if res.State != types.StatePending { // Task is already processed
+	if res.State != types.StatePending {
 		return nil
 	}
 
-	haveAuthorization, err := h.gc.CheckGitServerAuthorization(ctx, event.Creator)
-	if err != nil {
-		return err
-	}
-	if !haveAuthorization {
-		logger.FromContext(ctx).
-			WithField("creator", event.Creator).
-			WithField("repository-id", event.RepositoryId).
-			WithField("pull-request-iid", event.PullRequestIid).
-			WithField("task-id", event.TaskId).
-			WithField("tx-height", event.TxHeight).
-			Info("skipping merge pull request, not authorized")
-		return nil
-	}
-
+	// Get pull request details
 	resp, err := h.gc.PullRequest(ctx, event.RepositoryId, event.PullRequestIid)
 	if err != nil {
-		err = errors.WithMessage(err, "query error")
-		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
-		if err2 != nil {
-			return errors.WithMessage(err2, "update task error")
-		}
-		return err
+		return h.handleError(ctx, err, event.TaskId, "pull request query error")
 	}
 
+	// Prepare repositories
+	cacheDir := viper.GetString("GIT_REPOS_DIR")
+	utils.LockRepository(resp.Base.RepositoryId)
+	defer utils.UnlockRepository(resp.Base.RepositoryId)
+
+	if resp.Base.RepositoryId != resp.Head.RepositoryId {
+		utils.LockRepository(resp.Head.RepositoryId)
+		defer utils.UnlockRepository(resp.Head.RepositoryId)
+	}
+	if err := h.prepareRepositories(ctx, resp, cacheDir); err != nil {
+		return h.handleError(ctx, err, event.TaskId, "repository preparation error")
+	}
+
+	// Get repository name
 	headRepositoryName, err := h.gc.RepositoryName(ctx, resp.Head.RepositoryId)
 	if err != nil {
-		err = errors.WithMessage(err, "query error")
-		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
-		if err2 != nil {
-			return errors.WithMessage(err2, "update task error")
-		}
-		return err
+		return h.handleError(ctx, err, event.TaskId, "repository name query error")
 	}
 
 	message := fmt.Sprintf("Merge pull request #%v from %s/%s", resp.Iid, headRepositoryName, resp.Head.Branch)
 
+	// Create quarantine repository
 	quarantineRepoPath, err := utils.CreateQuarantineRepo(resp.Base.RepositoryId, resp.Head.RepositoryId, resp.Base.Branch, resp.Head.Branch)
 	if err != nil {
-		err = errors.WithMessage(err, "create quarantine repo error")
-		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
-		if err2 != nil {
-			return errors.WithMessage(err2, "update task error")
-		}
-		return err
+		return h.handleError(ctx, err, event.TaskId, "create quarantine repo error")
 	}
 	defer os.RemoveAll(quarantineRepoPath)
 
-	baseBranch := "base"
-	trackingBranch := "tracking"
-	stagingBranch := "staging"
-
-	// Read base branch index
 	cmd := exec.Command("git", "read-tree", "HEAD")
 	cmd.Dir = quarantineRepoPath
-	out, err := cmd.Output()
-	if err != nil {
-		err = errors.WithMessage(err, "read base branch error")
-		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
-		if err2 != nil {
-			return errors.WithMessage(err2, "update task error")
-		}
-		return err
+	if err := h.runGitCommandWithTimeout(ctx, cmd, defaultTimeout); err != nil {
+		return errors.WithMessage(err, "git read-tree error")
 	}
 
-	commitTimeStr := time.Now().Format(time.RFC3339)
+	// Prepare environment variables
+	env := h.prepareGitEnv(event.Creator)
 
-	// Because this may call hooks we should pass in the environment
-	env := append(os.Environ(),
-		"GIT_AUTHOR_NAME="+event.Creator,
-		"GIT_AUTHOR_EMAIL=<>",
-		"GIT_AUTHOR_DATE="+commitTimeStr,
-		"GIT_COMMITTER_NAME="+event.Creator,
-		"GIT_COMMITTER_EMAIL=<>",
-		"GIT_COMMITTER_DATE="+commitTimeStr,
-	)
-
-	// Currently only merge style merge is enabled
+	// Perform merge
 	mergeStyle := utils.MergeStyleMerge
-
-	// Merge commits.
-	switch mergeStyle {
-	case utils.MergeStyleMerge:
-		cmd := exec.Command("git", "merge", "--no-ff", "--no-commit", trackingBranch)
-		cmd.Env = env
-		if err := utils.RunMergeCommand(*resp.Head, *resp.Base, cmd, quarantineRepoPath); err != nil {
-			err = errors.WithMessage(err, "merge error")
-			err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
-			if err2 != nil {
-				return errors.WithMessage(err2, "update task error")
-			}
-			return err
-		}
-
-		if err := utils.CommitAndSignNoAuthor(resp, message, "", quarantineRepoPath, env); err != nil {
-			err = errors.WithMessage(err, "merge commit error")
-			// truncate error message to less than 255 characters
-			if len(err.Error()) > 255 {
-				err = errors.New(err.Error()[:255])
-			}
-			err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
-			if err2 != nil {
-				return errors.WithMessage(err2, "update task error")
-			}
-			return err
-		}
-	case utils.MergeStyleRebase:
-		fallthrough
-	case utils.MergeStyleRebaseUpdate:
-		fallthrough
-	case utils.MergeStyleRebaseMerge:
-		// Checkout head branch
-		cmd = exec.Command("git", "checkout", "-b", stagingBranch, trackingBranch)
-		cmd.Dir = quarantineRepoPath
-		out, err = cmd.Output()
-		if err != nil {
-			err = errors.WithMessage(err, "git checkout error")
-			err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
-			if err2 != nil {
-				return errors.WithMessage(err2, "update task error")
-			}
-			return err
-		}
-
-		// Rebase before merging
-		cmd = exec.Command("git", "rebase", baseBranch)
-		cmd.Dir = quarantineRepoPath
-		out, err = cmd.Output()
-		if err != nil {
-			// Rebase will leave a REBASE_HEAD file in .git if there is a conflict
-			if _, statErr := os.Stat(filepath.Join(quarantineRepoPath, ".git", "REBASE_HEAD")); statErr == nil {
-				ok := false
-				failingCommitPaths := []string{
-					filepath.Join(quarantineRepoPath, ".git", "rebase-apply", "original-commit"), // Git < 2.26
-					filepath.Join(quarantineRepoPath, ".git", "rebase-merge", "stopped-sha"),     // Git >= 2.26
-				}
-				for _, failingCommitPath := range failingCommitPaths {
-					if _, statErr := os.Stat(filepath.Join(failingCommitPath)); statErr == nil {
-						_, readErr := os.ReadFile(filepath.Join(failingCommitPath))
-						if readErr != nil {
-							// Abandon this attempt to handle the error
-						}
-						ok = true
-						break
-					}
-				}
-				if !ok {
-					err = errors.WithMessage(err, "git rebase error")
-					err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
-					if err2 != nil {
-						return errors.WithMessage(err2, "update task error")
-					}
-					return err
-				}
-				err = errors.WithMessage(err, "rebase conflict error")
-				err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
-				if err2 != nil {
-					return errors.WithMessage(err2, "update task error")
-				}
-				return err
-			}
-			err = errors.WithMessage(err, "rebase error")
-			err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
-			if err2 != nil {
-				return errors.WithMessage(err2, "update task error")
-			}
-			return err
-		}
-
-		// not need merge, just update by rebase. so skip
-		if mergeStyle == utils.MergeStyleRebaseUpdate {
-			break
-		}
-
-		// Checkout base branch again
-		cmd = exec.Command("git", "checkout", baseBranch)
-		cmd.Dir = quarantineRepoPath
-		out, err = cmd.Output()
-		if err != nil {
-			err = errors.WithMessage(err, "git checkout error")
-			err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
-			if err2 != nil {
-				return errors.WithMessage(err2, "update task error")
-			}
-			return err
-		}
-
-		cmd = exec.Command("git", "merge")
-		if mergeStyle == utils.MergeStyleRebase {
-			cmd.Args = append(cmd.Args, "--ff-only")
-		} else {
-			cmd.Args = append(cmd.Args, "--no-ff", "--no-commit")
-		}
-		cmd.Args = append(cmd.Args, stagingBranch)
-
-		// Prepare merge with commit
-		if err := utils.RunMergeCommand(*resp.Head, *resp.Base, cmd, quarantineRepoPath); err != nil {
-			err = errors.WithMessage(err, "git merge error")
-			err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
-			if err2 != nil {
-				return errors.WithMessage(err2, "update task error")
-			}
-			return err
-		}
-		if mergeStyle == utils.MergeStyleRebaseMerge {
-			if err := utils.CommitAndSignNoAuthor(resp, message, "", quarantineRepoPath, env); err != nil {
-				err = errors.WithMessage(err, "merge commit error")
-				err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
-				if err2 != nil {
-					return errors.WithMessage(err2, "update task error")
-				}
-				return err
-			}
-		}
-	case utils.MergeStyleSquash:
-		// Merge with squash
-		cmd := exec.Command("git", "merge", "--squash", trackingBranch)
-		if err := utils.RunMergeCommand(*resp.Head, *resp.Base, cmd, quarantineRepoPath); err != nil {
-			err = errors.WithMessage(err, "git merge --squash error")
-			err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
-			if err2 != nil {
-				return errors.WithMessage(err2, "update task error")
-			}
-			return err
-		}
-
-		cmd = exec.Command("git", "commit", fmt.Sprintf("--author='%s <%s>'", event.Creator, "<>"), "-m", message)
-		cmd.Env = env
-		cmd.Dir = quarantineRepoPath
-		out, err = cmd.Output()
-		if err != nil {
-			err = errors.WithMessage(err, "git commit error")
-			err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
-			if err2 != nil {
-				return errors.WithMessage(err2, "update task error")
-			}
-			return err
-		}
-
-	default:
-		err = fmt.Errorf("Invalid merge style: %v", mergeStyle)
-		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
-		if err2 != nil {
-			return errors.WithMessage(err2, "update task error")
-		}
-		return err
+	if err := h.performMerge(ctx, mergeStyle, resp, quarantineRepoPath, env, message); err != nil {
+		return h.handleError(ctx, err, event.TaskId, "merge operation error")
 	}
 
-	mergeCommitSha, err := utils.GetFullCommitSha(quarantineRepoPath, baseBranch)
+	// Get merge commit SHA
+	mergeCommitSha, err := utils.GetFullCommitSha(quarantineRepoPath, "base")
 	if err != nil {
-		err = errors.WithMessage(err, "merge commit sha error")
-		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
-		if err2 != nil {
-			return errors.WithMessage(err2, "update task error")
-		}
-		return err
+		return h.handleError(ctx, err, event.TaskId, "merge commit sha error")
 	}
 
-	env = append(os.Environ(),
-		"GIT_AUTHOR_NAME="+event.Creator,
-		"GIT_AUTHOR_EMAIL=<>",
-		"GIT_COMMITTER_NAME="+event.Creator,
-		"GIT_COMMITTER_EMAIL=<>")
-
-	var pushCmd *exec.Cmd
-	if mergeStyle == utils.MergeStyleRebaseUpdate {
-		// force push the rebase result to head brach
-		pushCmd = exec.Command("git", "push", "-f", "head_repo", stagingBranch+":refs/heads/"+resp.Head.Branch)
-	} else {
-		pushCmd = exec.Command("git", "push", "origin", baseBranch+":refs/heads/"+resp.Base.Branch)
+	// Push changes
+	if err := h.pushChanges(ctx, resp, quarantineRepoPath, env, mergeStyle); err != nil {
+		return h.handleError(ctx, err, event.TaskId, "push changes error")
 	}
 
-	// Push back to upstream.
-	pushCmd.Env = env
-	pushCmd.Dir = quarantineRepoPath
-	out, err = pushCmd.Output()
-	if err != nil {
-		if strings.Contains(string(out), "non-fast-forward") {
-
-		} else if strings.Contains(string(out), "! [remote rejected]") {
-
-		}
-		err = errors.WithMessage(err, "git push error")
-		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
-		if err2 != nil {
-			return errors.WithMessage(err2, "update task error")
-		}
-		return err
+	// Handle IPFS operations
+	if err := h.handlePostMergeOperations(ctx, resp, cacheDir); err != nil {
+		return h.handleError(ctx, err, event.TaskId, "post-merge operations error")
 	}
 
-	err = h.gc.SetPullRequestState(ctx, event.Creator, event.RepositoryId, event.PullRequestIid, "MERGED", mergeCommitSha, event.TaskId)
-	if err != nil {
-		err = errors.WithMessage(err, "set pull request state error")
-		// truncate error message to less than 255 characters
-		if len(err.Error()) > 255 {
-			err = errors.New(err.Error()[:255])
-		}
-		err2 := h.gc.UpdateTask(ctx, event.Creator, event.TaskId, types.StateFailure, err.Error())
-		if err2 != nil {
-			return errors.WithMessage(err2, "update task error")
-		}
-		return err
+	// Update pull request state and repository branch reference
+	if err := h.gc.MergePullRequest(ctx, event.RepositoryId, event.PullRequestIid, mergeCommitSha, event.TaskId); err != nil {
+		return h.handleError(ctx, err, event.TaskId, "set pull request state error")
 	}
 
-	logger.FromContext(ctx).
-		WithField("creator", event.Creator).
-		WithField("repository-id", event.RepositoryId).
-		WithField("pull-request-id", event.PullRequestIid).
-		WithField("task-id", event.TaskId).
-		WithField("tx-height", event.TxHeight).
-		Info("merged pull request")
+	h.logOperation(ctx, "merge_completed", map[string]interface{}{
+		"creator":          event.Creator,
+		"repository_id":    event.RepositoryId,
+		"pull_request_iid": event.PullRequestIid,
+		"task_id":          event.TaskId,
+		"tx_height":        event.TxHeight,
+	})
 	return nil
 }
 
-// run asynchronously
-// read offset until which tx's are processed
-// fetch missed txs
-// fetch repository information for missed txs
-// process setRepositoryEvent
-func (h *InvokeMergePullRequestEventHandler) BackfillMissedEvents(ctx context.Context) (<-chan struct{}, chan error) {
-	errChan := make(chan error)
-	ctx, cancel := context.WithCancel(ctx)
-	go func() {
-		defer func() {
-			// notify backfill is done
-			func() {
-				h.commitOffsetMu.Lock()
-				defer h.commitOffsetMu.Unlock()
-				h.commitOffset = true
-			}()
-			cancel()
-		}()
+// prepareRepositories ensures repositories are cached and available
+func (h *InvokeMergePullRequestEventHandler) prepareRepositories(ctx context.Context, resp types.PullRequest, cacheDir string) error {
+	// Cache head repository
+	if err := utils.CacheRepository(resp.Head.RepositoryId, cacheDir); err != nil {
+		return errors.Wrap(err, "error caching head repository")
+	}
 
-		startHeight, err := h.cc.Offset()
+	// Cache base repository if different
+	if resp.Base.RepositoryId != resp.Head.RepositoryId {
+		if err := utils.CacheRepository(resp.Base.RepositoryId, cacheDir); err != nil {
+			return errors.Wrap(err, "error caching base repository")
+		}
+	}
+	return nil
+}
+
+// prepareGitEnv prepares environment variables for git operations
+func (h *InvokeMergePullRequestEventHandler) prepareGitEnv(creator string) []string {
+	commitTimeStr := time.Now().Format(time.RFC3339)
+	return append(os.Environ(),
+		"GIT_AUTHOR_NAME="+creator,
+		"GIT_AUTHOR_EMAIL=<>",
+		"GIT_AUTHOR_DATE="+commitTimeStr,
+		"GIT_COMMITTER_NAME="+creator,
+		"GIT_COMMITTER_EMAIL=<>",
+		"GIT_COMMITTER_DATE="+commitTimeStr,
+	)
+}
+
+// performMerge executes the merge operation based on the merge style
+func (h *InvokeMergePullRequestEventHandler) performMerge(ctx context.Context, mergeStyle utils.MergeStyle, resp types.PullRequest, quarantineRepoPath string, env []string, message string) error {
+	switch mergeStyle {
+	case utils.MergeStyleMerge:
+		return h.performMergeStyle(ctx, resp, quarantineRepoPath, env, message)
+	case utils.MergeStyleRebase:
+		return h.performRebaseStyle(ctx, resp, quarantineRepoPath, env, message)
+	case utils.MergeStyleSquash:
+		return h.performSquashStyle(ctx, resp, quarantineRepoPath, env, message)
+	default:
+		return fmt.Errorf("invalid merge style: %v", mergeStyle)
+	}
+}
+
+// pushChanges pushes the merged changes to the repository
+func (h *InvokeMergePullRequestEventHandler) pushChanges(ctx context.Context, resp types.PullRequest, quarantineRepoPath string, env []string, mergeStyle utils.MergeStyle) error {
+	var pushCmd *exec.Cmd
+	if mergeStyle == utils.MergeStyleRebaseUpdate {
+		pushCmd = exec.Command("git", "push", "-f", "head_repo", "staging:refs/heads/"+resp.Head.Branch)
+	} else {
+		pushCmd = exec.Command("git", "push", "origin", "base:refs/heads/"+resp.Base.Branch)
+	}
+
+	pushCmd.Env = env
+	pushCmd.Dir = quarantineRepoPath
+	return h.runGitCommandWithTimeout(ctx, pushCmd, defaultTimeout)
+}
+
+// handlePostMergeOperations handles operations after successful merge
+func (h *InvokeMergePullRequestEventHandler) handlePostMergeOperations(ctx context.Context, resp types.PullRequest, cacheDir string) error {
+	baseRepoPath := filepath.Join(cacheDir, fmt.Sprintf("%d.git", resp.Base.RepositoryId))
+
+	// Run git gc
+	cmd := exec.Command("git", "gc")
+	cmd.Dir = baseRepoPath
+	if err := h.runGitCommandWithTimeout(ctx, cmd, defaultTimeout); err != nil {
+		return errors.WithMessage(err, "git gc error")
+	}
+
+	// Get packfile name
+	packfileName, err := utils.GetPackfileName(baseRepoPath)
+	if err != nil {
+		return errors.WithMessage(err, "get packfile name error")
+	}
+
+	// Get packfile size before pinning
+	packfileInfo, err := os.Stat(packfileName)
+	if err != nil {
+		return errors.WithMessage(err, "get packfile size error")
+	}
+
+	// Get repository owner
+	repo, err := h.gc.Repository(ctx, resp.Base.RepositoryId)
+	if err != nil {
+		return errors.WithMessage(err, "failed to get repository")
+	}
+
+	// Get current packfile size
+	var currentSize int64
+	packfile, err := h.gc.RepositoryPackfile(ctx, resp.Base.RepositoryId)
+	if err == nil {
+		currentSize = int64(packfile.Size_)
+	}
+
+	// Calculate storage delta
+	storageDelta := packfileInfo.Size() - currentSize
+
+	// Check storage quota
+	userQuota, err := h.gc.UserQuota(ctx, repo.Owner.Id)
+	if err != nil {
+		return errors.WithMessage(err, "failed to get user quota")
+	}
+
+	// Get storage params
+	storageParams, err := h.gc.StorageParams(ctx)
+	if err != nil {
+		return errors.WithMessage(err, "failed to get storage params")
+	}
+
+	// Calculate storage cost
+	costInfo, err := utils.CalculateStorageCost(
+		uint64(userQuota.StorageUsed),
+		uint64(storageDelta),
+		storageParams,
+	)
+	if err != nil {
+		return errors.WithMessage(err, "failed to calculate storage cost")
+	}
+
+	// If there is a storage charge, check if user has sufficient balance
+	if !costInfo.StorageCharge.IsZero() {
+		balance, err := h.gc.CosmosBankBalance(ctx, repo.Owner.Id, costInfo.StorageCharge.Denom)
 		if err != nil {
-			errChan <- errors.WithMessage(err, "error fetching processed tx height")
-			return
+			return errors.WithMessage(err, "failed to get user balance")
 		}
 
-		// no known offset to backfill
-		if startHeight == 0 {
-			logger.FromContext(ctx).Info("no known offset to backfill. terminating")
-			return
-		}
-
-		// fetch upper limit for range query
-		// in order to avoid scanning whole kv store
-		// !!WAIT!! until first real time event is received. practically, real time events should flow as soon as bridge starts
-		// backfill till current offset
-		endHeight := <-h.offsetChan
-
-		logger.FromContext(ctx).WithField("start", startHeight).WithField("end", endHeight).Info("backfill in progress")
-		defer func() {
-			logger.FromContext(ctx).Info("backfill done")
-		}()
-
-		grpcConn, err := grpc.Dial(viper.GetString("GITOPIA_ADDR"),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithDefaultCallOptions(grpc.ForceCodec(codec.NewProtoCodec(nil).GRPCCodec())),
-		)
-		if err != nil {
-			errChan <- errors.Wrap(err, "dial err")
-			return
-		}
-		serviceClient := tx.NewServiceClient(grpcConn)
-
-		// process events in batches
-		for offset, remainingPages := uint64(0), uint64(0); offset == 0 || remainingPages > 0; offset,
-			remainingPages = offset+query.DefaultLimit, remainingPages-1 {
-			res, err := serviceClient.GetTxsEvent(ctx, &tx.GetTxsEventRequest{
-				Events: []string{"message.action='InvokeMergePullRequest'",
-					// NOTE: > and < operators are not supported
-					fmt.Sprintf("tx.height>=%d", startHeight+1),
-					fmt.Sprintf("tx.height<=%d", endHeight-1),
-				},
-				Pagination: &query.PageRequest{
-					Offset: offset,
-				},
-			})
+		if balance.Amount.LT(costInfo.StorageCharge.Amount) {
+			// rollback local repository cache
+			err = os.RemoveAll(baseRepoPath)
 			if err != nil {
-				errChan <- errors.Wrap(err, "error fetching events")
-				return
-			}
-			if remainingPages == 0 {
-				remainingPages = uint64(math.Ceil(float64(res.GetPagination().GetTotal()) / query.DefaultLimit))
+				return errors.WithMessage(err, "failed to rollback local repository cache")
 			}
 
-			for _, r := range res.GetTxResponses() {
-				for _, e := range r.Events {
-					switch e.GetType() {
-					case "InvokeMergePullRequest":
-						attributeMap := make(map[string]string)
-						for i := 0; i < len(e.Attributes); i++ {
-							attributeMap[string(e.Attributes[i].Key)] = string(e.Attributes[i].Value)
-						}
-
-						repoId, err := strconv.ParseUint(attributeMap["RepositoryId"], 10, 64)
-						if err != nil {
-							errChan <- errors.WithMessage(err, "error parsing repo id")
-							return
-						}
-
-						prIid, err := strconv.ParseUint(attributeMap["PullRequestIid"], 10, 64)
-						if err != nil {
-							errChan <- errors.WithMessage(err, "error parsing pull request iid")
-							return
-						}
-
-						taskId, err := strconv.ParseUint(attributeMap["TaskId"], 10, 64)
-						if err != nil {
-							errChan <- errors.WithMessage(err, "error parsing task id")
-							return
-						}
-
-						event := InvokeMergePullRequestEvent{
-							Creator:        attributeMap["Creator"],
-							RepositoryId:   repoId,
-							PullRequestIid: prIid,
-							TaskId:         taskId,
-							TxHeight:       uint64(r.Height),
-						}
-
-						err = h.Process(ctx, event)
-						if err != nil {
-							errChan <- errors.WithMessage(err, "error processing event")
-							return
-						}
-						err = h.cc.Commit(event.TxHeight)
-						if err != nil {
-							errChan <- errors.WithMessage(err, "error commiting tx height")
-							return
-						}
-					}
-				}
-			}
+			// TODO: log insufficient balance for storage charge
+			return nil
 		}
-		// processed all missed txs
-		// handoff height tracking to real time event processor
-		err = h.cc.Commit(endHeight)
+	}
+
+	// Handle IPFS operations
+	cid, err := h.handleIPFSOperations(ctx, packfileName, resp.Base.RepositoryId)
+	if err != nil {
+		return errors.WithMessage(err, "IPFS operations error")
+	}
+
+	// Get packfile from IPFS cluster
+	ipfsHttpApi, err := rpc.NewURLApiWithClient(fmt.Sprintf("http://%s:%s", viper.GetString("IPFS_HOST"), viper.GetString("IPFS_PORT")), &http.Client{})
+	if err != nil {
+		return errors.WithMessage(err, "create IPFS API error")
+	}
+
+	p, err := ipfspath.NewPath("/ipfs/" + cid)
+	if err != nil {
+		return errors.WithMessage(err, "create path error")
+	}
+
+	f, err := ipfsHttpApi.Unixfs().Get(ctx, p)
+	if err != nil {
+		return errors.WithMessage(err, "get packfile from IPFS error")
+	}
+
+	file, ok := f.(files.File)
+	if !ok {
+		return errors.New("invalid packfile format")
+	}
+
+	rootHash, err := merkleproof.ComputePackfileMerkleRoot(file, merkleChunkSize)
+	if err != nil {
+		return errors.WithMessage(err, "compute packfile merkle root error")
+	}
+
+	err = h.gc.UpdateRepositoryPackfile(ctx, resp.Base.RepositoryId, filepath.Base(packfileName), cid, rootHash, packfileInfo.Size())
+	if err != nil {
+		return errors.WithMessage(err, "update repository packfile error")
+	}
+
+	// Unpin old packfile from IPFS cluster
+	if packfile.Cid != "" {
+		// Get packfile reference count
+		refCount, err := h.gc.StorageCidReferenceCount(ctx, packfile.Cid)
 		if err != nil {
-			errChan <- errors.WithMessage(err, "error commiting tx height")
+			return errors.WithMessage(err, "failed to get packfile reference count")
+		}
+
+		if refCount == 0 {
+			err = utils.UnpinFile(h.ipfsClusterClient, packfile.Cid)
+			if err != nil {
+				return errors.WithMessage(err, "failed to unpin packfile from IPFS cluster")
+			}
+
+			h.logOperation(ctx, "unpin packfile", map[string]interface{}{
+				"repository_id": resp.Base.RepositoryId,
+				"packfile_name": filepath.Base(packfileName),
+				"cid":           packfile.Cid,
+			})
+		}
+	}
+
+	return nil
+}
+
+// handleError is a helper function for common error handling pattern
+func (h *InvokeMergePullRequestEventHandler) handleError(ctx context.Context, err error, taskId uint64, message string) error {
+	if err == nil {
+		return nil
+	}
+	// Truncate error message if needed
+	errMsg := err.Error()
+	if len(errMsg) > maxErrorLength {
+		errMsg = errMsg[:maxErrorLength]
+	}
+	updateErr := h.gc.UpdateTask(ctx, taskId, types.StateFailure, errMsg)
+	if updateErr != nil {
+		return errors.WithMessage(updateErr, "update task error")
+	}
+	return errors.WithMessage(err, message)
+}
+
+// runGitCommandWithTimeout executes a git command with a timeout
+func (h *InvokeMergePullRequestEventHandler) runGitCommandWithTimeout(ctx context.Context, cmd *exec.Cmd, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	// Store original command settings
+	originalDir := cmd.Dir
+	originalEnv := cmd.Env
+
+	cmd = exec.CommandContext(ctx, cmd.Path, cmd.Args[1:]...)
+	cmd.Dir = originalDir
+	cmd.Env = originalEnv
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%v: %s", err, string(out))
+	}
+	return nil
+}
+
+// handleIPFSOperations handles IPFS-related operations concurrently
+func (h *InvokeMergePullRequestEventHandler) handleIPFSOperations(ctx context.Context, packfileName string, repositoryId uint64) (string, error) {
+	errChan := make(chan error, 2)
+	cidChan := make(chan string, 1)
+
+	go func() {
+		cid, err := utils.PinFile(h.ipfsClusterClient, packfileName)
+		if err != nil {
+			errChan <- err
 			return
 		}
+		cidChan <- cid
+		errChan <- nil
 	}()
 
-	return ctx.Done(), errChan
+	go func() {
+		_, err := h.gc.RepositoryPackfile(ctx, repositoryId)
+		errChan <- err
+	}()
+
+	for i := 0; i < 2; i++ {
+		if err := <-errChan; err != nil {
+			return "", err
+		}
+	}
+
+	return <-cidChan, nil
+}
+
+// logOperation adds structured logging with context
+func (h *InvokeMergePullRequestEventHandler) logOperation(ctx context.Context, operation string, fields map[string]interface{}) {
+	logger.FromContext(ctx).
+		WithFields(fields).
+		WithField("operation", operation).
+		Info("processing operation")
+}
+
+// performMergeStyle handles the standard merge style
+func (h *InvokeMergePullRequestEventHandler) performMergeStyle(ctx context.Context, resp types.PullRequest, quarantineRepoPath string, env []string, message string) error {
+	cmd := exec.Command("git", "merge", "--no-ff", "--no-commit", "tracking")
+	cmd.Env = env
+	if err := utils.RunMergeCommand(*resp.Head, *resp.Base, cmd, quarantineRepoPath); err != nil {
+		return errors.WithMessage(err, "merge error")
+	}
+
+	if err := utils.CommitAndSignNoAuthor(resp, message, "", quarantineRepoPath, env); err != nil {
+		return errors.WithMessage(err, "merge commit error")
+	}
+	return nil
+}
+
+// performRebaseStyle handles the rebase merge style
+func (h *InvokeMergePullRequestEventHandler) performRebaseStyle(ctx context.Context, resp types.PullRequest, quarantineRepoPath string, env []string, message string) error {
+	// Checkout head branch
+	cmd := exec.Command("git", "checkout", "-b", "staging", "tracking")
+	cmd.Dir = quarantineRepoPath
+	if err := h.runGitCommandWithTimeout(ctx, cmd, defaultTimeout); err != nil {
+		return errors.WithMessage(err, "git checkout error")
+	}
+
+	// Rebase before merging
+	cmd = exec.Command("git", "rebase", "base")
+	cmd.Dir = quarantineRepoPath
+	if err := h.runGitCommandWithTimeout(ctx, cmd, defaultTimeout); err != nil {
+		// Check for rebase conflicts
+		if _, statErr := os.Stat(filepath.Join(quarantineRepoPath, ".git", "REBASE_HEAD")); statErr == nil {
+			return errors.WithMessage(err, "rebase conflict error")
+		}
+		return errors.WithMessage(err, "rebase error")
+	}
+
+	// Checkout base branch again
+	cmd = exec.Command("git", "checkout", "base")
+	cmd.Dir = quarantineRepoPath
+	if err := h.runGitCommandWithTimeout(ctx, cmd, defaultTimeout); err != nil {
+		return errors.WithMessage(err, "git checkout error")
+	}
+
+	// Merge with fast-forward
+	cmd = exec.Command("git", "merge", "--ff-only", "staging")
+	if err := utils.RunMergeCommand(*resp.Head, *resp.Base, cmd, quarantineRepoPath); err != nil {
+		return errors.WithMessage(err, "git merge error")
+	}
+
+	return nil
+}
+
+// performSquashStyle handles the squash merge style
+func (h *InvokeMergePullRequestEventHandler) performSquashStyle(ctx context.Context, resp types.PullRequest, quarantineRepoPath string, env []string, message string) error {
+	// Merge with squash
+	cmd := exec.Command("git", "merge", "--squash", "tracking")
+	if err := utils.RunMergeCommand(*resp.Head, *resp.Base, cmd, quarantineRepoPath); err != nil {
+		return errors.WithMessage(err, "git merge --squash error")
+	}
+
+	cmd = exec.Command("git", "commit", fmt.Sprintf("--author='%s <%s>'", resp.Creator, "<>"), "-m", message)
+	cmd.Env = env
+	cmd.Dir = quarantineRepoPath
+	return h.runGitCommandWithTimeout(ctx, cmd, defaultTimeout)
 }

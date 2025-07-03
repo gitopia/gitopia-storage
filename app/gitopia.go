@@ -3,8 +3,11 @@ package app
 import (
 	"context"
 
+	sdk "github.com/cosmos/cosmos-sdk/types"
+	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	"github.com/gitopia/gitopia-go"
-	"github.com/gitopia/gitopia/v5/x/gitopia/types"
+	"github.com/gitopia/gitopia/v6/x/gitopia/types"
+	storagetypes "github.com/gitopia/gitopia/v6/x/storage/types"
 	"github.com/pkg/errors"
 )
 
@@ -23,76 +26,17 @@ func NewGitopiaProxy(g gitopia.Client) GitopiaProxy {
 	return GitopiaProxy{g}
 }
 
-func (g GitopiaProxy) ForkRepository(ctx context.Context,
-	creator string,
-	repositoryId types.RepositoryId,
-	forkRepositoryName string,
-	forkRepositoryDescription string,
-	branch string,
-	owner string,
-	taskId uint64) error {
-	msg := &types.MsgForkRepository{
-		Creator:                   creator,
-		RepositoryId:              repositoryId,
-		ForkRepositoryName:        forkRepositoryName,
-		ForkRepositoryDescription: forkRepositoryDescription,
-		Branch:                    branch,
-		Owner:                     owner,
-		TaskId:                    taskId,
-	}
-
-	err := g.gc.AuthorizedBroadcastTx(ctx, msg)
-	if err != nil {
-		return errors.WithMessage(err, "error sending authorized tx")
-	}
-
-	return nil
-}
-
-func (g GitopiaProxy) ForkRepositorySuccess(ctx context.Context, creator string, repositoryId types.RepositoryId, taskId uint64) error {
-	msg := &types.MsgForkRepositorySuccess{
-		Creator:      creator,
-		RepositoryId: repositoryId,
-		TaskId:       taskId,
-	}
-
-	err := g.gc.AuthorizedBroadcastTx(ctx, msg)
-	if err != nil {
-		return errors.WithMessage(err, "error sending authorized tx")
-	}
-
-	return nil
-}
-
-func (g GitopiaProxy) UpdateTask(ctx context.Context, creator string, id uint64, state types.TaskState, message string) error {
+func (g GitopiaProxy) UpdateTask(ctx context.Context, id uint64, state types.TaskState, message string) error {
 	msg := &types.MsgUpdateTask{
-		Creator: creator,
+		Creator: g.gc.Address().String(),
 		Id:      id,
 		State:   state,
 		Message: message,
 	}
 
-	err := g.gc.AuthorizedBroadcastTx(ctx, msg)
+	err := g.gc.BroadcastTxAndWait(ctx, msg)
 	if err != nil {
-		return errors.WithMessage(err, "error sending authorized tx")
-	}
-
-	return nil
-}
-
-func (g GitopiaProxy) SetPullRequestState(ctx context.Context, creator string, repositoryId, iid uint64, state string, mergeCommitSha string, taskId uint64) error {
-	msg := &types.MsgSetPullRequestState{
-		Creator:        creator,
-		RepositoryId:   repositoryId,
-		Iid:            iid,
-		State:          state,
-		MergeCommitSha: mergeCommitSha,
-		TaskId:         taskId,
-	}
-
-	err := g.gc.AuthorizedBroadcastTx(ctx, msg)
-	if err != nil {
-		return errors.WithMessage(err, "error sending authorized tx")
+		return errors.WithMessage(err, "error sending tx")
 	}
 
 	return nil
@@ -107,18 +51,6 @@ func (g GitopiaProxy) RepositoryName(ctx context.Context, id uint64) (string, er
 	}
 
 	return resp.Repository.Name, nil
-}
-
-func (g GitopiaProxy) CheckGitServerAuthorization(ctx context.Context, userAddress string) (bool, error) {
-	resp, err := g.gc.QueryClient().Gitopia.CheckGitServerAuthorization(ctx, &types.QueryCheckGitServerAuthorizationRequest{
-		UserAddress:     userAddress,
-		ProviderAddress: g.gc.Address().String(),
-	})
-	if err != nil {
-		return false, errors.WithMessage(err, "query error")
-	}
-
-	return resp.HaveAuthorization, nil
 }
 
 func (g GitopiaProxy) RepositoryId(ctx context.Context, address string, repoName string) (uint64, error) {
@@ -173,4 +105,221 @@ func (g GitopiaProxy) Repository(ctx context.Context, repositoryId uint64) (type
 	}
 
 	return *resp.Repository, nil
+}
+
+func (g GitopiaProxy) UpdateRepositoryPackfile(ctx context.Context, repositoryId uint64, name string, cid string, rootHash []byte, size int64) error {
+	msg := &storagetypes.MsgUpdateRepositoryPackfile{
+		Creator:      g.gc.Address().String(),
+		RepositoryId: repositoryId,
+		Name:         name,
+		Cid:          cid,
+		RootHash:     rootHash,
+		Size_:        uint64(size),
+	}
+
+	err := g.gc.BroadcastTxAndWait(ctx, msg)
+	if err != nil {
+		return errors.WithMessage(err, "error sending tx")
+	}
+
+	return nil
+}
+
+func (g GitopiaProxy) SubmitChallenge(ctx context.Context, creator string, challengeId uint64, data []byte, proof *storagetypes.Proof) error {
+	msg := &storagetypes.MsgSubmitChallengeResponse{
+		Creator:     creator,
+		ChallengeId: challengeId,
+		Data:        data,
+		Proof:       proof,
+	}
+
+	err := g.gc.BroadcastTxAndWait(ctx, msg)
+	if err != nil {
+		return errors.WithMessage(err, "error sending tx")
+	}
+
+	return nil
+}
+
+func (g GitopiaProxy) Challenge(ctx context.Context, id uint64) (storagetypes.Challenge, error) {
+	resp, err := g.gc.QueryClient().Storage.Challenge(ctx, &storagetypes.QueryChallengeRequest{
+		Id: id,
+	})
+	if err != nil {
+		return storagetypes.Challenge{}, errors.WithMessage(err, "query error")
+	}
+
+	return resp.Challenge, nil
+}
+
+func (g GitopiaProxy) Packfile(ctx context.Context, id uint64) (storagetypes.Packfile, error) {
+	resp, err := g.gc.QueryClient().Storage.Packfile(ctx, &storagetypes.QueryPackfileRequest{
+		Id: id,
+	})
+	if err != nil {
+		return storagetypes.Packfile{}, errors.WithMessage(err, "query error")
+	}
+
+	return resp.Packfile, nil
+}
+
+func (g GitopiaProxy) CheckProvider(provider string) bool {
+	return provider == g.gc.Address().String()
+}
+
+// get client address
+func (g GitopiaProxy) ClientAddress() string {
+	return g.gc.Address().String()
+}
+
+func (g GitopiaProxy) UserQuota(ctx context.Context, address string) (types.UserQuota, error) {
+	resp, err := g.gc.QueryClient().Gitopia.UserQuota(ctx, &types.QueryUserQuotaRequest{
+		Address: address,
+	})
+	if err != nil {
+		return types.UserQuota{}, errors.WithMessage(err, "query error")
+	}
+
+	return resp.UserQuota, nil
+}
+
+func (g GitopiaProxy) ReleaseAsset(ctx context.Context, id uint64) (storagetypes.ReleaseAsset, error) {
+	resp, err := g.gc.QueryClient().Storage.ReleaseAsset(ctx, &storagetypes.QueryReleaseAssetRequest{
+		Id: id,
+	})
+	if err != nil {
+		return storagetypes.ReleaseAsset{}, errors.WithMessage(err, "query error")
+	}
+
+	return resp.ReleaseAsset, nil
+}
+
+func (g GitopiaProxy) UpdateReleaseAsset(ctx context.Context, repositoryId uint64, tag string, name string, cid string, rootHash []byte, size int64, sha256 string) error {
+	msg := &storagetypes.MsgUpdateReleaseAsset{
+		Creator:      g.gc.Address().String(),
+		RepositoryId: repositoryId,
+		Tag:          tag,
+		Name:         name,
+		Cid:          cid,
+		RootHash:     rootHash,
+		Size_:        uint64(size),
+		Sha256:       sha256,
+	}
+
+	err := g.gc.BroadcastTxAndWait(ctx, msg)
+	if err != nil {
+		return errors.WithMessage(err, "error sending tx")
+	}
+
+	return nil
+}
+
+func (g GitopiaProxy) RepositoryReleaseAsset(ctx context.Context, repositoryId uint64, tag string, name string) (storagetypes.ReleaseAsset, error) {
+	resp, err := g.gc.QueryClient().Storage.RepositoryReleaseAsset(ctx, &storagetypes.QueryRepositoryReleaseAssetRequest{
+		RepositoryId: repositoryId,
+		Tag:          tag,
+		Name:         name,
+	})
+	if err != nil {
+		return storagetypes.ReleaseAsset{}, errors.WithMessage(err, "query error")
+	}
+
+	return resp.ReleaseAsset, nil
+}
+
+func (g GitopiaProxy) RepositoryReleaseAssets(ctx context.Context, repositoryId uint64, tag string) ([]storagetypes.ReleaseAsset, error) {
+	resp, err := g.gc.QueryClient().Storage.RepositoryReleaseAssets(ctx, &storagetypes.QueryRepositoryReleaseAssetsRequest{
+		RepositoryId: repositoryId,
+		Tag:          tag,
+	})
+	if err != nil {
+		return nil, errors.WithMessage(err, "query error")
+	}
+
+	return resp.ReleaseAssets, nil
+}
+
+func (g GitopiaProxy) RepositoryPackfile(ctx context.Context, repositoryId uint64) (storagetypes.Packfile, error) {
+	resp, err := g.gc.QueryClient().Storage.RepositoryPackfile(ctx, &storagetypes.QueryRepositoryPackfileRequest{
+		RepositoryId: repositoryId,
+	})
+	if err != nil {
+		return storagetypes.Packfile{}, errors.WithMessage(err, "query error")
+	}
+
+	return resp.Packfile, nil
+}
+
+func (g GitopiaProxy) MergePullRequest(ctx context.Context, repositoryId uint64, pullRequestIid uint64, mergeCommitSha string, taskId uint64) error {
+	msg := &storagetypes.MsgMergePullRequest{
+		Creator:        g.gc.Address().String(),
+		RepositoryId:   repositoryId,
+		PullRequestIid: pullRequestIid,
+		MergeCommitSha: mergeCommitSha,
+		TaskId:         taskId,
+	}
+
+	err := g.gc.BroadcastTxAndWait(ctx, msg)
+	if err != nil {
+		return errors.WithMessage(err, "error sending tx")
+	}
+
+	return nil
+}
+
+func (g GitopiaProxy) StorageParams(ctx context.Context) (storagetypes.Params, error) {
+	resp, err := g.gc.QueryClient().Storage.Params(ctx, &storagetypes.QueryParamsRequest{})
+	if err != nil {
+		return storagetypes.Params{}, errors.WithMessage(err, "query error")
+	}
+
+	return resp.Params, nil
+}
+
+func (g GitopiaProxy) CosmosBankBalance(ctx context.Context, address, denom string) (sdk.Coin, error) {
+	resp, err := g.gc.QueryClient().Bank.Balance(ctx, &banktypes.QueryBalanceRequest{
+		Address: address,
+		Denom:   denom,
+	})
+	if err != nil {
+		return sdk.Coin{}, err
+	}
+
+	return *resp.Balance, nil
+}
+
+func (g GitopiaProxy) StorageCidReferenceCount(ctx context.Context, cid string) (uint64, error) {
+	resp, err := g.gc.QueryClient().Storage.CidReferenceCount(ctx, &storagetypes.QueryCidReferenceCountRequest{
+		Cid: cid,
+	})
+	if err != nil {
+		return 0, errors.WithMessage(err, "query error")
+	}
+
+	return resp.Count, nil
+}
+
+func (g GitopiaProxy) DeleteReleaseAsset(ctx context.Context, repositoryId uint64, tag string, name string) error {
+	msg := &storagetypes.MsgDeleteReleaseAsset{
+		Creator:      g.gc.Address().String(),
+		RepositoryId: repositoryId,
+		Tag:          tag,
+		Name:         name,
+	}
+
+	err := g.gc.BroadcastTxAndWait(ctx, msg)
+	if err != nil {
+		return errors.WithMessage(err, "error sending tx")
+	}
+
+	return nil
+}
+
+func (g GitopiaProxy) ActiveProviders(ctx context.Context) ([]storagetypes.Provider, error) {
+	resp, err := g.gc.QueryClient().Storage.ActiveProviders(ctx, &storagetypes.QueryActiveProvidersRequest{})
+	if err != nil {
+		return nil, errors.WithMessage(err, "query error")
+	}
+
+	return resp.Providers, nil
 }

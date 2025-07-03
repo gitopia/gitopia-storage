@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  ipfs:
+    container_name: ipfs
+    image: ipfs/kubo:v0.25.0 # Use a specific version
+    ports:
+      - "4001:4001" # ipfs swarm
+      - "5001:5001" # ipfs api
+      - "8080:8080" # ipfs gateway
+    volumes:
+      - ipfs_data:/data/ipfs
+    networks:
+      - gitopia-network
+
+  cluster:
+    container_name: ipfs-cluster
+    image: ipfs/ipfs-cluster:v1.1.0 # Use a specific version
+    depends_on:
+      - ipfs
+    environment:
+      # Configuration via environment variables. See https://ipfscluster.io/documentation/reference/configuration/
+      - CLUSTER_PEERNAME=${CLUSTER_PEERNAME:-cluster0}
+      - CLUSTER_SECRET=${CLUSTER_SECRET:?err_secret_not_set}
+      - CLUSTER_IPFSHTTP_NODEMULTIADDRESS=/dns4/ipfs/tcp/5001
+      - CLUSTER_CRDT_TRUSTEDPEERS=${CLUSTER_TRUSTED_PEERS:-*}
+      - CLUSTER_RESTAPI_HTTPLISTENMULTIADDRESS=/ip4/0.0.0.0/tcp/9094
+    ports:
+      - "9094:9094" # Cluster API
+      - "9096:9096" # Cluster swarm
+    volumes:
+      - cluster_data:/data/ipfs-cluster
+    networks:
+      - gitopia-network
+
+  gitopia-storage:
+    container_name: gitopia-storage
+    image: gitopia/gitopia-storage:latest
+    depends_on:
+      - cluster
+    ports:
+      - "5002:5000"
+    environment:
+      # This entrypoint script will import the key on startup
+      - GITOPIA_OPERATOR_MNEMONIC=${GITOPIA_OPERATOR_MNEMONIC:?err_mnemonic_not_set}
+    volumes:
+      # Map host directories for persistent git data.
+      # To use an external disk, change the host path. E.g., /mnt/my-disk/repos:/var/repos
+      - ./data/repos:/var/repos
+      - ./data/attachments:/var/attachments
+      - ./data/lfs-objects:/var/lfs-objects
+      # Optional: Mount a custom config file
+      # - ./my_config.toml:/etc/gitopia-storage/config.toml
+    networks:
+      - gitopia-network
+    # The new entrypoint handles key import, then starts the service
+    entrypoint: supervisord -c /etc/supervisord.conf
+
+
+volumes:
+  ipfs_data:
+  cluster_data:
+
+networks:
+  gitopia-network:
+    name: gitopia-network
