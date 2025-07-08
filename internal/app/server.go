@@ -621,37 +621,39 @@ func (s *Server) PostRPC(service string, w http.ResponseWriter, r *Request) {
 		}
 
 		// Calculate storage cost
-		costInfo, err := utils.CalculateStorageCost(
-			uint64(userQuotaResp.UserQuota.StorageUsed),
-			uint64(storageDelta),
-			storageParams.Params,
-		)
-		if err != nil {
-			fail500(w, logContext, fmt.Errorf("failed to calculate storage cost: %w", err))
-			return
-		}
-
-		// If there is a storage charge, check if user has sufficient balance
-		if !costInfo.StorageCharge.IsZero() {
-			balance, err := s.QueryService.CosmosBankBalance(context.Background(), &banktypes.QueryBalanceRequest{
-				Address: repoResp.Repository.Owner.Id,
-				Denom:   costInfo.StorageCharge.Denom,
-			})
+		if !storageParams.Params.StoragePricePerMb.IsZero() {
+			costInfo, err := utils.CalculateStorageCost(
+				uint64(userQuotaResp.UserQuota.StorageUsed),
+				uint64(storageDelta),
+				storageParams.Params,
+			)
 			if err != nil {
-				fail500(w, logContext, fmt.Errorf("failed to get user balance: %w", err))
+				fail500(w, logContext, fmt.Errorf("failed to calculate storage cost: %w", err))
 				return
 			}
 
-			if balance.Balance.Amount.LT(costInfo.StorageCharge.Amount) {
-				// rollback local repository cache
-				err = os.RemoveAll(r.RepoPath)
+			// If there is a storage charge, check if user has sufficient balance
+			if !costInfo.StorageCharge.IsZero() {
+				balance, err := s.QueryService.CosmosBankBalance(context.Background(), &banktypes.QueryBalanceRequest{
+					Address: repoResp.Repository.Owner.Id,
+					Denom:   costInfo.StorageCharge.Denom,
+				})
 				if err != nil {
-					fail500(w, logContext, fmt.Errorf("failed to rollback local repository cache: %w", err))
+					fail500(w, logContext, fmt.Errorf("failed to get user balance: %w", err))
 					return
 				}
 
-				http.Error(w, "Insufficient balance for storage charge", http.StatusPaymentRequired)
-				return
+				if balance.Balance.Amount.LT(costInfo.StorageCharge.Amount) {
+					// rollback local repository cache
+					err = os.RemoveAll(r.RepoPath)
+					if err != nil {
+						fail500(w, logContext, fmt.Errorf("failed to rollback local repository cache: %w", err))
+						return
+					}
+
+					http.Error(w, "Insufficient balance for storage charge", http.StatusPaymentRequired)
+					return
+				}
 			}
 		}
 
