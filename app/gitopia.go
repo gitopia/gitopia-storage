@@ -4,6 +4,7 @@ import (
 	"context"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/types/query"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	"github.com/gitopia/gitopia-go"
 	"github.com/gitopia/gitopia/v6/x/gitopia/types"
@@ -115,6 +116,20 @@ func (g GitopiaProxy) UpdateRepositoryPackfile(ctx context.Context, repositoryId
 		Cid:          cid,
 		RootHash:     rootHash,
 		Size_:        uint64(size),
+	}
+
+	err := g.gc.BroadcastTxAndWait(ctx, msg)
+	if err != nil {
+		return errors.WithMessage(err, "error sending tx")
+	}
+
+	return nil
+}
+
+func (g GitopiaProxy) DeleteRepositoryPackfile(ctx context.Context, repositoryId uint64) error {
+	msg := &storagetypes.MsgDeleteRepositoryPackfile{
+		Creator:      g.gc.Address().String(),
+		RepositoryId: repositoryId,
 	}
 
 	err := g.gc.BroadcastTxAndWait(ctx, msg)
@@ -322,4 +337,42 @@ func (g GitopiaProxy) ActiveProviders(ctx context.Context) ([]storagetypes.Provi
 	}
 
 	return resp.Providers, nil
+}
+
+// RepositoryReleaseAssetsByRepositoryId returns all release assets for a repository with pagination support
+func (g GitopiaProxy) RepositoryReleaseAssetsByRepositoryId(ctx context.Context, repositoryId uint64, nextKey []byte) ([]storagetypes.ReleaseAsset, []byte, error) {
+	resp, err := g.gc.QueryClient().Storage.RepositoryReleaseAssetsByRepositoryId(ctx, &storagetypes.QueryRepositoryReleaseAssetsByRepositoryIdRequest{
+		RepositoryId: repositoryId,
+		Pagination: &query.PageRequest{
+			Key: nextKey,
+		},
+	})
+	if err != nil {
+		return nil, nil, errors.WithMessage(err, "query error")
+	}
+
+	return resp.ReleaseAssets, resp.Pagination.NextKey, nil
+}
+
+// RepositoryReleaseAssetsByRepositoryIdAll returns all release assets for a repository (handles pagination internally)
+func (g GitopiaProxy) RepositoryReleaseAssetsByRepositoryIdAll(ctx context.Context, repositoryId uint64) ([]storagetypes.ReleaseAsset, error) {
+	var allAssets []storagetypes.ReleaseAsset
+	var nextKey []byte
+
+	for {
+		assets, next, err := g.RepositoryReleaseAssetsByRepositoryId(ctx, repositoryId, nextKey)
+		if err != nil {
+			return nil, err
+		}
+
+		allAssets = append(allAssets, assets...)
+
+		if next == nil {
+			break
+		}
+
+		nextKey = next
+	}
+
+	return allAssets, nil
 }
