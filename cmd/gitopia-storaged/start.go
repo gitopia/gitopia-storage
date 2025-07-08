@@ -32,12 +32,14 @@ const (
 	InvokeDaoMergePullRequestQuery = "tm.event='Tx' AND message.action='InvokeDaoMergePullRequest'"
 	ChallengeCreatedQuery          = "tm.event='NewBlock' AND gitopia.gitopia.storage.EventChallengeCreated.challenge_id EXISTS"
 	PackfileUpdatedQuery           = "tm.event='Tx' AND gitopia.gitopia.storage.EventPackfileUpdated.repository_id EXISTS"
+	PackfileDeletedQuery           = "tm.event='Tx' AND gitopia.gitopia.storage.EventPackfileDeleted.repository_id EXISTS"
 	ReleaseAssetUpdatedQuery       = "tm.event='Tx' AND gitopia.gitopia.storage.EventReleaseAssetUpdated.repository_id EXISTS"
 	ReleaseAssetDeletedQuery       = "tm.event='Tx' AND gitopia.gitopia.storage.EventReleaseAssetDeleted.repository_id EXISTS"
 	CreateReleaseQuery             = "tm.event='Tx' AND message.action='CreateRelease'"
 	UpdateReleaseQuery             = "tm.event='Tx' AND message.action='UpdateRelease'"
 	DeleteReleaseQuery             = "tm.event='Tx' AND message.action='DeleteRelease'"
 	DaoCreateReleaseQuery          = "tm.event='Tx' AND message.action='DaoCreateRelease'"
+	DeleteRepositoryQuery          = "tm.event='Tx' AND message.action='DeleteRepository'"
 )
 
 func NewStartCmd() *cobra.Command {
@@ -192,6 +194,12 @@ func start(cmd *cobra.Command, args []string) error {
 			return
 		}
 
+		pdmc, err := gitopia.NewWSEvents(ctx, PackfileDeletedQuery)
+		if err != nil {
+			eventErrChan <- errors.WithMessage(err, "tm error")
+			return
+		}
+
 		rautmc, err := gitopia.NewWSEvents(ctx, ReleaseAssetUpdatedQuery)
 		if err != nil {
 			eventErrChan <- errors.WithMessage(err, "tm error")
@@ -216,14 +224,22 @@ func start(cmd *cobra.Command, args []string) error {
 			return
 		}
 
+		dcc, err := consumer.NewClient("deleteRepositoryEvent")
+		if err != nil {
+			eventErrChan <- errors.WithMessage(err, "error creating consumer client")
+			return
+		}
+
 		mergeHandler := handler.NewInvokeMergePullRequestEventHandler(gp, mcc, cl)
 		daoMergeHandler := handler.NewInvokeDaoMergePullRequestEventHandler(gp, dmcc, cl)
 		challengeHandler := handler.NewChallengeEventHandler(gp)
 		packfileUpdatedHandler := handler.NewPackfileUpdatedEventHandler(gp)
+		packfileDeletedHandler := handler.NewPackfileDeletedEventHandler(gp)
 		releaseAssetUpdatedHandler := handler.NewReleaseAssetUpdatedEventHandler(gp)
 		releaseAssetDeletedHandler := handler.NewReleaseAssetDeletedEventHandler(gp)
 		releaseHandler := handler.NewReleaseEventHandler(gp, cl)
 		daoReleaseHandler := handler.NewDaoCreateReleaseEventHandler(gp, cl)
+		deleteRepoHandler := handler.NewDeleteRepositoryEventHandler(gp, dcc, cl)
 
 		mergeDone, mergeSubscribeErr := mtmc.Subscribe(ctx, mergeHandler.Handle)
 		daoMergeDone, daoMergeSubscribeErr := dmtmc.Subscribe(ctx, daoMergeHandler.Handle)
@@ -264,11 +280,20 @@ func start(cmd *cobra.Command, args []string) error {
 			return releaseHandler.Handle(ctx, eventBuf, handler.EventDeleteReleaseType)
 		})
 
+		// Subscribe to repository deletion events
+		deleteRepoTMC, err := gitopia.NewWSEvents(ctx, DeleteRepositoryQuery)
+		if err != nil {
+			eventErrChan <- errors.WithMessage(err, "delete repository tm error")
+			return
+		}
+		deleteRepoDone, deleteRepoSubscribeErr := deleteRepoTMC.Subscribe(ctx, deleteRepoHandler.Handle)
+
 		// Only subscribe to packfile and release asset events if external pinning is enabled
-		var packfileUpdatedDone, releaseAssetUpdatedDone, releaseAssetDeletedDone <-chan struct{}
-		var packfileUpdatedSubscribeErr, releaseAssetUpdatedSubscribeErr, releaseAssetDeletedSubscribeErr <-chan error
+		var packfileUpdatedDone, packfileDeletedDone, releaseAssetUpdatedDone, releaseAssetDeletedDone <-chan struct{}
+		var packfileUpdatedSubscribeErr, packfileDeletedSubscribeErr, releaseAssetUpdatedSubscribeErr, releaseAssetDeletedSubscribeErr <-chan error
 		if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
 			packfileUpdatedDone, packfileUpdatedSubscribeErr = putmc.Subscribe(ctx, packfileUpdatedHandler.Handle)
+			packfileDeletedDone, packfileDeletedSubscribeErr = pdmc.Subscribe(ctx, packfileDeletedHandler.Handle)
 			releaseAssetUpdatedDone, releaseAssetUpdatedSubscribeErr = rautmc.Subscribe(ctx, releaseAssetUpdatedHandler.Handle)
 			releaseAssetDeletedDone, releaseAssetDeletedSubscribeErr = radtmc.Subscribe(ctx, releaseAssetDeletedHandler.Handle)
 		}
@@ -293,6 +318,14 @@ func start(cmd *cobra.Command, args []string) error {
 		case <-packfileUpdatedDone:
 			if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
 				logger.FromContext(ctx).Info("packfile updated done")
+			}
+		case err = <-packfileDeletedSubscribeErr:
+			if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
+				eventErrChan <- errors.WithMessage(err, "packfile deleted tm subscribe error")
+			}
+		case <-packfileDeletedDone:
+			if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
+				logger.FromContext(ctx).Info("packfile deleted done")
 			}
 		case err = <-releaseAssetUpdatedSubscribeErr:
 			if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
@@ -326,6 +359,10 @@ func start(cmd *cobra.Command, args []string) error {
 			eventErrChan <- errors.WithMessage(err, "delete release tm subscribe error")
 		case <-deleteReleaseDone:
 			logger.FromContext(ctx).Info("delete release done")
+		case err = <-deleteRepoSubscribeErr:
+			eventErrChan <- errors.WithMessage(err, "delete repository tm subscribe error")
+		case <-deleteRepoDone:
+			logger.FromContext(ctx).Info("delete repository done")
 		case <-ctx.Done():
 			eventErrChan <- ctx.Err()
 		}
