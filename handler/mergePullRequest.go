@@ -342,31 +342,33 @@ func (h *InvokeMergePullRequestEventHandler) handlePostMergeOperations(ctx conte
 	}
 
 	// Calculate storage cost
-	costInfo, err := utils.CalculateStorageCost(
-		uint64(userQuota.StorageUsed),
-		uint64(storageDelta),
-		storageParams,
-	)
-	if err != nil {
-		return errors.WithMessage(err, "failed to calculate storage cost")
-	}
-
-	// If there is a storage charge, check if user has sufficient balance
-	if !costInfo.StorageCharge.IsZero() {
-		balance, err := h.gc.CosmosBankBalance(ctx, repo.Owner.Id, costInfo.StorageCharge.Denom)
+	if !storageParams.StoragePricePerMb.IsZero() {
+		costInfo, err := utils.CalculateStorageCost(
+			uint64(userQuota.StorageUsed),
+			uint64(storageDelta),
+			storageParams,
+		)
 		if err != nil {
-			return errors.WithMessage(err, "failed to get user balance")
+			return errors.WithMessage(err, "failed to calculate storage cost")
 		}
 
-		if balance.Amount.LT(costInfo.StorageCharge.Amount) {
-			// rollback local repository cache
-			err = os.RemoveAll(baseRepoPath)
+		// If there is a storage charge, check if user has sufficient balance
+		if !costInfo.StorageCharge.IsZero() {
+			balance, err := h.gc.CosmosBankBalance(ctx, repo.Owner.Id, costInfo.StorageCharge.Denom)
 			if err != nil {
-				return errors.WithMessage(err, "failed to rollback local repository cache")
+				return errors.WithMessage(err, "failed to get user balance")
 			}
 
-			// TODO: log insufficient balance for storage charge
-			return nil
+			if balance.Amount.LT(costInfo.StorageCharge.Amount) {
+				// rollback local repository cache
+				err = os.RemoveAll(baseRepoPath)
+				if err != nil {
+					return errors.WithMessage(err, "failed to rollback local repository cache")
+				}
+
+				// TODO: log insufficient balance for storage charge
+				return nil
+			}
 		}
 	}
 
