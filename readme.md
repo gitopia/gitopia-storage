@@ -80,6 +80,9 @@ This method uses Docker Compose to set up the entire stack, including the Gitopi
 ### 4. One-Time Setup (Registration)
 You need to register your provider on the Gitopia blockchain. You only need to do this once.
 
+> [!WARNING] 
+> Make sure to sync your ipfs cluster with other active providers before registering your provider. You'll start receiving challenges after registration.
+
 1.  **Import your key:** The container automatically imports the key from the `GITOPIA_OPERATOR_MNEMONIC` in your `.env` file on startup.
 
 2.  **Register the Provider:**
