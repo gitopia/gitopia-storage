@@ -17,11 +17,12 @@ import (
 )
 
 type DaoCreateReleaseEvent struct {
-	Admin        string
-	RepositoryId uint64
-	Tag          string
-	Attachments  []types.Attachment
-	Provider     string
+	Admin             string
+	RepositoryId      uint64
+	RepositoryOwnerId string
+	Tag               string
+	Attachments       []types.Attachment
+	Provider          string
 }
 
 // tm event codec
@@ -39,6 +40,11 @@ func (e *DaoCreateReleaseEvent) UnMarshal(eventBuf []byte) error {
 	repositoryId, err := strconv.ParseUint(repositoryIdStr, 10, 64)
 	if err != nil {
 		return errors.Wrap(err, "error parsing repository id")
+	}
+
+	repoOwnerId, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+types.EventAttributeRepoOwnerIdKey, "[0]")
+	if err != nil {
+		return errors.Wrap(err, "error parsing repository owner id")
 	}
 
 	tag, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+types.EventAttributeReleaseTagNameKey, "[0]")
@@ -68,6 +74,7 @@ func (e *DaoCreateReleaseEvent) UnMarshal(eventBuf []byte) error {
 
 	e.Admin = admin
 	e.RepositoryId = repositoryId
+	e.RepositoryOwnerId = repoOwnerId
 	e.Tag = tag
 	e.Attachments = attachments
 	e.Provider = provider

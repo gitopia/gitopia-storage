@@ -30,10 +30,11 @@ const (
 )
 
 type ReleaseEvent struct {
-	RepositoryId uint64
-	Tag          string
-	Attachments  []gitopiatypes.Attachment
-	Provider     string
+	RepositoryId      uint64
+	RepositoryOwnerId string
+	Tag               string
+	Attachments       []gitopiatypes.Attachment
+	Provider          string
 }
 
 func (e *ReleaseEvent) UnMarshal(eventBuf []byte) error {
@@ -45,6 +46,11 @@ func (e *ReleaseEvent) UnMarshal(eventBuf []byte) error {
 	repoId, err := strconv.ParseUint(repoIdStr, 10, 64)
 	if err != nil {
 		return errors.Wrap(err, "error parsing repository id")
+	}
+
+	repoOwnerId, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+gitopiatypes.EventAttributeRepoOwnerIdKey, "[0]")
+	if err != nil {
+		return errors.Wrap(err, "error parsing repository owner id")
 	}
 
 	tag, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+gitopiatypes.EventAttributeReleaseTagNameKey, "[0]")
@@ -73,6 +79,7 @@ func (e *ReleaseEvent) UnMarshal(eventBuf []byte) error {
 	provider = strings.Trim(provider, "\"")
 
 	e.RepositoryId = repoId
+	e.RepositoryOwnerId = repoOwnerId
 	e.Tag = tag
 	e.Attachments = attachments
 	e.Provider = provider
@@ -283,7 +290,7 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 			}
 			if !found {
 				// Delete attachment
-				err := h.gc.DeleteReleaseAsset(ctx, event.RepositoryId, event.Tag, existingAsset.Name)
+				err := h.gc.DeleteReleaseAsset(ctx, event.RepositoryId, event.Tag, existingAsset.Name, event.RepositoryOwnerId)
 				if err != nil {
 					logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
 						"asset":         existingAsset.Name,
@@ -456,7 +463,7 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 		// Unpin all attachments
 		for _, existingAsset := range existingAssets {
 			// Delete the release asset
-			err := h.gc.DeleteReleaseAsset(ctx, event.RepositoryId, event.Tag, existingAsset.Name)
+			err := h.gc.DeleteReleaseAsset(ctx, event.RepositoryId, event.Tag, existingAsset.Name, event.RepositoryOwnerId)
 			if err != nil {
 				logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
 					"asset":         existingAsset.Name,

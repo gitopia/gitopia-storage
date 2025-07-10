@@ -17,10 +17,11 @@ import (
 )
 
 type DeleteRepositoryEvent struct {
-	Creator        string
-	RepositoryId   uint64
-	RepositoryName string
-	Provider       string
+	Creator           string
+	RepositoryId      uint64
+	RepositoryOwnerId string
+	RepositoryName    string
+	Provider          string
 }
 
 // UnMarshal parses the event data into the DeleteRepositoryEvent struct
@@ -40,6 +41,11 @@ func (e *DeleteRepositoryEvent) UnMarshal(eventBuf []byte) error {
 		return errors.Wrap(err, "error parsing repository id")
 	}
 
+	repoOwnerId, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+types.EventAttributeRepoOwnerIdKey, "[0]")
+	if err != nil {
+		return errors.Wrap(err, "error parsing repository owner id")
+	}
+
 	repoName, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+types.EventAttributeRepoNameKey, "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing repository name")
@@ -52,6 +58,7 @@ func (e *DeleteRepositoryEvent) UnMarshal(eventBuf []byte) error {
 
 	e.Creator = creator
 	e.RepositoryId = repoId
+	e.RepositoryOwnerId = repoOwnerId
 	e.RepositoryName = repoName
 	e.Provider = provider
 
@@ -107,7 +114,7 @@ func (h *DeleteRepositoryEventHandler) Process(ctx context.Context, event Delete
 		return errors.Wrap(err, "failed to get repository packfile")
 	}
 
-	if err := h.gc.DeleteRepositoryPackfile(ctx, event.RepositoryId); err != nil {
+	if err := h.gc.DeleteRepositoryPackfile(ctx, event.RepositoryId, event.RepositoryOwnerId); err != nil {
 		return errors.Wrap(err, "failed to delete repository packfile")
 	}
 
@@ -133,7 +140,7 @@ func (h *DeleteRepositoryEventHandler) Process(ctx context.Context, event Delete
 	}
 
 	for _, asset := range assets {
-		if err := h.gc.DeleteReleaseAsset(ctx, asset.RepositoryId, asset.Tag, asset.Name); err != nil {
+		if err := h.gc.DeleteReleaseAsset(ctx, asset.RepositoryId, asset.Tag, asset.Name, event.RepositoryOwnerId); err != nil {
 			return errors.Wrap(err, "failed to delete release asset")
 		}
 

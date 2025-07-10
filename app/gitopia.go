@@ -126,10 +126,11 @@ func (g GitopiaProxy) UpdateRepositoryPackfile(ctx context.Context, repositoryId
 	return nil
 }
 
-func (g GitopiaProxy) DeleteRepositoryPackfile(ctx context.Context, repositoryId uint64) error {
+func (g GitopiaProxy) DeleteRepositoryPackfile(ctx context.Context, repositoryId uint64, ownerId string) error {
 	msg := &storagetypes.MsgDeleteRepositoryPackfile{
 		Creator:      g.gc.Address().String(),
 		RepositoryId: repositoryId,
+		OwnerId:      ownerId,
 	}
 
 	err := g.gc.BroadcastTxAndWait(ctx, msg)
@@ -314,12 +315,13 @@ func (g GitopiaProxy) StorageCidReferenceCount(ctx context.Context, cid string) 
 	return resp.Count, nil
 }
 
-func (g GitopiaProxy) DeleteReleaseAsset(ctx context.Context, repositoryId uint64, tag string, name string) error {
+func (g GitopiaProxy) DeleteReleaseAsset(ctx context.Context, repositoryId uint64, tag string, name string, ownerId string) error {
 	msg := &storagetypes.MsgDeleteReleaseAsset{
 		Creator:      g.gc.Address().String(),
 		RepositoryId: repositoryId,
 		Tag:          tag,
 		Name:         name,
+		OwnerId:      ownerId,
 	}
 
 	err := g.gc.BroadcastTxAndWait(ctx, msg)
