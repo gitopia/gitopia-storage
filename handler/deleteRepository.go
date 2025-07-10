@@ -3,8 +3,10 @@ package handler
 import (
 	"context"
 	"strconv"
+	"strings"
 
 	"github.com/buger/jsonparser"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/gitopia/gitopia-storage/app"
 	"github.com/gitopia/gitopia-storage/app/consumer"
 	"github.com/gitopia/gitopia-storage/utils"
@@ -23,12 +25,12 @@ type DeleteRepositoryEvent struct {
 
 // UnMarshal parses the event data into the DeleteRepositoryEvent struct
 func (e *DeleteRepositoryEvent) UnMarshal(eventBuf []byte) error {
-	creator, err := jsonparser.GetString(eventBuf, "events", types.EventAttributeCreatorKey, "[0]")
+	creator, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+types.EventAttributeCreatorKey, "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing creator")
 	}
 
-	repoIdStr, err := jsonparser.GetString(eventBuf, "events", types.EventAttributeRepoIdKey, "[0]")
+	repoIdStr, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+types.EventAttributeRepoIdKey, "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing repository id")
 	}
@@ -38,12 +40,12 @@ func (e *DeleteRepositoryEvent) UnMarshal(eventBuf []byte) error {
 		return errors.Wrap(err, "error parsing repository id")
 	}
 
-	repoName, err := jsonparser.GetString(eventBuf, "events", types.EventAttributeRepoNameKey, "[0]")
+	repoName, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+types.EventAttributeRepoNameKey, "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing repository name")
 	}
 
-	provider, err := jsonparser.GetString(eventBuf, "events", types.EventAttributeProviderKey, "[0]")
+	provider, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+types.EventAttributeProviderKey, "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing provider")
 	}
@@ -98,6 +100,10 @@ func (h *DeleteRepositoryEventHandler) Process(ctx context.Context, event Delete
 
 	packfile, err := h.gc.RepositoryPackfile(ctx, event.RepositoryId)
 	if err != nil {
+		// Empty repository
+		if strings.Contains(err.Error(), "packfile not found") {
+			return nil
+		}
 		return errors.Wrap(err, "failed to get repository packfile")
 	}
 
