@@ -18,7 +18,7 @@ func (s *Server) CacheRepository(repoId uint64) error {
 		RepositoryId: repoId,
 	})
 	if err != nil && !strings.Contains(err.Error(), "packfile not found") {
-		return fmt.Errorf("failed to get cid from chain: %v", err)
+		return fmt.Errorf("failed to get packfile from chain: %v", err)
 	}
 
 	// Get repo from chain
@@ -58,6 +58,11 @@ func (s *Server) CacheRepository(repoId uint64) error {
 	// Sync repository refs with blockchain state
 	if err := utils.SyncRepositoryRefs(repoId, s.Config.Dir); err != nil {
 		return fmt.Errorf("failed to sync repository refs: %v", err)
+	}
+
+	// Cache all lfs objects for the repository
+	if err := utils.CacheLFSObjects(repoId); err != nil {
+		return fmt.Errorf("failed to cache lfs objects for repo %d: %v", repoId, err)
 	}
 
 	return nil

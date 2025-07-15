@@ -378,3 +378,59 @@ func (g GitopiaProxy) RepositoryReleaseAssetsByRepositoryIdAll(ctx context.Conte
 
 	return allAssets, nil
 }
+
+func (g GitopiaProxy) UpdateLFSObject(ctx context.Context, repositoryId uint64, oid string, cid string, rootHash []byte, size int64) error {
+	msg := &storagetypes.MsgUpdateLFSObject{
+		Creator:      g.gc.Address().String(),
+		RepositoryId: repositoryId,
+		Oid:          oid,
+		Cid:          cid,
+		RootHash:     rootHash,
+		Size_:        uint64(size),
+	}
+
+	err := g.gc.BroadcastTxAndWait(ctx, msg)
+	if err != nil {
+		return errors.WithMessage(err, "error sending tx")
+	}
+
+	return nil
+}
+
+func (g GitopiaProxy) DeleteLFSObject(ctx context.Context, repositoryId uint64, oid string, ownerId string) error {
+	msg := &storagetypes.MsgDeleteLFSObject{
+		Creator:      g.gc.Address().String(),
+		RepositoryId: repositoryId,
+		Oid:          oid,
+		OwnerId:      ownerId,
+	}
+
+	err := g.gc.BroadcastTxAndWait(ctx, msg)
+	if err != nil {
+		return errors.WithMessage(err, "error sending tx")
+	}
+
+	return nil
+}
+
+func (g GitopiaProxy) LFSObject(ctx context.Context, id uint64) (storagetypes.LFSObject, error) {
+	resp, err := g.gc.QueryClient().Storage.LFSObject(ctx, &storagetypes.QueryLFSObjectRequest{
+		Id: id,
+	})
+	if err != nil {
+		return storagetypes.LFSObject{}, errors.WithMessage(err, "query error")
+	}
+
+	return resp.LfsObject, nil
+}
+
+func (g GitopiaProxy) LFSObjectsByRepositoryId(ctx context.Context, repositoryId uint64) ([]storagetypes.LFSObject, error) {
+	resp, err := g.gc.QueryClient().Storage.LFSObjectsByRepositoryId(ctx, &storagetypes.QueryLFSObjectsByRepositoryIdRequest{
+		RepositoryId: repositoryId,
+	})
+	if err != nil {
+		return nil, errors.WithMessage(err, "query error")
+	}
+
+	return resp.LfsObjects, nil
+}

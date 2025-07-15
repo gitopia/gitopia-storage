@@ -207,24 +207,6 @@ func getNamespaceAndRepo(input string) (string, string) {
 
 func New(cmd *cobra.Command, cfg utils.Config) (*Server, error) {
 	s := Server{Config: cfg}
-	basic := &lfs.BasicHandler{
-		DefaultStorage: lfsutil.Storage(lfsutil.StorageLocal),
-		Storagers: map[lfsutil.Storage]lfsutil.Storager{
-			lfsutil.StorageLocal: &lfsutil.LocalStorage{Root: viper.GetString("LFS_OBJECTS_DIR")},
-		},
-	}
-	s.Services = []Service{
-		{"GET", "/info/refs", s.GetInfoRefs, ""},
-		{"POST", "/git-upload-pack", s.PostRPC, "git-upload-pack"},
-		{"POST", "/git-receive-pack", s.PostRPC, "git-receive-pack"},
-	}
-
-	s.LfsServices = []LfsService{
-		{"POST", "/objects/batch", lfs.Authenticate(basic.ServeBatchHandler)},
-		{"GET", "/objects/basic", basic.ServeDownloadHandler},
-		{"PUT", "/objects/basic", lfs.Authenticate(basic.ServeUploadHandler)},
-		{"POST", "/objects/basic/verify", basic.ServeVerifyHandler},
-	}
 
 	// Use PATH if full path is not specified
 	if s.Config.GitPath == "" {
@@ -266,6 +248,27 @@ func New(cmd *cobra.Command, cfg utils.Config) (*Server, error) {
 		return nil, errors.Wrap(err, "failed to create IPFS cluster client")
 	}
 	s.IPFSClusterClient = cl
+
+	basic := &lfs.BasicHandler{
+		DefaultStorage: lfsutil.Storage(lfsutil.StorageLocal),
+		Storagers: map[lfsutil.Storage]lfsutil.Storager{
+			lfsutil.StorageLocal: &lfsutil.LocalStorage{Root: viper.GetString("LFS_OBJECTS_DIR")},
+		},
+		GitopiaProxy:      s.GitopiaProxy,
+		IPFSClusterClient: s.IPFSClusterClient,
+	}
+	s.Services = []Service{
+		{"GET", "/info/refs", s.GetInfoRefs, ""},
+		{"POST", "/git-upload-pack", s.PostRPC, "git-upload-pack"},
+		{"POST", "/git-receive-pack", s.PostRPC, "git-receive-pack"},
+	}
+
+	s.LfsServices = []LfsService{
+		{"POST", "/objects/batch", lfs.Authenticate(basic.ServeBatchHandler)},
+		{"GET", "/objects/basic", basic.ServeDownloadHandler},
+		{"PUT", "/objects/basic", lfs.Authenticate(basic.ServeUploadHandler)},
+		{"POST", "/objects/basic/verify", basic.ServeVerifyHandler},
+	}
 
 	// Initialize cache manager
 	s.CacheManager = utils.NewCacheManager()

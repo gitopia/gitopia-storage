@@ -1,15 +1,19 @@
 package lfs
 
 import (
+	"context"
 	"encoding/json"
-	"io"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/gitopia/gitopia-storage/app"
 	lfsutil "github.com/gitopia/gitopia-storage/lfs"
 	"github.com/gitopia/gitopia-storage/utils"
+	ipfsclusterclient "github.com/ipfs-cluster/ipfs-cluster/api/rest/client"
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 )
 
 const transferBasic = "basic"
@@ -22,7 +26,9 @@ type BasicHandler struct {
 	// The default storage backend for uploading new objects.
 	DefaultStorage lfsutil.Storage
 	// The list of available storage backends to access objects.
-	Storagers map[lfsutil.Storage]lfsutil.Storager
+	Storagers         map[lfsutil.Storage]lfsutil.Storager
+	GitopiaProxy      app.GitopiaProxy
+	IPFSClusterClient ipfsclusterclient.Client
 }
 
 // DefaultStorager returns the default storage backend.
@@ -57,14 +63,14 @@ func (h *BasicHandler) ServeDownloadHandler(w http.ResponseWriter, r *http.Reque
 	s := h.DefaultStorager()
 	if s == nil {
 		internalServerError(w)
-		log.Error("Failed to locate the object [repo_id: %d, oid: %s]: storage %q not found", repoId, oid, s)
+		log.Errorf("Failed to locate the object [repo_id: %d, oid: %s]: storage %q not found", repoId, oid, s)
 		return
 	}
 
 	size, err := s.Size(oid)
 	if err != nil {
 		internalServerError(w)
-		log.Error("Failed to locate the object [repo_id: %d, oid: %s]: storage %q not found", repoId, oid, s)
+		log.Errorf("Failed to locate the object [repo_id: %d, oid: %s]: storage %q not found", repoId, oid, s)
 		return
 	}
 
@@ -74,13 +80,21 @@ func (h *BasicHandler) ServeDownloadHandler(w http.ResponseWriter, r *http.Reque
 
 	err = s.Download(oid, w)
 	if err != nil {
-		log.Error("Failed to download object [oid: %s]: %v", oid, err)
+		log.Errorf("Failed to download object [oid: %s]: %v", oid, err)
 		return
 	}
 }
 
 // PUT /{owner}/{repo}.git/info/lfs/object/basic/{oid}
 func (h *BasicHandler) ServeUploadHandler(w http.ResponseWriter, r *http.Request) {
+	repoId, err := utils.ParseRepositoryIdfromURI(r.URL.Path)
+	if err != nil {
+		responseJSON(w, http.StatusBadRequest, responseError{
+			Message: err.Error(),
+		})
+		return
+	}
+
 	components := strings.Split(r.URL.Path, "/")
 	if len(components) != 7 {
 		responseJSON(w, http.StatusBadRequest, responseError{
@@ -90,20 +104,56 @@ func (h *BasicHandler) ServeUploadHandler(w http.ResponseWriter, r *http.Request
 	}
 	oid := lfsutil.OID(components[6])
 
-	s := h.DefaultStorager()
-
-	// NOTE: LFS client will retry upload the same object if there was a partial failure,
-	// therefore we would like to skip ones that already exist.
-	_, err := s.Size(oid)
-	if err == nil {
-		// Object exists, drain the request body and we're good.
-		_, _ = io.Copy(io.Discard, r.Body)
-		r.Body.Close()
-		w.WriteHeader(http.StatusOK)
+	repo, err := h.GitopiaProxy.Repository(context.Background(), repoId)
+	if err != nil {
+		internalServerError(w)
+		log.WithError(err).Error("failed to get repository")
 		return
 	}
 
-	_, err = s.Upload(oid, r.Body)
+	userQuota, err := h.GitopiaProxy.UserQuota(context.Background(), repo.Owner.Id)
+	if err != nil {
+		internalServerError(w)
+		log.WithError(err).Error("failed to get user quota")
+		return
+	}
+
+	storageParams, err := h.GitopiaProxy.StorageParams(context.Background())
+	if err != nil {
+		internalServerError(w)
+		log.WithError(err).Error("failed to get storage params")
+		return
+	}
+
+	if !storageParams.StoragePricePerMb.IsZero() {
+		costInfo, err := utils.CalculateStorageCost(uint64(userQuota.StorageUsed), uint64(r.ContentLength), storageParams)
+		if err != nil {
+			internalServerError(w)
+			log.WithError(err).Error("failed to calculate storage cost")
+			return
+		}
+
+		if !costInfo.StorageCharge.IsZero() {
+			balance, err := h.GitopiaProxy.CosmosBankBalance(context.Background(), repo.Owner.Id, costInfo.StorageCharge.Denom)
+			if err != nil {
+				internalServerError(w)
+				log.WithError(err).Error("failed to get user balance")
+				return
+			}
+
+			if balance.Amount.LT(costInfo.StorageCharge.Amount) {
+				responseJSON(w, http.StatusPaymentRequired, responseError{Message: "insufficient balance for storage charge"})
+				return
+			}
+		}
+	}
+
+	s := h.DefaultStorager()
+
+	utils.LockLFSObject(string(oid))
+	defer utils.UnlockLFSObject(string(oid))
+
+	size, err := s.Upload(oid, r.Body)
 	if err != nil {
 		if err == lfsutil.ErrInvalidOID {
 			responseJSON(w, http.StatusBadRequest, responseError{
@@ -111,14 +161,30 @@ func (h *BasicHandler) ServeUploadHandler(w http.ResponseWriter, r *http.Request
 			})
 		} else {
 			internalServerError(w)
-			log.Error("Failed to upload object [storage: %s, oid: %s]: %v", s.Storage(), oid, err)
+			log.Errorf("Failed to upload object [storage: %s, oid: %s]: %v", s.Storage(), oid, err)
 		}
+		return
+	}
+
+	filePath := localStoragePath(string(oid))
+
+	cid, err := utils.PinFile(h.IPFSClusterClient, filePath)
+	if err != nil {
+		internalServerError(w)
+		log.WithError(err).Error("failed to pin file to ipfs")
+		return
+	}
+
+	err = h.GitopiaProxy.UpdateLFSObject(context.Background(), repoId, string(oid), cid, nil, size)
+	if err != nil {
+		internalServerError(w)
+		log.WithError(err).Error("failed to update lfs object on chain")
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
 
-	log.Trace("[LFS] Object created %q", oid)
+	log.Tracef("[LFS] Object created %q", oid)
 }
 
 // POST /{owner}/{repo}.git/info/lfs/object/basic/verify
@@ -223,4 +289,12 @@ func internalServerError(w http.ResponseWriter) {
 	responseJSON(w, http.StatusInternalServerError, responseError{
 		Message: "Internal server error",
 	})
+}
+
+func localStoragePath(oid string) string {
+	if len(oid) < 2 {
+		return ""
+	}
+
+	return filepath.Join(viper.GetString("LFS_OBJECTS_DIR"), string(oid[0]), string(oid[1]), string(oid))
 }
