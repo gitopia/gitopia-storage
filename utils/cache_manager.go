@@ -15,14 +15,17 @@ import (
 	"github.com/spf13/viper"
 )
 
-// CacheManager handles cache clearing operations for repositories and release assets
+// CacheManager handles cache clearing operations for repositories, release assets and lfs objects
 type CacheManager struct {
 	repoCacheDir  string
 	assetCacheDir string
+	lfsCacheDir   string
 	repoMaxAge    time.Duration
 	assetMaxAge   time.Duration
+	lfsMaxAge     time.Duration
 	repoMaxSize   int64
 	assetMaxSize  int64
+	lfsMaxSize    int64
 	clearInterval time.Duration
 	stopChan      chan struct{}
 	mu            sync.Mutex
@@ -34,10 +37,13 @@ func NewCacheManager() *CacheManager {
 	return &CacheManager{
 		repoCacheDir:  viper.GetString("GIT_REPOS_DIR"),
 		assetCacheDir: viper.GetString("ATTACHMENT_DIR"),
+		lfsCacheDir:   viper.GetString("LFS_OBJECTS_DIR"),
 		repoMaxAge:    viper.GetDuration("CACHE_REPO_MAX_AGE"),
 		assetMaxAge:   viper.GetDuration("CACHE_ASSET_MAX_AGE"),
+		lfsMaxAge:     viper.GetDuration("CACHE_LFS_MAX_AGE"),
 		repoMaxSize:   viper.GetInt64("CACHE_REPO_MAX_SIZE"),
 		assetMaxSize:  viper.GetInt64("CACHE_ASSET_MAX_SIZE"),
+		lfsMaxSize:    viper.GetInt64("CACHE_LFS_MAX_SIZE"),
 		clearInterval: viper.GetDuration("CACHE_CLEAR_INTERVAL"),
 		stopChan:      make(chan struct{}),
 	}
@@ -99,6 +105,11 @@ func (cm *CacheManager) clearCache() error {
 		return errors.Wrap(err, "failed to clear asset cache")
 	}
 
+	// Clear LFS cache
+	if err := cm.clearLfsCache(); err != nil {
+		return errors.Wrap(err, "failed to clear lfs cache")
+	}
+
 	return nil
 }
 
@@ -110,6 +121,11 @@ func (cm *CacheManager) isRepositoryInUse(repoID uint64) bool {
 // isAssetInUse checks if an asset is currently locked/in use
 func (cm *CacheManager) isAssetInUse(sha string) bool {
 	return IsAssetInUse(sha)
+}
+
+// isLfsObjectInUse checks if an LFS object is currently locked/in use
+func (cm *CacheManager) isLfsObjectInUse(oid string) bool {
+	return IsLFSObjectInUse(oid)
 }
 
 // clearRepositoryCache clears old repository caches based on age and size
@@ -243,6 +259,92 @@ func (cm *CacheManager) clearRepositoryCache() error {
 				"path": entry.path,
 				"size": entry.size,
 			}).Info("cleared repository cache due to size limit")
+		}
+	}
+
+	return nil
+}
+
+// clearLfsCache clears old LFS object caches based on age and size
+func (cm *CacheManager) clearLfsCache() error {
+	entries, err := os.ReadDir(cm.lfsCacheDir)
+	if err != nil {
+		return errors.Wrap(err, "failed to read lfs cache directory")
+	}
+
+	var totalSize int64
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		oid := entry.Name()
+
+		// Skip if LFS object is in use
+		if cm.isLfsObjectInUse(oid) {
+			logrus.WithFields(logrus.Fields{
+				"oid": oid,
+			}).Info("skipping cache clear for in-use lfs object")
+			continue
+		}
+
+		assetPath := filepath.Join(cm.lfsCacheDir, entry.Name())
+		info, err := entry.Info()
+		if err != nil {
+			LogError("cache-clear", fmt.Errorf("failed to get info for lfs object %s: %v", entry.Name(), err))
+			continue
+		}
+
+		// Remove if older than max age
+		if time.Since(info.ModTime()) > cm.lfsMaxAge {
+			if err := os.Remove(assetPath); err != nil {
+				LogError("cache-clear", fmt.Errorf("failed to remove old lfs object %s: %v", entry.Name(), err))
+			}
+			continue
+		}
+
+		totalSize += info.Size()
+	}
+
+	// If total size exceeds max size, remove oldest assets until size is within limit
+	if totalSize > cm.lfsMaxSize {
+		// Sort entries by modification time (oldest first)
+		sort.Slice(entries, func(i, j int) bool {
+			iInfo, iErr := entries[i].Info()
+			jInfo, jErr := entries[j].Info()
+			if iErr != nil || jErr != nil {
+				return false
+			}
+			return iInfo.ModTime().Before(jInfo.ModTime())
+		})
+
+		for _, entry := range entries {
+			if totalSize <= cm.lfsMaxSize {
+				break
+			}
+
+			if entry.IsDir() {
+				continue
+			}
+
+			oid := entry.Name()
+
+			// Skip if LFS object is in use
+			if cm.isLfsObjectInUse(oid) {
+				continue
+			}
+
+			assetPath := filepath.Join(cm.lfsCacheDir, entry.Name())
+			info, err := entry.Info()
+			if err != nil {
+				continue // Should have been caught earlier
+			}
+
+			if err := os.Remove(assetPath); err != nil {
+				LogError("cache-clear", fmt.Errorf("failed to remove lfs object %s for size limit: %v", entry.Name(), err))
+			} else {
+				totalSize -= info.Size()
+			}
 		}
 	}
 
