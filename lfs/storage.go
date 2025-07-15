@@ -45,11 +45,7 @@ func (*LocalStorage) Storage() Storage {
 }
 
 func (s *LocalStorage) storagePath(oid OID) string {
-	if len(oid) < 2 {
-		return ""
-	}
-
-	return filepath.Join(s.Root, string(oid[0]), string(oid[1]), string(oid))
+	return filepath.Join(s.Root, string(oid))
 }
 
 func (s *LocalStorage) Upload(oid OID, rc io.ReadCloser) (int64, error) {

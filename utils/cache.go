@@ -476,7 +476,7 @@ func CacheReleaseAsset(repositoryId uint64, tag, name string, cacheDir string) e
 
 func IsLFSObjectCached(oid string) (bool, error) {
 	lfsDir := viper.GetString("LFS_OBJECTS_DIR")
-	filePath := filepath.Join(lfsDir, string(oid[0]), string(oid[1]), oid)
+	filePath := filepath.Join(lfsDir, oid)
 
 	if _, err := os.Stat(filePath); err == nil {
 		return true, nil
@@ -497,7 +497,7 @@ func DownloadLFSObject(cid, oid string) error {
 	}
 
 	lfsDir := viper.GetString("LFS_OBJECTS_DIR")
-	filePath := filepath.Join(lfsDir, string(oid[0]), string(oid[1]), oid)
+	filePath := filepath.Join(lfsDir, oid)
 
 	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
 		return fmt.Errorf("failed to create lfs object directory: %v", err)

@@ -292,9 +292,5 @@ func internalServerError(w http.ResponseWriter) {
 }
 
 func localStoragePath(oid string) string {
-	if len(oid) < 2 {
-		return ""
-	}
-
-	return filepath.Join(viper.GetString("LFS_OBJECTS_DIR"), string(oid[0]), string(oid[1]), string(oid))
+	return filepath.Join(viper.GetString("LFS_OBJECTS_DIR"), oid)
 }
