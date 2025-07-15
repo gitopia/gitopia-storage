@@ -35,6 +35,7 @@ const (
 	PackfileDeletedQuery           = "tm.event='Tx' AND gitopia.gitopia.storage.EventPackfileDeleted.repository_id EXISTS"
 	ReleaseAssetUpdatedQuery       = "tm.event='Tx' AND gitopia.gitopia.storage.EventReleaseAssetUpdated.repository_id EXISTS"
 	ReleaseAssetDeletedQuery       = "tm.event='Tx' AND gitopia.gitopia.storage.EventReleaseAssetDeleted.repository_id EXISTS"
+	LfsObjectUpdatedQuery          = "tm.event='Tx' AND gitopia.gitopia.storage.EventLFSObjectUpdated.repository_id EXISTS"
 	CreateReleaseQuery             = "tm.event='Tx' AND message.action='CreateRelease'"
 	UpdateReleaseQuery             = "tm.event='Tx' AND message.action='UpdateRelease'"
 	DeleteReleaseQuery             = "tm.event='Tx' AND message.action='DeleteRelease'"
@@ -237,6 +238,7 @@ func start(cmd *cobra.Command, args []string) error {
 		packfileDeletedHandler := handler.NewPackfileDeletedEventHandler(gp)
 		releaseAssetUpdatedHandler := handler.NewReleaseAssetUpdatedEventHandler(gp)
 		releaseAssetDeletedHandler := handler.NewReleaseAssetDeletedEventHandler(gp)
+		lfsObjectUpdatedHandler := handler.NewLfsObjectUpdatedEventHandler(gp)
 		releaseHandler := handler.NewReleaseEventHandler(gp, cl)
 		daoReleaseHandler := handler.NewDaoCreateReleaseEventHandler(gp, cl)
 		deleteRepoHandler := handler.NewDeleteRepositoryEventHandler(gp, dcc, cl)
@@ -288,14 +290,21 @@ func start(cmd *cobra.Command, args []string) error {
 		}
 		deleteRepoDone, deleteRepoSubscribeErr := deleteRepoTMC.Subscribe(ctx, deleteRepoHandler.Handle)
 
+		lfsObjectUpdatedTMC, err := gitopia.NewWSEvents(ctx, LfsObjectUpdatedQuery)
+		if err != nil {
+			eventErrChan <- errors.WithMessage(err, "lfs object updated tm error")
+			return
+		}
+
 		// Only subscribe to packfile and release asset events if external pinning is enabled
-		var packfileUpdatedDone, packfileDeletedDone, releaseAssetUpdatedDone, releaseAssetDeletedDone <-chan struct{}
-		var packfileUpdatedSubscribeErr, packfileDeletedSubscribeErr, releaseAssetUpdatedSubscribeErr, releaseAssetDeletedSubscribeErr <-chan error
+		var packfileUpdatedDone, packfileDeletedDone, releaseAssetUpdatedDone, releaseAssetDeletedDone, lfsObjectUpdatedDone <-chan struct{}
+		var packfileUpdatedSubscribeErr, packfileDeletedSubscribeErr, releaseAssetUpdatedSubscribeErr, releaseAssetDeletedSubscribeErr, lfsObjectUpdatedSubscribeErr <-chan error
 		if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
 			packfileUpdatedDone, packfileUpdatedSubscribeErr = putmc.Subscribe(ctx, packfileUpdatedHandler.Handle)
 			packfileDeletedDone, packfileDeletedSubscribeErr = pdmc.Subscribe(ctx, packfileDeletedHandler.Handle)
 			releaseAssetUpdatedDone, releaseAssetUpdatedSubscribeErr = rautmc.Subscribe(ctx, releaseAssetUpdatedHandler.Handle)
 			releaseAssetDeletedDone, releaseAssetDeletedSubscribeErr = radtmc.Subscribe(ctx, releaseAssetDeletedHandler.Handle)
+			lfsObjectUpdatedDone, lfsObjectUpdatedSubscribeErr = lfsObjectUpdatedTMC.Subscribe(ctx, lfsObjectUpdatedHandler.Handle)
 		}
 
 		select {
@@ -342,6 +351,14 @@ func start(cmd *cobra.Command, args []string) error {
 		case <-releaseAssetDeletedDone:
 			if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
 				logger.FromContext(ctx).Info("release asset deleted done")
+			}
+		case err = <-lfsObjectUpdatedSubscribeErr:
+			if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
+				eventErrChan <- errors.WithMessage(err, "lfs object updated tm subscribe error")
+			}
+		case <-lfsObjectUpdatedDone:
+			if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
+				logger.FromContext(ctx).Info("lfs object updated done")
 			}
 		case err = <-createReleaseSubscribeErr:
 			eventErrChan <- errors.WithMessage(err, "create release tm subscribe error")
