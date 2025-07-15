@@ -335,6 +335,8 @@ CACHE_REPO_MAX_AGE = "24h"           # Maximum age for repository cache entries
 CACHE_REPO_MAX_SIZE = 10737418240    # Maximum size for repository cache (10GB in bytes)
 CACHE_ASSET_MAX_AGE = "168h"         # Maximum age for asset cache entries (7 days)
 CACHE_ASSET_MAX_SIZE = 5368709120    # Maximum size for asset cache (5GB in bytes)
+CACHE_LFS_MAX_AGE = "720h"           # Maximum age for LFS object cache entries (30 days)
+CACHE_LFS_MAX_SIZE = 53687091200     # Maximum size for LFS object cache (50GB in bytes)
 CACHE_CLEAR_INTERVAL = "1h"          # Interval for cache cleanup
 ```
 
