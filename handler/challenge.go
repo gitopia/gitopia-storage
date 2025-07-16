@@ -108,12 +108,18 @@ func (h *ChallengeEventHandler) Process(ctx context.Context, event ChallengeEven
 			return errors.WithMessage(err, "failed to get packfile from Gitopia")
 		}
 		cid = packfile.Cid
-	} else {
+	} else if challenge.ChallengeType == storagetypes.ChallengeType_CHALLENGE_TYPE_RELEASE_ASSET {
 		release, err := h.gc.ReleaseAsset(ctx, challenge.ContentId)
 		if err != nil {
 			return errors.WithMessage(err, "failed to get release asset from Gitopia")
 		}
 		cid = release.Cid
+	} else {
+		lfsObject, err := h.gc.LFSObject(ctx, challenge.ContentId)
+		if err != nil {
+			return errors.WithMessage(err, "failed to get lfs object from Gitopia")
+		}
+		cid = lfsObject.Cid
 	}
 
 	p, err := path.NewPath("/ipfs/" + cid)
