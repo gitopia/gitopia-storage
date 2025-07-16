@@ -194,7 +194,7 @@ func (h *ReleaseEventHandler) calculateMerkleRoot(ctx context.Context, attachmen
 	}
 
 	// Calculate merkle root
-	rootHash, err := merkleproof.ComputePackfileMerkleRoot(ipfsFile, 256*1024)
+	rootHash, err := merkleproof.ComputeMerkleRoot(ipfsFile)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to compute merkle root for attachment: %s", attachment.Name)
 	}

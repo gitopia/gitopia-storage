@@ -4,7 +4,6 @@ import (
 	"context"
 	"path"
 	"strconv"
-	"strings"
 
 	"github.com/buger/jsonparser"
 	"github.com/gitopia/gitopia-go/logger"
@@ -15,10 +14,9 @@ import (
 	"github.com/spf13/viper"
 )
 
-const EventLFSObjectUpdatedType = "gitopia.gitopia.git.EventLFSObjectUpdated"
+const EventLFSObjectUpdatedType = "gitopia.gitopia.storage.EventLFSObjectUpdated"
 
 type LfsObjectUpdatedEvent struct {
-	LfsObjectId  uint64
 	RepositoryId uint64
 	Oid          string
 	Cid          string
@@ -29,7 +27,6 @@ func (e *LfsObjectUpdatedEvent) UnMarshal(eventBuf []byte) error {
 	if err != nil {
 		return errors.Wrap(err, "error parsing repository id")
 	}
-	repoIdStr = strings.Trim(repoIdStr, "\"")
 	repoId, err := strconv.ParseUint(repoIdStr, 10, 64)
 	if err != nil {
 		return errors.Wrap(err, "error parsing repository id")
@@ -39,28 +36,15 @@ func (e *LfsObjectUpdatedEvent) UnMarshal(eventBuf []byte) error {
 	if err != nil {
 		return errors.Wrap(err, "error parsing oid")
 	}
-	oid = strings.Trim(oid, "\"")
 
 	cid, err := jsonparser.GetString(eventBuf, "events", EventLFSObjectUpdatedType+"."+"cid", "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing cid")
 	}
-	cid = strings.Trim(cid, "\"")
-
-	lfsObjectIdStr, err := jsonparser.GetString(eventBuf, "events", EventLFSObjectUpdatedType+"."+"lfs_object_id", "[0]")
-	if err != nil {
-		return errors.Wrap(err, "error parsing lfs_object_id")
-	}
-	lfsObjectIdStr = strings.Trim(lfsObjectIdStr, "\"")
-	lfsObjectId, err := strconv.ParseUint(lfsObjectIdStr, 10, 64)
-	if err != nil {
-		return errors.Wrap(err, "error parsing lfs_object_id")
-	}
 
 	e.RepositoryId = repoId
 	e.Oid = oid
 	e.Cid = cid
-	e.LfsObjectId = lfsObjectId
 
 	return nil
 }

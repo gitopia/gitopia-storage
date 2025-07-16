@@ -60,7 +60,7 @@ func responseJSON(w http.ResponseWriter, status int, v any) {
 
 	err := json.NewEncoder(w).Encode(v)
 	if err != nil {
-		log.Error("Failed to encode JSON: %v", err)
+		log.Errorf("Failed to encode JSON: %v", err)
 		return
 	}
 }
