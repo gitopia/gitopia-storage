@@ -102,7 +102,18 @@ func setupWebServer(cmd *cobra.Command) (*http.Server, error) {
 	mux := http.NewServeMux()
 	serverWrapper := internalapp.ServerWrapper{Server: server}
 
-	mux.Handle("/", &serverWrapper)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			serverWrapper.ServeHTTP(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
 	mux.Handle("/objects/", http.HandlerFunc(serverWrapper.Server.ObjectsHandler))
 	mux.Handle("/commits", http.HandlerFunc(internalhandler.CommitsHandler))
 	mux.Handle("/commits/", http.HandlerFunc(internalhandler.CommitsHandler))

@@ -90,13 +90,7 @@ func (h *BasicHandler) ServeBatchHandler(w http.ResponseWriter, r *http.Request)
 	if r.TLS != nil {
 		scheme = "https"
 	}
-	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
-		scheme = proto
-	}
 	host := r.Host
-	if forwardedHost := r.Header.Get("X-Forwarded-Host"); forwardedHost != "" {
-		host = forwardedHost
-	}
 	gitServerExternalAddr := fmt.Sprintf("%s://%s", scheme, host)
 
 	// Example: https://server.gitopia.com/1.git/info/lfs/object/basic
