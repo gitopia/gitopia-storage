@@ -318,7 +318,6 @@ WORKING_DIR = "/home/ubuntu/gitopia-storage/"
 # Gitopia Network Configuration
 GITOPIA_ADDR = "gitopia-grpc.polkachu.com:11390"
 TM_ADDR = "https://gitopia-rpc.polkachu.com:443"
-GIT_SERVER_EXTERNAL_ADDR = "public-address"
 CHAIN_ID = "gitopia"
 GAS_PRICES = "0.001ulore"
 

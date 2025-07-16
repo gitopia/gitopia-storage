@@ -8,7 +8,6 @@ import (
 	lfsutil "github.com/gitopia/gitopia-storage/lfs"
 	"github.com/gitopia/gitopia-storage/utils"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 )
 
 // batchRequest defines the request payload for the batch endpoint.
@@ -87,8 +86,21 @@ func (h *BasicHandler) ServeBatchHandler(w http.ResponseWriter, r *http.Request)
 
 	// NOTE: We only support basic transfer as of now.
 	transfer := transferBasic
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+		scheme = proto
+	}
+	host := r.Host
+	if forwardedHost := r.Header.Get("X-Forwarded-Host"); forwardedHost != "" {
+		host = forwardedHost
+	}
+	gitServerExternalAddr := fmt.Sprintf("%s://%s", scheme, host)
+
 	// Example: https://server.gitopia.com/1.git/info/lfs/object/basic
-	baseHref := fmt.Sprintf("%s/%d.git/info/lfs/objects/basic", viper.GetString("GIT_SERVER_EXTERNAL_ADDR"), repoId)
+	baseHref := fmt.Sprintf("%s/%d.git/info/lfs/objects/basic", gitServerExternalAddr, repoId)
 
 	objects := make([]batchObject, 0, len(request.Objects))
 	switch request.Operation {
