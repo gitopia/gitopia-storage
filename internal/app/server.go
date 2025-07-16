@@ -698,7 +698,7 @@ func (s *Server) PostRPC(service string, w http.ResponseWriter, r *Request) {
 			return
 		}
 
-		rootHash, err := merkleproof.ComputePackfileMerkleRoot(file, 256*1024)
+		rootHash, err := merkleproof.ComputeMerkleRoot(file)
 		if err != nil {
 			fail500(w, logContext, fmt.Errorf("failed to compute packfile merkle root: %w", err))
 			return

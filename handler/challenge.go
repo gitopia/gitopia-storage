@@ -141,7 +141,7 @@ func (h *ChallengeEventHandler) Process(ctx context.Context, event ChallengeEven
 		return errors.New("invalid content format")
 	}
 
-	proof, root, chunkHash, err := merkleproof.GenerateChunkProof(file, challenge.ChunkIndex, 256*1024)
+	proof, root, chunkHash, err := merkleproof.GenerateProof(file, challenge.ChunkIndex)
 	if err != nil {
 		return errors.WithMessage(err, "failed to generate proofs")
 	}

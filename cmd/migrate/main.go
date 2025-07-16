@@ -298,7 +298,7 @@ func main() {
 						return err
 					}
 
-					rootHash, err := merkleproof.ComputePackfileMerkleRoot(file, 256*1024)
+					rootHash, err := merkleproof.ComputeMerkleRoot(file)
 					if err != nil {
 						progress.FailedRepos[repository.Id] = err.Error()
 						progress.LastFailedRepo = repository.Id
@@ -523,7 +523,7 @@ func main() {
 						}
 
 						// Calculate merkle root
-						rootHash, err := merkleproof.ComputePackfileMerkleRoot(ipfsFile, 256*1024)
+						rootHash, err := merkleproof.ComputeMerkleRoot(ipfsFile)
 						if err != nil {
 							progress.FailedReleases[release.Id] = err.Error()
 							progress.LastFailedRelease = release.Id

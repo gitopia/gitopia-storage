@@ -4,14 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/gitopia/gitopia-storage/app"
 	lfsutil "github.com/gitopia/gitopia-storage/lfs"
+	"github.com/gitopia/gitopia-storage/pkg/merkleproof"
 	"github.com/gitopia/gitopia-storage/utils"
 	ipfsclusterclient "github.com/ipfs-cluster/ipfs-cluster/api/rest/client"
+	"github.com/ipfs/boxo/files"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )
@@ -175,7 +179,14 @@ func (h *BasicHandler) ServeUploadHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	err = h.GitopiaProxy.UpdateLFSObject(context.Background(), repoId, string(oid), cid, nil, size)
+	rootHash, err := calculateMerkleRoot(filePath)
+	if err != nil {
+		internalServerError(w)
+		log.WithError(err).Error("failed to calculate merkle root")
+		return
+	}
+
+	err = h.GitopiaProxy.UpdateLFSObject(context.Background(), repoId, string(oid), cid, rootHash, size)
 	if err != nil {
 		internalServerError(w)
 		log.WithError(err).Error("failed to update lfs object on chain")
@@ -293,4 +304,32 @@ func internalServerError(w http.ResponseWriter) {
 
 func localStoragePath(oid string) string {
 	return filepath.Join(viper.GetString("LFS_OBJECTS_DIR"), oid)
+}
+
+func calculateMerkleRoot(filePath string) ([]byte, error) {
+	// Open the file for merkle root calculation
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to open file: %s", filePath)
+	}
+	defer file.Close()
+
+	stat, err := file.Stat()
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to get file stat: %s", filePath)
+	}
+
+	// Create a files.File from the os.File
+	ipfsFile, err := files.NewReaderPathFile(filePath, file, stat)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to create files.File from file: %s", filePath)
+	}
+
+	// Calculate merkle root
+	rootHash, err := merkleproof.ComputeMerkleRoot(ipfsFile)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to compute merkle root for file: %s", filePath)
+	}
+
+	return rootHash, nil
 }

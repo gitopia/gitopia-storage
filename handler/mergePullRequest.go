@@ -29,7 +29,7 @@ import (
 const (
 	maxErrorLength  = 255
 	defaultTimeout  = 5 * time.Minute
-	merkleChunkSize = 256 * 1024
+
 )
 
 type InvokeMergePullRequestEvent struct {
@@ -399,7 +399,7 @@ func (h *InvokeMergePullRequestEventHandler) handlePostMergeOperations(ctx conte
 		return errors.New("invalid packfile format")
 	}
 
-	rootHash, err := merkleproof.ComputePackfileMerkleRoot(file, merkleChunkSize)
+	rootHash, err := merkleproof.ComputeMerkleRoot(file)
 	if err != nil {
 		return errors.WithMessage(err, "compute packfile merkle root error")
 	}
