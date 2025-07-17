@@ -163,6 +163,34 @@ func (h *DeleteRepositoryEventHandler) Process(ctx context.Context, event Delete
 		}
 	}
 
+	lfsObjects, err := h.gc.LFSObjectsByRepositoryId(ctx, event.RepositoryId)
+	if err != nil {
+		return errors.Wrap(err, "failed to get repository lfs objects")
+	}
+
+	for _, lfsObject := range lfsObjects {
+		if err := h.gc.DeleteLFSObject(ctx, lfsObject.RepositoryId, lfsObject.Oid, event.RepositoryOwnerId); err != nil {
+			return errors.Wrap(err, "failed to delete lfs object")
+		}
+
+		// check reference count
+		refCount, err := h.gc.StorageCidReferenceCount(ctx, lfsObject.Cid)
+		if err != nil {
+			return errors.Wrap(err, "failed to get reference count")
+		}
+		if refCount == 0 {
+			err := utils.UnpinFile(h.ipfsClusterClient, lfsObject.Cid)
+			if err != nil {
+				logger.WithFields(logrus.Fields{
+					"repository_id":   event.RepositoryId,
+					"repository_name": event.RepositoryName,
+					"oid":             lfsObject.Oid,
+					"cid":             lfsObject.Cid,
+				}).WithError(err).Error("failed to unpin file from IPFS Cluster")
+			}
+		}
+	}
+
 	logger.WithFields(logrus.Fields{
 		"repository_id":   event.RepositoryId,
 		"repository_name": event.RepositoryName,
