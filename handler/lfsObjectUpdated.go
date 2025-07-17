@@ -4,6 +4,7 @@ import (
 	"context"
 	"path"
 	"strconv"
+	"strings"
 
 	"github.com/buger/jsonparser"
 	"github.com/gitopia/gitopia-go/logger"
@@ -27,6 +28,7 @@ func (e *LfsObjectUpdatedEvent) UnMarshal(eventBuf []byte) error {
 	if err != nil {
 		return errors.Wrap(err, "error parsing repository id")
 	}
+	repoIdStr = strings.Trim(repoIdStr, "\"")
 	repoId, err := strconv.ParseUint(repoIdStr, 10, 64)
 	if err != nil {
 		return errors.Wrap(err, "error parsing repository id")
@@ -36,11 +38,13 @@ func (e *LfsObjectUpdatedEvent) UnMarshal(eventBuf []byte) error {
 	if err != nil {
 		return errors.Wrap(err, "error parsing oid")
 	}
+	oid = strings.Trim(oid, "\"")
 
 	cid, err := jsonparser.GetString(eventBuf, "events", EventLFSObjectUpdatedType+"."+"cid", "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing cid")
 	}
+	cid = strings.Trim(cid, "\"")
 
 	e.RepositoryId = repoId
 	e.Oid = oid
