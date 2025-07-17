@@ -93,7 +93,7 @@ func (h *LfsObjectUpdatedEventHandler) Process(ctx context.Context, event LfsObj
 
 	// Pin to Pinata if enabled
 	if h.pinataClient != nil && event.Cid != "" {
-		cacheDir := viper.GetString("LFS_DIR")
+		cacheDir := viper.GetString("LFS_OBJECTS_DIR")
 
 		// check if lfs object is cached
 		cached, err := utils.IsLFSObjectCached(event.Oid)
