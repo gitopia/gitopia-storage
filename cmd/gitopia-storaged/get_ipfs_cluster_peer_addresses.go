@@ -33,7 +33,7 @@ func NewGetIpfsClusterPeerAddressesCmd() *cobra.Command {
 			}
 			defer gc.Close()
 
-			gp := app.NewGitopiaProxy(gc)
+			gp := app.NewGitopiaProxy(gc, nil)
 
 			providers, err := gp.ActiveProviders(ctx)
 			if err != nil {

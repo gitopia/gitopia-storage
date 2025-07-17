@@ -125,7 +125,13 @@ func main() {
 			if err != nil {
 				return err
 			}
-			gitopiaProxy := app.NewGitopiaProxy(gitopiaClient)
+			defer gitopiaClient.Close()
+
+			batchTxManager := app.NewBatchTxManager(gitopiaClient, app.BLOCK_TIME)
+			batchTxManager.Start()
+			defer batchTxManager.Stop()
+
+			gitopiaProxy := app.NewGitopiaProxy(gitopiaClient, batchTxManager)
 
 			// Initialize IPFS cluster client
 			ipfsCfg := &ipfsclusterclient.Config{
