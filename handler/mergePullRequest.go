@@ -222,6 +222,18 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 		return h.handleError(ctx, err, event.TaskId, "set pull request state error")
 	}
 
+	// Wait for pull request update to be confirmed with a timeout of 10 seconds
+	err = h.gc.PollForUpdate(context.Background(), func() (bool, error) {
+		return h.gc.CheckPullRequestUpdate(event.RepositoryId, event.PullRequestIid, mergeCommitSha)
+	})
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return h.handleError(ctx, err, event.TaskId, "timeout waiting for pull request update to be confirmed")
+		} else {
+			return h.handleError(ctx, err, event.TaskId, "failed to verify pull request update")
+		}
+	}
+
 	h.logOperation(ctx, "merge_completed", map[string]interface{}{
 		"creator":          event.Creator,
 		"repository_id":    event.RepositoryId,
@@ -406,6 +418,14 @@ func (h *InvokeMergePullRequestEventHandler) handlePostMergeOperations(ctx conte
 	err = h.gc.UpdateRepositoryPackfile(ctx, resp.Base.RepositoryId, filepath.Base(packfileName), cid, rootHash, packfileInfo.Size())
 	if err != nil {
 		return errors.WithMessage(err, "update repository packfile error")
+	}
+
+	// Wait for packfile update to be confirmed with a timeout of 10 seconds
+	err = h.gc.PollForUpdate(ctx, func() (bool, error) {
+		return h.gc.CheckPackfileUpdate(resp.Base.RepositoryId, cid)
+	})
+	if err != nil {
+		return errors.WithMessage(err, "failed to verify packfile update")
 	}
 
 	// Unpin old packfile from IPFS cluster

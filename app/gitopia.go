@@ -475,6 +475,15 @@ func (g *GitopiaProxy) CheckPackfileUpdate(repositoryId uint64, expectedCid stri
 	return packfile.Cid == expectedCid, nil
 }
 
+// CheckPackfileDelete verifies if a packfile delete was applied
+func (g *GitopiaProxy) CheckPackfileDelete(repositoryId uint64) (bool, error) {
+	_, err := g.RepositoryPackfile(context.Background(), repositoryId)
+	if err != nil && strings.Contains(err.Error(), "packfile not found") {
+		return true, nil
+	}
+	return false, err
+}
+
 // CheckLFSObjectUpdate verifies if an LFS object update was applied
 func (g *GitopiaProxy) CheckLFSObjectUpdate(repositoryId uint64, oid, expectedCid string) (bool, error) {
 	lfsObject, err := g.LFSObjectByRepositoryIdAndOid(context.Background(), repositoryId, oid)
@@ -510,4 +519,13 @@ func (g *GitopiaProxy) CheckReleaseAssetDelete(repositoryId uint64, tag string, 
 		return true, nil
 	}
 	return false, err
+}
+
+// CheckPullRequestUpdate verifies if a pull request update was applied
+func (g *GitopiaProxy) CheckPullRequestUpdate(repositoryId uint64, pullRequestIid uint64, mergeCommitSha string) (bool, error) {
+	pullRequest, err := g.PullRequest(context.Background(), repositoryId, pullRequestIid)
+	if err != nil {
+		return false, err
+	}
+	return pullRequest.MergeCommitSha == mergeCommitSha, nil
 }

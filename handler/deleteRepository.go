@@ -118,6 +118,14 @@ func (h *DeleteRepositoryEventHandler) Process(ctx context.Context, event Delete
 		return errors.Wrap(err, "failed to delete repository packfile")
 	}
 
+	// Wait for packfile delete to be confirmed with a timeout of 10 seconds
+	err = h.gc.PollForUpdate(ctx, func() (bool, error) {
+		return h.gc.CheckPackfileDelete(event.RepositoryId)
+	})
+	if err != nil {
+		return errors.Wrap(err, "failed to verify packfile delete")
+	}
+
 	// Unpin old packfile from IPFS cluster
 	refCount, err := h.gc.StorageCidReferenceCount(ctx, packfile.Cid)
 	if err != nil {
@@ -142,6 +150,14 @@ func (h *DeleteRepositoryEventHandler) Process(ctx context.Context, event Delete
 	for _, asset := range assets {
 		if err := h.gc.DeleteReleaseAsset(ctx, asset.RepositoryId, asset.Tag, asset.Name, event.RepositoryOwnerId); err != nil {
 			return errors.Wrap(err, "failed to delete release asset")
+		}
+
+		// Wait for release asset delete to be confirmed with a timeout of 10 seconds
+		err = h.gc.PollForUpdate(ctx, func() (bool, error) {
+			return h.gc.CheckReleaseAssetDelete(event.RepositoryId, asset.Tag, asset.Name)
+		})
+		if err != nil {
+			return errors.Wrap(err, "failed to verify release asset delete")
 		}
 
 		// check reference count
