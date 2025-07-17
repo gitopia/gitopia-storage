@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -415,4 +416,98 @@ func (g *GitopiaProxy) LFSObjectsByRepositoryId(ctx context.Context, repositoryI
 	}
 
 	return resp.LfsObjects, nil
+}
+
+func (g *GitopiaProxy) LFSObjectByRepositoryIdAndOid(ctx context.Context, repositoryId uint64, oid string) (storagetypes.LFSObject, error) {
+	resp, err := g.gc.QueryClient().Storage.LFSObjectByRepositoryIdAndOid(ctx, &storagetypes.QueryLFSObjectByRepositoryIdAndOidRequest{
+		RepositoryId: repositoryId,
+		Oid:          oid,
+	})
+	if err != nil {
+		return storagetypes.LFSObject{}, errors.WithMessage(err, "query error")
+	}
+
+	return resp.LfsObject, nil
+}
+
+// PollForUpdate polls for an update until the checker function returns true or the context is cancelled
+// checkerFn should return (success, error) where success indicates if the update was verified
+func (g *GitopiaProxy) PollForUpdate(ctx context.Context, checkerFn func() (bool, error)) error {
+	// Create a new context with timeout
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	// Initial check
+	success, err := checkerFn()
+	if err != nil {
+		return err
+	}
+	if success {
+		return nil
+	}
+
+	// Start polling
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			success, err := checkerFn()
+			if err != nil {
+				return err
+			}
+			if success {
+				return nil
+			}
+		}
+	}
+}
+
+// CheckPackfileUpdate verifies if a packfile update was applied
+func (g *GitopiaProxy) CheckPackfileUpdate(repositoryId uint64, expectedCid string) (bool, error) {
+	packfile, err := g.RepositoryPackfile(context.Background(), repositoryId)
+	if err != nil {
+		return false, err
+	}
+	return packfile.Cid == expectedCid, nil
+}
+
+// CheckLFSObjectUpdate verifies if an LFS object update was applied
+func (g *GitopiaProxy) CheckLFSObjectUpdate(repositoryId uint64, oid, expectedCid string) (bool, error) {
+	lfsObject, err := g.LFSObjectByRepositoryIdAndOid(context.Background(), repositoryId, oid)
+	if err != nil {
+		return false, err
+	}
+
+	return lfsObject.Cid == expectedCid, nil
+}
+
+// CheckLFSObjectDelete verifies if an LFS object delete was applied
+func (g *GitopiaProxy) CheckLFSObjectDelete(repositoryId uint64, oid string) (bool, error) {
+	_, err := g.LFSObjectByRepositoryIdAndOid(context.Background(), repositoryId, oid)
+	if err != nil && strings.Contains(err.Error(), "LFS object not found") {
+		return true, nil
+	}
+	return false, err
+}
+
+// CheckReleaseAssetUpdate verifies if a release asset update was applied
+func (g *GitopiaProxy) CheckReleaseAssetUpdate(repositoryId uint64, tag string, name string, expectedCid string) (bool, error) {
+	releaseAsset, err := g.RepositoryReleaseAsset(context.Background(), repositoryId, tag, name)
+	if err != nil {
+		return false, err
+	}
+	return releaseAsset.Cid == expectedCid, nil
+}
+
+// CheckReleaseAssetDelete verifies if a release asset delete was applied
+func (g *GitopiaProxy) CheckReleaseAssetDelete(repositoryId uint64, tag string, name string) (bool, error) {
+	_, err := g.RepositoryReleaseAsset(context.Background(), repositoryId, tag, name)
+	if err != nil && strings.Contains(err.Error(), "release asset not found") {
+		return true, nil
+	}
+	return false, err
 }

@@ -729,6 +729,20 @@ func (s *Server) PostRPC(service string, w http.ResponseWriter, r *Request) {
 			return
 		}
 
+		// Wait for packfile update to be confirmed with a timeout of 10 seconds
+		err = s.GitopiaProxy.PollForUpdate(context.Background(), func() (bool, error) {
+			return s.GitopiaProxy.CheckPackfileUpdate(repoId, cid)
+		})
+
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				fail500(w, logContext, fmt.Errorf("timeout waiting for packfile update to be confirmed"))
+			} else {
+				fail500(w, logContext, fmt.Errorf("failed to verify packfile update: %w", err))
+			}
+			return
+		}
+
 		// Unpin old packfile from IPFS cluster
 		if packfileResp != nil && packfileResp.Packfile.Cid != "" {
 			// Get packfile reference count

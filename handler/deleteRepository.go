@@ -173,6 +173,14 @@ func (h *DeleteRepositoryEventHandler) Process(ctx context.Context, event Delete
 			return errors.Wrap(err, "failed to delete lfs object")
 		}
 
+		// Wait for LFS object delete to be confirmed with a timeout of 10 seconds
+		err = h.gc.PollForUpdate(ctx, func() (bool, error) {
+			return h.gc.CheckLFSObjectDelete(lfsObject.RepositoryId, lfsObject.Oid)
+		})
+		if err != nil {
+			return errors.Wrap(err, "failed to verify LFS object delete")
+		}
+
 		// check reference count
 		refCount, err := h.gc.StorageCidReferenceCount(ctx, lfsObject.Cid)
 		if err != nil {

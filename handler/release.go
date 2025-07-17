@@ -269,6 +269,20 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 				continue
 			}
 
+			// Wait for release asset update to be confirmed with a timeout of 10 seconds
+			err = h.gc.PollForUpdate(ctx, func() (bool, error) {
+				return h.gc.CheckReleaseAssetUpdate(event.RepositoryId, event.Tag, attachment.Name, cid)
+			})
+
+			if err != nil {
+				if errors.Is(err, context.DeadlineExceeded) {
+					logger.FromContext(ctx).WithError(err).Error("timeout waiting for release asset update to be confirmed")
+				} else {
+					logger.FromContext(ctx).WithError(err).Error("failed to verify release asset update")
+				}
+				continue
+			}
+
 			logger.FromContext(ctx).WithFields(logrus.Fields{
 				"attachment":    attachment.Name,
 				"repository_id": event.RepositoryId,
@@ -297,6 +311,20 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 						"repository_id": event.RepositoryId,
 						"tag":           event.Tag,
 					}).Error("failed to delete release attachment")
+					continue
+				}
+
+				// Wait for release asset delete to be confirmed with a timeout of 10 seconds
+				err = h.gc.PollForUpdate(ctx, func() (bool, error) {
+					return h.gc.CheckReleaseAssetDelete(event.RepositoryId, event.Tag, existingAsset.Name)
+				})
+
+				if err != nil {
+					if errors.Is(err, context.DeadlineExceeded) {
+						logger.FromContext(ctx).WithError(err).Error("timeout waiting for release asset delete to be confirmed")
+					} else {
+						logger.FromContext(ctx).WithError(err).Error("failed to verify release asset delete")
+					}
 					continue
 				}
 
@@ -379,6 +407,20 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 						continue
 					}
 
+					// Wait for release asset update to be confirmed with a timeout of 10 seconds
+					err = h.gc.PollForUpdate(ctx, func() (bool, error) {
+						return h.gc.CheckReleaseAssetUpdate(event.RepositoryId, event.Tag, attachment.Name, newCid)
+					})
+
+					if err != nil {
+						if errors.Is(err, context.DeadlineExceeded) {
+							logger.FromContext(ctx).WithError(err).Error("timeout waiting for release asset update to be confirmed")
+						} else {
+							logger.FromContext(ctx).WithError(err).Error("failed to verify release asset update")
+						}
+						continue
+					}
+
 					logger.FromContext(ctx).WithFields(logrus.Fields{
 						"attachment":    attachment.Name,
 						"repository_id": event.RepositoryId,
@@ -451,6 +493,20 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 					continue
 				}
 
+				// Wait for release asset update to be confirmed with a timeout of 10 seconds
+				err = h.gc.PollForUpdate(ctx, func() (bool, error) {
+					return h.gc.CheckReleaseAssetUpdate(event.RepositoryId, event.Tag, attachment.Name, newCid)
+				})
+
+				if err != nil {
+					if errors.Is(err, context.DeadlineExceeded) {
+						logger.FromContext(ctx).WithError(err).Error("timeout waiting for release asset update to be confirmed")
+					} else {
+						logger.FromContext(ctx).WithError(err).Error("failed to verify release asset update")
+					}
+					continue
+				}
+
 				logger.FromContext(ctx).WithFields(logrus.Fields{
 					"attachment":    attachment.Name,
 					"repository_id": event.RepositoryId,
@@ -470,6 +526,20 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 					"repository_id": event.RepositoryId,
 					"tag":           event.Tag,
 				}).Error("failed to delete release asset")
+				continue
+			}
+
+			// Wait for release asset delete to be confirmed with a timeout of 10 seconds
+			err = h.gc.PollForUpdate(ctx, func() (bool, error) {
+				return h.gc.CheckReleaseAssetDelete(event.RepositoryId, event.Tag, existingAsset.Name)
+			})
+
+			if err != nil {
+				if errors.Is(err, context.DeadlineExceeded) {
+					logger.FromContext(ctx).WithError(err).Error("timeout waiting for release asset delete to be confirmed")
+				} else {
+					logger.FromContext(ctx).WithError(err).Error("failed to verify release asset delete")
+				}
 				continue
 			}
 
