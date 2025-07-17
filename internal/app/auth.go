@@ -3,8 +3,8 @@ package app
 import (
 	"fmt"
 
-	"github.com/gitopia/gitopia-go"
 	"github.com/gitopia/gitopia-storage/utils"
+	"github.com/gitopia/gitopia/v6/app"
 	offchaintypes "github.com/gitopia/gitopia/v6/x/offchain/types"
 )
 
@@ -14,7 +14,7 @@ func AuthFunc(token string, req *Request) (bool, error) {
 		return false, err
 	}
 
-	encConf := gitopia.MakeEncodingConfig()
+	encConf := app.MakeEncodingConfig()
 	offchaintypes.RegisterInterfaces(encConf.InterfaceRegistry)
 	offchaintypes.RegisterLegacyAminoCodec(encConf.Amino)
 
