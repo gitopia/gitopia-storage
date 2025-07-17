@@ -205,8 +205,16 @@ func getNamespaceAndRepo(input string) (string, string) {
 	return strings.Join(blocks[0:num-1], "/"), blocks[num-1]
 }
 
+// New creates a new Server instance with the given configuration
 func New(cmd *cobra.Command, cfg utils.Config) (*Server, error) {
-	s := Server{Config: cfg}
+	// Create a context that will be cancelled when the server shuts down
+	ctx, cancel := context.WithCancel(cmd.Context())
+
+	s := Server{
+		Config: cfg,
+		Ctx:    ctx,
+		Cancel: cancel,
+	}
 
 	// Use PATH if full path is not specified
 	if s.Config.GitPath == "" {
@@ -223,7 +231,6 @@ func New(cmd *cobra.Command, cfg utils.Config) (*Server, error) {
 	s.QueryService = &QueryServiceImpl{&queryClient}
 
 	// Initialize GitopiaProxy
-	ctx := cmd.Context()
 	clientCtx := client.GetClientContextFromCmd(cmd)
 	txf, err := tx.NewFactoryCLI(clientCtx, cmd.Flags())
 	if err != nil {
@@ -231,8 +238,9 @@ func New(cmd *cobra.Command, cfg utils.Config) (*Server, error) {
 	}
 	txf = txf.WithGasAdjustment(app.GAS_ADJUSTMENT)
 
-	gitopiaClient, err := gc.NewClient(ctx, clientCtx, txf)
+	gitopiaClient, err := gc.NewClient(s.Ctx, clientCtx, txf)
 	if err != nil {
+		s.Cancel() // Clean up context on error
 		return nil, err
 	}
 	s.GitopiaProxy = app.NewGitopiaProxy(gitopiaClient)
@@ -245,6 +253,7 @@ func New(cmd *cobra.Command, cfg utils.Config) (*Server, error) {
 	}
 	cl, err := ipfsclusterclient.NewDefaultClient(ipfsCfg)
 	if err != nil {
+		s.Shutdown() // Clean up on error
 		return nil, errors.Wrap(err, "failed to create IPFS cluster client")
 	}
 	s.IPFSClusterClient = cl
@@ -474,9 +483,11 @@ type Server struct {
 	LfsServices       []LfsService
 	AuthFunc          func(string, *Request) (bool, error)
 	QueryService      QueryService
-	GitopiaProxy      app.GitopiaProxy
+	GitopiaProxy      *app.GitopiaProxy
 	IPFSClusterClient ipfsclusterclient.Client
 	CacheManager      *utils.CacheManager
+	Ctx               context.Context
+	Cancel            context.CancelFunc
 }
 
 type ServerWrapper struct {
@@ -750,11 +761,39 @@ func (s *Server) PostRPC(service string, w http.ResponseWriter, r *Request) {
 			"repository_id": repoId,
 			"packfile_name": filepath.Base(packfileName),
 			"cid":           cid,
-			"root_hash":     rootHash,
-		}).Info("successfully updated packfile")
+		}).Info("git push completed")
 	}
 }
 
+// Setup initializes the server configuration
 func (s *Server) Setup() error {
-	return s.Config.Setup()
+	// Initialize context if not already set
+	if s.Ctx == nil {
+		s.Ctx, s.Cancel = context.WithCancel(context.Background())
+	}
+
+	// Setup configuration
+	if err := s.Config.Setup(); err != nil {
+		return err
+	}
+
+	return nil
 }
+
+func (s *Server) Shutdown() error {
+	// Cancel the server context to signal shutdown to all components
+	if s.Cancel != nil {
+		s.Cancel()
+	}
+
+	// Clean up GitopiaProxy if it exists
+	if s.GitopiaProxy != nil {
+		s.GitopiaProxy.Stop()
+	}
+
+	// Clean up any other resources if needed
+
+	return nil
+}
+
+// ... rest of the code remains the same ...

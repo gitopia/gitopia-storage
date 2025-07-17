@@ -50,11 +50,11 @@ func (e *LfsObjectUpdatedEvent) UnMarshal(eventBuf []byte) error {
 }
 
 type LfsObjectUpdatedEventHandler struct {
-	gc           app.GitopiaProxy
+	gc           *app.GitopiaProxy
 	pinataClient *PinataClient
 }
 
-func NewLfsObjectUpdatedEventHandler(g app.GitopiaProxy) LfsObjectUpdatedEventHandler {
+func NewLfsObjectUpdatedEventHandler(g *app.GitopiaProxy) LfsObjectUpdatedEventHandler {
 	var pinataClient *PinataClient
 	if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
 		pinataClient = NewPinataClient(viper.GetString("PINATA_JWT"))

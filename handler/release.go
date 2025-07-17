@@ -87,11 +87,11 @@ func (e *ReleaseEvent) UnMarshal(eventBuf []byte) error {
 }
 
 type ReleaseEventHandler struct {
-	gc                app.GitopiaProxy
+	gc                *app.GitopiaProxy
 	ipfsClusterClient ipfsclusterclient.Client
 }
 
-func NewReleaseEventHandler(g app.GitopiaProxy, ipfsClusterClient ipfsclusterclient.Client) ReleaseEventHandler {
+func NewReleaseEventHandler(g *app.GitopiaProxy, ipfsClusterClient ipfsclusterclient.Client) ReleaseEventHandler {
 	return ReleaseEventHandler{
 		gc:                g,
 		ipfsClusterClient: ipfsClusterClient,

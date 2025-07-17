@@ -83,11 +83,11 @@ func (e *DaoCreateReleaseEvent) UnMarshal(eventBuf []byte) error {
 }
 
 type DaoCreateReleaseEventHandler struct {
-	gc                app.GitopiaProxy
+	gc                *app.GitopiaProxy
 	ipfsClusterClient ipfsclusterclient.Client
 }
 
-func NewDaoCreateReleaseEventHandler(g app.GitopiaProxy, ipfsClusterClient ipfsclusterclient.Client) DaoCreateReleaseEventHandler {
+func NewDaoCreateReleaseEventHandler(g *app.GitopiaProxy, ipfsClusterClient ipfsclusterclient.Client) DaoCreateReleaseEventHandler {
 	return DaoCreateReleaseEventHandler{
 		gc:                g,
 		ipfsClusterClient: ipfsClusterClient,

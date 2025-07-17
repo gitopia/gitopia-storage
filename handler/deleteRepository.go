@@ -66,13 +66,13 @@ func (e *DeleteRepositoryEvent) UnMarshal(eventBuf []byte) error {
 }
 
 type DeleteRepositoryEventHandler struct {
-	gc                app.GitopiaProxy
+	gc                *app.GitopiaProxy
 	cc                consumer.Client
 	ipfsClusterClient ipfsclusterclient.Client
 }
 
 // NewDeleteRepositoryEventHandler creates a new DeleteRepositoryEventHandler
-func NewDeleteRepositoryEventHandler(g app.GitopiaProxy, c consumer.Client, ipfsClusterClient ipfsclusterclient.Client) *DeleteRepositoryEventHandler {
+func NewDeleteRepositoryEventHandler(g *app.GitopiaProxy, c consumer.Client, ipfsClusterClient ipfsclusterclient.Client) *DeleteRepositoryEventHandler {
 	return &DeleteRepositoryEventHandler{
 		gc:                g,
 		cc:                c,

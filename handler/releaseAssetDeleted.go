@@ -69,11 +69,11 @@ func (e *ReleaseAssetDeletedEvent) UnMarshal(eventBuf []byte) error {
 }
 
 type ReleaseAssetDeletedEventHandler struct {
-	gc           app.GitopiaProxy
+	gc           *app.GitopiaProxy
 	pinataClient *PinataClient
 }
 
-func NewReleaseAssetDeletedEventHandler(g app.GitopiaProxy) ReleaseAssetDeletedEventHandler {
+func NewReleaseAssetDeletedEventHandler(g *app.GitopiaProxy) ReleaseAssetDeletedEventHandler {
 	var pinataClient *PinataClient
 	if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
 		pinataClient = NewPinataClient(viper.GetString("PINATA_JWT"))

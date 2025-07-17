@@ -83,14 +83,14 @@ func (e *InvokeDaoMergePullRequestEvent) UnMarshal(eventBuf []byte) error {
 }
 
 type InvokeDaoMergePullRequestEventHandler struct {
-	gc app.GitopiaProxy
+	gc *app.GitopiaProxy
 
 	cc consumer.Client
 
 	ipfsClusterClient ipfsclusterclient.Client
 }
 
-func NewInvokeDaoMergePullRequestEventHandler(g app.GitopiaProxy, c consumer.Client, ipfsClusterClient ipfsclusterclient.Client) InvokeDaoMergePullRequestEventHandler {
+func NewInvokeDaoMergePullRequestEventHandler(g *app.GitopiaProxy, c consumer.Client, ipfsClusterClient ipfsclusterclient.Client) InvokeDaoMergePullRequestEventHandler {
 	return InvokeDaoMergePullRequestEventHandler{
 		gc:                g,
 		cc:                c,

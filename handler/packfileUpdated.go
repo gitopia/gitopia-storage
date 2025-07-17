@@ -72,11 +72,11 @@ func (e *PackfileUpdatedEvent) UnMarshal(eventBuf []byte) error {
 }
 
 type PackfileUpdatedEventHandler struct {
-	gc           app.GitopiaProxy
+	gc           *app.GitopiaProxy
 	pinataClient *PinataClient
 }
 
-func NewPackfileUpdatedEventHandler(g app.GitopiaProxy) PackfileUpdatedEventHandler {
+func NewPackfileUpdatedEventHandler(g *app.GitopiaProxy) PackfileUpdatedEventHandler {
 	var pinataClient *PinataClient
 	if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
 		pinataClient = NewPinataClient(viper.GetString("PINATA_JWT"))

@@ -31,7 +31,7 @@ type BasicHandler struct {
 	DefaultStorage lfsutil.Storage
 	// The list of available storage backends to access objects.
 	Storagers         map[lfsutil.Storage]lfsutil.Storager
-	GitopiaProxy      app.GitopiaProxy
+	GitopiaProxy      *app.GitopiaProxy
 	IPFSClusterClient ipfsclusterclient.Client
 }
 

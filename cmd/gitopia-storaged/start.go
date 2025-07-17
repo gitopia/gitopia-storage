@@ -94,9 +94,12 @@ func setupWebServer(cmd *cobra.Command) (*http.Server, error) {
 		return nil, err
 	}
 
-	// Configure git server
+	// Initialize server context and cancellation
+	server.Ctx, server.Cancel = context.WithCancel(cmd.Context())
+
+	// Setup server
 	if err = server.Setup(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to setup server: %w", err)
 	}
 
 	mux := http.NewServeMux()

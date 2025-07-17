@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"time"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/query"
@@ -17,17 +18,33 @@ const (
 	GAS_ADJUSTMENT             = 1.8
 	MAX_TRIES                  = 5
 	MAX_WAIT_BLOCKS            = 10
+	BLOCK_TIME                 = 1600 * time.Millisecond
 )
 
 type GitopiaProxy struct {
-	gc gitopia.Client
+	gc         gitopia.Client
+	batchTxMgr *BatchTxManager
 }
 
-func NewGitopiaProxy(g gitopia.Client) GitopiaProxy {
-	return GitopiaProxy{g}
+func NewGitopiaProxy(g gitopia.Client) *GitopiaProxy {
+	// Initialize batch transaction manager with 1.6 second batch interval
+	batchTxMgr := NewBatchTxManager(g, BLOCK_TIME)
+	batchTxMgr.Start()
+
+	return &GitopiaProxy{
+		gc:         g,
+		batchTxMgr: batchTxMgr,
+	}
 }
 
-func (g GitopiaProxy) UpdateTask(ctx context.Context, id uint64, state types.TaskState, message string) error {
+// Stop gracefully shuts down the GitopiaProxy and its batch transaction manager
+func (g *GitopiaProxy) Stop() {
+	if g.batchTxMgr != nil {
+		g.batchTxMgr.Stop()
+	}
+}
+
+func (g *GitopiaProxy) UpdateTask(ctx context.Context, id uint64, state types.TaskState, message string) error {
 	msg := &types.MsgUpdateTask{
 		Creator: g.gc.Address().String(),
 		Id:      id,
@@ -35,12 +52,8 @@ func (g GitopiaProxy) UpdateTask(ctx context.Context, id uint64, state types.Tas
 		Message: message,
 	}
 
-	err := g.gc.BroadcastTxAndWait(ctx, msg)
-	if err != nil {
-		return errors.WithMessage(err, "error sending tx")
-	}
-
-	return nil
+	// Use batch transaction manager
+	return g.batchTxMgr.AddToBatch(ctx, msg)
 }
 
 func (g GitopiaProxy) RepositoryName(ctx context.Context, id uint64) (string, error) {
@@ -54,7 +67,7 @@ func (g GitopiaProxy) RepositoryName(ctx context.Context, id uint64) (string, er
 	return resp.Repository.Name, nil
 }
 
-func (g GitopiaProxy) RepositoryId(ctx context.Context, address string, repoName string) (uint64, error) {
+func (g *GitopiaProxy) RepositoryId(ctx context.Context, address string, repoName string) (uint64, error) {
 	resp, err := g.gc.QueryClient().Gitopia.AnyRepository(ctx, &types.QueryGetAnyRepositoryRequest{
 		Id:             address,
 		RepositoryName: repoName,
@@ -66,7 +79,7 @@ func (g GitopiaProxy) RepositoryId(ctx context.Context, address string, repoName
 	return resp.Repository.Id, nil
 }
 
-func (g GitopiaProxy) PullRequest(ctx context.Context, repositoryId uint64, pullRequestIid uint64) (types.PullRequest, error) {
+func (g *GitopiaProxy) PullRequest(ctx context.Context, repositoryId uint64, pullRequestIid uint64) (types.PullRequest, error) {
 	repoResp, err := g.gc.QueryClient().Gitopia.Repository(ctx, &types.QueryGetRepositoryRequest{
 		Id: repositoryId,
 	})
@@ -86,7 +99,7 @@ func (g GitopiaProxy) PullRequest(ctx context.Context, repositoryId uint64, pull
 	return *prResp.PullRequest, nil
 }
 
-func (g GitopiaProxy) Task(ctx context.Context, id uint64) (types.Task, error) {
+func (g *GitopiaProxy) Task(ctx context.Context, id uint64) (types.Task, error) {
 	res, err := g.gc.QueryClient().Gitopia.Task(ctx, &types.QueryGetTaskRequest{
 		Id: id,
 	})
@@ -97,7 +110,7 @@ func (g GitopiaProxy) Task(ctx context.Context, id uint64) (types.Task, error) {
 	return res.Task, nil
 }
 
-func (g GitopiaProxy) Repository(ctx context.Context, repositoryId uint64) (types.Repository, error) {
+func (g *GitopiaProxy) Repository(ctx context.Context, repositoryId uint64) (types.Repository, error) {
 	resp, err := g.gc.QueryClient().Gitopia.Repository(ctx, &types.QueryGetRepositoryRequest{
 		Id: repositoryId,
 	})
@@ -108,7 +121,7 @@ func (g GitopiaProxy) Repository(ctx context.Context, repositoryId uint64) (type
 	return *resp.Repository, nil
 }
 
-func (g GitopiaProxy) UpdateRepositoryPackfile(ctx context.Context, repositoryId uint64, name string, cid string, rootHash []byte, size int64) error {
+func (g *GitopiaProxy) UpdateRepositoryPackfile(ctx context.Context, repositoryId uint64, name string, cid string, rootHash []byte, size int64) error {
 	msg := &storagetypes.MsgUpdateRepositoryPackfile{
 		Creator:      g.gc.Address().String(),
 		RepositoryId: repositoryId,
@@ -118,30 +131,22 @@ func (g GitopiaProxy) UpdateRepositoryPackfile(ctx context.Context, repositoryId
 		Size_:        uint64(size),
 	}
 
-	err := g.gc.BroadcastTxAndWait(ctx, msg)
-	if err != nil {
-		return errors.WithMessage(err, "error sending tx")
-	}
-
-	return nil
+	// Use batch transaction manager
+	return g.batchTxMgr.AddToBatch(ctx, msg)
 }
 
-func (g GitopiaProxy) DeleteRepositoryPackfile(ctx context.Context, repositoryId uint64, ownerId string) error {
+func (g *GitopiaProxy) DeleteRepositoryPackfile(ctx context.Context, repositoryId uint64, ownerId string) error {
 	msg := &storagetypes.MsgDeleteRepositoryPackfile{
 		Creator:      g.gc.Address().String(),
 		RepositoryId: repositoryId,
 		OwnerId:      ownerId,
 	}
 
-	err := g.gc.BroadcastTxAndWait(ctx, msg)
-	if err != nil {
-		return errors.WithMessage(err, "error sending tx")
-	}
-
-	return nil
+	// Use batch transaction manager
+	return g.batchTxMgr.AddToBatch(ctx, msg)
 }
 
-func (g GitopiaProxy) SubmitChallenge(ctx context.Context, creator string, challengeId uint64, data []byte, proof *storagetypes.Proof) error {
+func (g *GitopiaProxy) SubmitChallenge(ctx context.Context, creator string, challengeId uint64, data []byte, proof *storagetypes.Proof) error {
 	msg := &storagetypes.MsgSubmitChallengeResponse{
 		Creator:     creator,
 		ChallengeId: challengeId,
@@ -149,15 +154,11 @@ func (g GitopiaProxy) SubmitChallenge(ctx context.Context, creator string, chall
 		Proof:       proof,
 	}
 
-	err := g.gc.BroadcastTxAndWait(ctx, msg)
-	if err != nil {
-		return errors.WithMessage(err, "error sending tx")
-	}
-
-	return nil
+	// Use batch transaction manager
+	return g.batchTxMgr.AddToBatch(ctx, msg)
 }
 
-func (g GitopiaProxy) Challenge(ctx context.Context, id uint64) (storagetypes.Challenge, error) {
+func (g *GitopiaProxy) Challenge(ctx context.Context, id uint64) (storagetypes.Challenge, error) {
 	resp, err := g.gc.QueryClient().Storage.Challenge(ctx, &storagetypes.QueryChallengeRequest{
 		Id: id,
 	})
@@ -168,7 +169,7 @@ func (g GitopiaProxy) Challenge(ctx context.Context, id uint64) (storagetypes.Ch
 	return resp.Challenge, nil
 }
 
-func (g GitopiaProxy) Packfile(ctx context.Context, id uint64) (storagetypes.Packfile, error) {
+func (g *GitopiaProxy) Packfile(ctx context.Context, id uint64) (storagetypes.Packfile, error) {
 	resp, err := g.gc.QueryClient().Storage.Packfile(ctx, &storagetypes.QueryPackfileRequest{
 		Id: id,
 	})
@@ -179,12 +180,13 @@ func (g GitopiaProxy) Packfile(ctx context.Context, id uint64) (storagetypes.Pac
 	return resp.Packfile, nil
 }
 
-func (g GitopiaProxy) CheckProvider(provider string) bool {
-	return provider == g.gc.Address().String()
+// CheckProvider checks if the given provider address matches the current node's address
+func (g *GitopiaProxy) CheckProvider(providerAddress string) bool {
+	return g.gc.Address().String() == providerAddress
 }
 
-// get client address
-func (g GitopiaProxy) ClientAddress() string {
+// ClientAddress returns the client's address as a string
+func (g *GitopiaProxy) ClientAddress() string {
 	return g.gc.Address().String()
 }
 
@@ -210,7 +212,7 @@ func (g GitopiaProxy) ReleaseAsset(ctx context.Context, id uint64) (storagetypes
 	return resp.ReleaseAsset, nil
 }
 
-func (g GitopiaProxy) UpdateReleaseAsset(ctx context.Context, repositoryId uint64, tag string, name string, cid string, rootHash []byte, size int64, sha256 string) error {
+func (g *GitopiaProxy) UpdateReleaseAsset(ctx context.Context, repositoryId uint64, tag string, name string, cid string, rootHash []byte, size int64, sha256 string) error {
 	msg := &storagetypes.MsgUpdateReleaseAsset{
 		Creator:      g.gc.Address().String(),
 		RepositoryId: repositoryId,
@@ -222,15 +224,11 @@ func (g GitopiaProxy) UpdateReleaseAsset(ctx context.Context, repositoryId uint6
 		Sha256:       sha256,
 	}
 
-	err := g.gc.BroadcastTxAndWait(ctx, msg)
-	if err != nil {
-		return errors.WithMessage(err, "error sending tx")
-	}
-
-	return nil
+	// Use batch transaction manager
+	return g.batchTxMgr.AddToBatch(ctx, msg)
 }
 
-func (g GitopiaProxy) RepositoryReleaseAsset(ctx context.Context, repositoryId uint64, tag string, name string) (storagetypes.ReleaseAsset, error) {
+func (g *GitopiaProxy) RepositoryReleaseAsset(ctx context.Context, repositoryId uint64, tag string, name string) (storagetypes.ReleaseAsset, error) {
 	resp, err := g.gc.QueryClient().Storage.RepositoryReleaseAsset(ctx, &storagetypes.QueryRepositoryReleaseAssetRequest{
 		RepositoryId: repositoryId,
 		Tag:          tag,
@@ -243,7 +241,7 @@ func (g GitopiaProxy) RepositoryReleaseAsset(ctx context.Context, repositoryId u
 	return resp.ReleaseAsset, nil
 }
 
-func (g GitopiaProxy) RepositoryReleaseAssets(ctx context.Context, repositoryId uint64, tag string) ([]storagetypes.ReleaseAsset, error) {
+func (g *GitopiaProxy) RepositoryReleaseAssets(ctx context.Context, repositoryId uint64, tag string) ([]storagetypes.ReleaseAsset, error) {
 	resp, err := g.gc.QueryClient().Storage.RepositoryReleaseAssets(ctx, &storagetypes.QueryRepositoryReleaseAssetsRequest{
 		RepositoryId: repositoryId,
 		Tag:          tag,
@@ -255,7 +253,7 @@ func (g GitopiaProxy) RepositoryReleaseAssets(ctx context.Context, repositoryId 
 	return resp.ReleaseAssets, nil
 }
 
-func (g GitopiaProxy) RepositoryPackfile(ctx context.Context, repositoryId uint64) (storagetypes.Packfile, error) {
+func (g *GitopiaProxy) RepositoryPackfile(ctx context.Context, repositoryId uint64) (storagetypes.Packfile, error) {
 	resp, err := g.gc.QueryClient().Storage.RepositoryPackfile(ctx, &storagetypes.QueryRepositoryPackfileRequest{
 		RepositoryId: repositoryId,
 	})
@@ -266,7 +264,7 @@ func (g GitopiaProxy) RepositoryPackfile(ctx context.Context, repositoryId uint6
 	return resp.Packfile, nil
 }
 
-func (g GitopiaProxy) MergePullRequest(ctx context.Context, repositoryId uint64, pullRequestIid uint64, mergeCommitSha string, taskId uint64) error {
+func (g *GitopiaProxy) MergePullRequest(ctx context.Context, repositoryId uint64, pullRequestIid uint64, mergeCommitSha string, taskId uint64) error {
 	msg := &storagetypes.MsgMergePullRequest{
 		Creator:        g.gc.Address().String(),
 		RepositoryId:   repositoryId,
@@ -275,15 +273,11 @@ func (g GitopiaProxy) MergePullRequest(ctx context.Context, repositoryId uint64,
 		TaskId:         taskId,
 	}
 
-	err := g.gc.BroadcastTxAndWait(ctx, msg)
-	if err != nil {
-		return errors.WithMessage(err, "error sending tx")
-	}
-
-	return nil
+	// Use batch transaction manager
+	return g.batchTxMgr.AddToBatch(ctx, msg)
 }
 
-func (g GitopiaProxy) StorageParams(ctx context.Context) (storagetypes.Params, error) {
+func (g *GitopiaProxy) StorageParams(ctx context.Context) (storagetypes.Params, error) {
 	resp, err := g.gc.QueryClient().Storage.Params(ctx, &storagetypes.QueryParamsRequest{})
 	if err != nil {
 		return storagetypes.Params{}, errors.WithMessage(err, "query error")
@@ -292,7 +286,7 @@ func (g GitopiaProxy) StorageParams(ctx context.Context) (storagetypes.Params, e
 	return resp.Params, nil
 }
 
-func (g GitopiaProxy) CosmosBankBalance(ctx context.Context, address, denom string) (sdk.Coin, error) {
+func (g *GitopiaProxy) CosmosBankBalance(ctx context.Context, address, denom string) (sdk.Coin, error) {
 	resp, err := g.gc.QueryClient().Bank.Balance(ctx, &banktypes.QueryBalanceRequest{
 		Address: address,
 		Denom:   denom,
@@ -304,7 +298,7 @@ func (g GitopiaProxy) CosmosBankBalance(ctx context.Context, address, denom stri
 	return *resp.Balance, nil
 }
 
-func (g GitopiaProxy) StorageCidReferenceCount(ctx context.Context, cid string) (uint64, error) {
+func (g *GitopiaProxy) StorageCidReferenceCount(ctx context.Context, cid string) (uint64, error) {
 	resp, err := g.gc.QueryClient().Storage.CidReferenceCount(ctx, &storagetypes.QueryCidReferenceCountRequest{
 		Cid: cid,
 	})
@@ -315,7 +309,7 @@ func (g GitopiaProxy) StorageCidReferenceCount(ctx context.Context, cid string) 
 	return resp.Count, nil
 }
 
-func (g GitopiaProxy) DeleteReleaseAsset(ctx context.Context, repositoryId uint64, tag string, name string, ownerId string) error {
+func (g *GitopiaProxy) DeleteReleaseAsset(ctx context.Context, repositoryId uint64, tag string, name string, ownerId string) error {
 	msg := &storagetypes.MsgDeleteReleaseAsset{
 		Creator:      g.gc.Address().String(),
 		RepositoryId: repositoryId,
@@ -324,15 +318,11 @@ func (g GitopiaProxy) DeleteReleaseAsset(ctx context.Context, repositoryId uint6
 		OwnerId:      ownerId,
 	}
 
-	err := g.gc.BroadcastTxAndWait(ctx, msg)
-	if err != nil {
-		return errors.WithMessage(err, "error sending tx")
-	}
-
-	return nil
+	// Use batch transaction manager
+	return g.batchTxMgr.AddToBatch(ctx, msg)
 }
 
-func (g GitopiaProxy) ActiveProviders(ctx context.Context) ([]storagetypes.Provider, error) {
+func (g *GitopiaProxy) ActiveProviders(ctx context.Context) ([]storagetypes.Provider, error) {
 	resp, err := g.gc.QueryClient().Storage.ActiveProviders(ctx, &storagetypes.QueryActiveProvidersRequest{})
 	if err != nil {
 		return nil, errors.WithMessage(err, "query error")
@@ -342,7 +332,7 @@ func (g GitopiaProxy) ActiveProviders(ctx context.Context) ([]storagetypes.Provi
 }
 
 // RepositoryReleaseAssetsByRepositoryId returns all release assets for a repository with pagination support
-func (g GitopiaProxy) RepositoryReleaseAssetsByRepositoryId(ctx context.Context, repositoryId uint64, nextKey []byte) ([]storagetypes.ReleaseAsset, []byte, error) {
+func (g *GitopiaProxy) RepositoryReleaseAssetsByRepositoryId(ctx context.Context, repositoryId uint64, nextKey []byte) ([]storagetypes.ReleaseAsset, []byte, error) {
 	resp, err := g.gc.QueryClient().Storage.RepositoryReleaseAssetsByRepositoryId(ctx, &storagetypes.QueryRepositoryReleaseAssetsByRepositoryIdRequest{
 		RepositoryId: repositoryId,
 		Pagination: &query.PageRequest{
@@ -357,7 +347,7 @@ func (g GitopiaProxy) RepositoryReleaseAssetsByRepositoryId(ctx context.Context,
 }
 
 // RepositoryReleaseAssetsByRepositoryIdAll returns all release assets for a repository (handles pagination internally)
-func (g GitopiaProxy) RepositoryReleaseAssetsByRepositoryIdAll(ctx context.Context, repositoryId uint64) ([]storagetypes.ReleaseAsset, error) {
+func (g *GitopiaProxy) RepositoryReleaseAssetsByRepositoryIdAll(ctx context.Context, repositoryId uint64) ([]storagetypes.ReleaseAsset, error) {
 	var allAssets []storagetypes.ReleaseAsset
 	var nextKey []byte
 
@@ -379,7 +369,7 @@ func (g GitopiaProxy) RepositoryReleaseAssetsByRepositoryIdAll(ctx context.Conte
 	return allAssets, nil
 }
 
-func (g GitopiaProxy) UpdateLFSObject(ctx context.Context, repositoryId uint64, oid string, cid string, rootHash []byte, size int64) error {
+func (g *GitopiaProxy) UpdateLFSObject(ctx context.Context, repositoryId uint64, oid string, cid string, rootHash []byte, size int64) error {
 	msg := &storagetypes.MsgUpdateLFSObject{
 		Creator:      g.gc.Address().String(),
 		RepositoryId: repositoryId,
@@ -389,15 +379,11 @@ func (g GitopiaProxy) UpdateLFSObject(ctx context.Context, repositoryId uint64, 
 		Size_:        uint64(size),
 	}
 
-	err := g.gc.BroadcastTxAndWait(ctx, msg)
-	if err != nil {
-		return errors.WithMessage(err, "error sending tx")
-	}
-
-	return nil
+	// Use batch transaction manager
+	return g.batchTxMgr.AddToBatch(ctx, msg)
 }
 
-func (g GitopiaProxy) DeleteLFSObject(ctx context.Context, repositoryId uint64, oid string, ownerId string) error {
+func (g *GitopiaProxy) DeleteLFSObject(ctx context.Context, repositoryId uint64, oid string, ownerId string) error {
 	msg := &storagetypes.MsgDeleteLFSObject{
 		Creator:      g.gc.Address().String(),
 		RepositoryId: repositoryId,
@@ -405,15 +391,11 @@ func (g GitopiaProxy) DeleteLFSObject(ctx context.Context, repositoryId uint64, 
 		OwnerId:      ownerId,
 	}
 
-	err := g.gc.BroadcastTxAndWait(ctx, msg)
-	if err != nil {
-		return errors.WithMessage(err, "error sending tx")
-	}
-
-	return nil
+	// Use batch transaction manager
+	return g.batchTxMgr.AddToBatch(ctx, msg)
 }
 
-func (g GitopiaProxy) LFSObject(ctx context.Context, id uint64) (storagetypes.LFSObject, error) {
+func (g *GitopiaProxy) LFSObject(ctx context.Context, id uint64) (storagetypes.LFSObject, error) {
 	resp, err := g.gc.QueryClient().Storage.LFSObject(ctx, &storagetypes.QueryLFSObjectRequest{
 		Id: id,
 	})
@@ -424,7 +406,7 @@ func (g GitopiaProxy) LFSObject(ctx context.Context, id uint64) (storagetypes.LF
 	return resp.LfsObject, nil
 }
 
-func (g GitopiaProxy) LFSObjectsByRepositoryId(ctx context.Context, repositoryId uint64) ([]storagetypes.LFSObject, error) {
+func (g *GitopiaProxy) LFSObjectsByRepositoryId(ctx context.Context, repositoryId uint64) ([]storagetypes.LFSObject, error) {
 	resp, err := g.gc.QueryClient().Storage.LFSObjectsByRepositoryId(ctx, &storagetypes.QueryLFSObjectsByRepositoryIdRequest{
 		RepositoryId: repositoryId,
 	})

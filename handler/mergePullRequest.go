@@ -27,9 +27,8 @@ import (
 )
 
 const (
-	maxErrorLength  = 255
-	defaultTimeout  = 5 * time.Minute
-
+	maxErrorLength = 255
+	defaultTimeout = 5 * time.Minute
 )
 
 type InvokeMergePullRequestEvent struct {
@@ -100,14 +99,14 @@ func (e *InvokeMergePullRequestEvent) UnMarshal(eventBuf []byte) error {
 }
 
 type InvokeMergePullRequestEventHandler struct {
-	gc app.GitopiaProxy
+	gc *app.GitopiaProxy
 
 	cc consumer.Client
 
 	ipfsClusterClient ipfsclusterclient.Client
 }
 
-func NewInvokeMergePullRequestEventHandler(g app.GitopiaProxy, c consumer.Client, ipfsClusterClient ipfsclusterclient.Client) InvokeMergePullRequestEventHandler {
+func NewInvokeMergePullRequestEventHandler(g *app.GitopiaProxy, c consumer.Client, ipfsClusterClient ipfsclusterclient.Client) InvokeMergePullRequestEventHandler {
 	return InvokeMergePullRequestEventHandler{
 		gc:                g,
 		cc:                c,

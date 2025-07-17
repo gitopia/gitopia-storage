@@ -52,11 +52,11 @@ func (e *ChallengeEvent) UnMarshal(eventBuf []byte) error {
 }
 
 type ChallengeEventHandler struct {
-	gc app.GitopiaProxy
+	gc *app.GitopiaProxy
 }
 
-func NewChallengeEventHandler(g app.GitopiaProxy) ChallengeEventHandler {
-	return ChallengeEventHandler{g}
+func NewChallengeEventHandler(g *app.GitopiaProxy) *ChallengeEventHandler {
+	return &ChallengeEventHandler{g}
 }
 
 func (h *ChallengeEventHandler) Handle(ctx context.Context, eventBuf []byte) error {

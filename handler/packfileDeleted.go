@@ -52,11 +52,11 @@ func (e *PackfileDeletedEvent) UnMarshal(eventBuf []byte) error {
 }
 
 type PackfileDeletedEventHandler struct {
-	gc           app.GitopiaProxy
+	gc           *app.GitopiaProxy
 	pinataClient *PinataClient
 }
 
-func NewPackfileDeletedEventHandler(g app.GitopiaProxy) PackfileDeletedEventHandler {
+func NewPackfileDeletedEventHandler(g *app.GitopiaProxy) PackfileDeletedEventHandler {
 	var pinataClient *PinataClient
 	if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
 		pinataClient = NewPinataClient(viper.GetString("PINATA_JWT"))

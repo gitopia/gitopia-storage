@@ -87,11 +87,11 @@ func (e *ReleaseAssetUpdatedEvent) UnMarshal(eventBuf []byte) error {
 }
 
 type ReleaseAssetUpdatedEventHandler struct {
-	gc           app.GitopiaProxy
+	gc           *app.GitopiaProxy
 	pinataClient *PinataClient
 }
 
-func NewReleaseAssetUpdatedEventHandler(g app.GitopiaProxy) ReleaseAssetUpdatedEventHandler {
+func NewReleaseAssetUpdatedEventHandler(g *app.GitopiaProxy) ReleaseAssetUpdatedEventHandler {
 	var pinataClient *PinataClient
 	if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
 		pinataClient = NewPinataClient(viper.GetString("PINATA_JWT"))
