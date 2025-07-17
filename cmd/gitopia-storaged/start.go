@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	_ "net/http/pprof" // Add pprof handlers to default HTTP mux
 	"os"
+	"runtime"
 	"time"
 
 	"github.com/pkg/errors"
@@ -25,6 +27,7 @@ import (
 	ipfsclusterclient "github.com/ipfs-cluster/ipfs-cluster/api/rest/client"
 	"github.com/rs/cors"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -58,20 +61,90 @@ func NewStartCmd() *cobra.Command {
 	return cmdStart
 }
 
-func validateConfig() error {
-	requiredConfigs := []string{
-		"IPFS_CLUSTER_PEER_HOST",
-		"IPFS_CLUSTER_PEER_PORT",
-		"WEB_SERVER_PORT",
-		"GIT_REPOS_DIR",
-	}
+func start(cmd *cobra.Command, args []string) error {
+	g, ctx := errgroup.WithContext(cmd.Context())
 
-	for _, config := range requiredConfigs {
-		if !viper.IsSet(config) {
-			return fmt.Errorf("required configuration %s is not set", config)
+	// Start pprof server for performance monitoring.
+	g.Go(func() error {
+		return startPprofServer(ctx, 6060)
+	})
+
+	// Start memory monitor to log memory usage periodically.
+	g.Go(func() error {
+		startMemoryMonitor(ctx)
+		return nil
+	})
+
+	// Start the main web server.
+	g.Go(func() error {
+		return startWebServer(ctx, cmd)
+	})
+
+	// Start the event processor to handle blockchain events.
+	g.Go(func() error {
+		return startEventProcessor(ctx, cmd)
+	})
+
+	logrus.Info("application started")
+	return g.Wait()
+}
+
+func startPprofServer(ctx context.Context, port int) error {
+	addr := fmt.Sprintf("localhost:%d", port)
+	logrus.Infof("starting pprof server on http://%s/debug/pprof/", addr)
+
+	server := &http.Server{Addr: addr, Handler: nil} // Use default mux
+
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		server.Shutdown(shutdownCtx)
+	}()
+
+	if err := server.ListenAndServe(); err != http.ErrServerClosed {
+		return errors.Wrap(err, "pprof server error")
+	}
+	logrus.Info("pprof server stopped")
+	return nil
+}
+
+func startMemoryMonitor(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			logrus.Infof("Memory Usage: Alloc = %v MiB, TotalAlloc = %v MiB, Sys = %v MiB, NumGC = %v",
+				m.Alloc/1024/1024, m.TotalAlloc/1024/1024, m.Sys/1024/1024, m.NumGC)
+		case <-ctx.Done():
+			logrus.Info("memory monitor stopped")
+			return
 		}
 	}
+}
 
+func startWebServer(ctx context.Context, cmd *cobra.Command) error {
+	server, err := setupWebServer(cmd)
+	if err != nil {
+		return errors.Wrap(err, "failed to setup web server")
+	}
+
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		server.Shutdown(shutdownCtx)
+	}()
+
+	logrus.Infof("starting web server on %s", server.Addr)
+	if err := server.ListenAndServe(); err != http.ErrServerClosed {
+		return errors.Wrap(err, "web server error")
+	}
+	logrus.Info("web server stopped")
 	return nil
 }
 
@@ -90,15 +163,12 @@ func setupWebServer(cmd *cobra.Command) (*http.Server, error) {
 		return nil, err
 	}
 
-	// Ensure cache directory exists
 	if err := os.MkdirAll(viper.GetString("GIT_REPOS_DIR"), os.ModePerm); err != nil {
 		return nil, err
 	}
 
-	// Initialize server context and cancellation
 	server.Ctx, server.Cancel = context.WithCancel(cmd.Context())
 
-	// Setup server
 	if err = server.Setup(); err != nil {
 		return nil, fmt.Errorf("failed to setup server: %w", err)
 	}
@@ -138,277 +208,123 @@ func setupWebServer(cmd *cobra.Command) (*http.Server, error) {
 	}, nil
 }
 
-func start(cmd *cobra.Command, args []string) error {
-	ctx, cancel := context.WithCancel(cmd.Context())
-	defer cancel()
+type eventSubscription struct {
+	query   string
+	handler func(context.Context, []byte) error
+}
 
-	if err := validateConfig(); err != nil {
-		return errors.Wrap(err, "configuration validation failed")
+func startEventProcessor(ctx context.Context, cmd *cobra.Command) error {
+	clientCtx := client.GetClientContextFromCmd(cmd)
+	txf, err := tx.NewFactoryCLI(clientCtx, cmd.Flags())
+	if err != nil {
+		return errors.Wrap(err, "error initializing tx factory")
+	}
+	txf = txf.WithGasAdjustment(app.GAS_ADJUSTMENT)
+
+	gc, err := gitopia.NewClient(ctx, clientCtx, txf)
+	if err != nil {
+		return errors.WithMessage(err, "gitopia client error")
+	}
+	defer gc.Close()
+
+	gp := app.NewGitopiaProxy(gc)
+
+	ipfsCfg := &ipfsclusterclient.Config{
+		Host:    viper.GetString("IPFS_CLUSTER_PEER_HOST"),
+		Port:    viper.GetString("IPFS_CLUSTER_PEER_PORT"),
+		Timeout: time.Minute * 5,
+	}
+	cl, err := ipfsclusterclient.NewDefaultClient(ipfsCfg)
+	if err != nil {
+		return errors.Wrap(err, "failed to create IPFS cluster client")
 	}
 
-	// Start event processor in a goroutine
-	eventErrChan := make(chan error, 1)
-	go func() {
-		defer close(eventErrChan)
+	logger.FromContext(ctx).WithFields(logrus.Fields{
+		"provider": gp.ClientAddress(),
+		"env":      viper.GetString("ENV"),
+	}).Info("starting event processor")
 
-		clientCtx := client.GetClientContextFromCmd(cmd)
-		txf, err := tx.NewFactoryCLI(clientCtx, cmd.Flags())
-		if err != nil {
-			eventErrChan <- errors.Wrap(err, "error initializing tx factory")
-			return
-		}
-		txf = txf.WithGasAdjustment(app.GAS_ADJUSTMENT)
+	mcc, err := consumer.NewClient("invokeMergePullRequestEvent")
+	if err != nil {
+		return errors.WithMessage(err, "error creating consumer client")
+	}
 
-		gc, err := gitopia.NewClient(ctx, clientCtx, txf)
-		if err != nil {
-			eventErrChan <- errors.WithMessage(err, "gitopia client error")
-			return
-		}
-		defer gc.Close()
+	dmcc, err := consumer.NewClient("invokeDaoMergePullRequestEvent")
+	if err != nil {
+		return errors.WithMessage(err, "error creating consumer client")
+	}
 
-		gp := app.NewGitopiaProxy(gc)
+	dcc, err := consumer.NewClient("deleteRepositoryEvent")
+	if err != nil {
+		return errors.WithMessage(err, "error creating consumer client")
+	}
 
-		// Initialize IPFS cluster client
-		ipfsCfg := &ipfsclusterclient.Config{
-			Host:    viper.GetString("IPFS_CLUSTER_PEER_HOST"),
-			Port:    viper.GetString("IPFS_CLUSTER_PEER_PORT"),
-			Timeout: time.Minute * 5, // Reasonable timeout for pinning
-		}
-		cl, err := ipfsclusterclient.NewDefaultClient(ipfsCfg)
-		if err != nil {
-			eventErrChan <- errors.Wrap(err, "failed to create IPFS cluster client")
-			return
-		}
+	mergeHandler := handler.NewInvokeMergePullRequestEventHandler(gp, mcc, cl)
+	daoMergeHandler := handler.NewInvokeDaoMergePullRequestEventHandler(gp, dmcc, cl)
+	challengeHandler := handler.NewChallengeEventHandler(gp)
+	packfileUpdatedHandler := handler.NewPackfileUpdatedEventHandler(gp)
+	packfileDeletedHandler := handler.NewPackfileDeletedEventHandler(gp)
+	releaseAssetUpdatedHandler := handler.NewReleaseAssetUpdatedEventHandler(gp)
+	releaseAssetDeletedHandler := handler.NewReleaseAssetDeletedEventHandler(gp)
+	lfsObjectUpdatedHandler := handler.NewLfsObjectUpdatedEventHandler(gp)
+	lfsObjectDeletedHandler := handler.NewLfsObjectDeletedEventHandler(gp)
+	releaseHandler := handler.NewReleaseEventHandler(gp, cl)
+	daoReleaseHandler := handler.NewDaoCreateReleaseEventHandler(gp, cl)
+	deleteRepoHandler := handler.NewDeleteRepositoryEventHandler(gp, dcc, cl)
 
-		logger.FromContext(ctx).WithFields(logrus.Fields{
-			"provider": gp.ClientAddress(),
-			"env":      viper.GetString("ENV"),
-			"port":     viper.GetString("WEB_SERVER_PORT"),
-		}).Info("starting storage provider")
-
-		mtmc, err := gitopia.NewWSEvents(ctx, InvokeMergePullRequestQuery)
-		if err != nil {
-			eventErrChan <- errors.WithMessage(err, "tm error")
-			return
-		}
-
-		dmtmc, err := gitopia.NewWSEvents(ctx, InvokeDaoMergePullRequestQuery)
-		if err != nil {
-			eventErrChan <- errors.WithMessage(err, "tm error")
-			return
-		}
-
-		ctmc, err := gitopia.NewWSEvents(ctx, ChallengeCreatedQuery)
-		if err != nil {
-			eventErrChan <- errors.WithMessage(err, "tm error")
-			return
-		}
-
-		mcc, err := consumer.NewClient("invokeMergePullRequestEvent")
-		if err != nil {
-			eventErrChan <- errors.WithMessage(err, "error creating consumer client")
-			return
-		}
-
-		dmcc, err := consumer.NewClient("invokeDaoMergePullRequestEvent")
-		if err != nil {
-			eventErrChan <- errors.WithMessage(err, "error creating consumer client")
-			return
-		}
-
-		dcc, err := consumer.NewClient("deleteRepositoryEvent")
-		if err != nil {
-			eventErrChan <- errors.WithMessage(err, "error creating consumer client")
-			return
-		}
-
-		mergeHandler := handler.NewInvokeMergePullRequestEventHandler(gp, mcc, cl)
-		daoMergeHandler := handler.NewInvokeDaoMergePullRequestEventHandler(gp, dmcc, cl)
-		challengeHandler := handler.NewChallengeEventHandler(gp)
-		packfileUpdatedHandler := handler.NewPackfileUpdatedEventHandler(gp)
-		packfileDeletedHandler := handler.NewPackfileDeletedEventHandler(gp)
-		releaseAssetUpdatedHandler := handler.NewReleaseAssetUpdatedEventHandler(gp)
-		releaseAssetDeletedHandler := handler.NewReleaseAssetDeletedEventHandler(gp)
-		lfsObjectUpdatedHandler := handler.NewLfsObjectUpdatedEventHandler(gp)
-		lfsObjectDeletedHandler := handler.NewLfsObjectDeletedEventHandler(gp)
-		releaseHandler := handler.NewReleaseEventHandler(gp, cl)
-		daoReleaseHandler := handler.NewDaoCreateReleaseEventHandler(gp, cl)
-		deleteRepoHandler := handler.NewDeleteRepositoryEventHandler(gp, dcc, cl)
-
-		mergeDone, mergeSubscribeErr := mtmc.Subscribe(ctx, mergeHandler.Handle)
-		daoMergeDone, daoMergeSubscribeErr := dmtmc.Subscribe(ctx, daoMergeHandler.Handle)
-		challengeDone, challengeSubscribeErr := ctmc.Subscribe(ctx, challengeHandler.Handle)
-
-		// Subscribe to release events
-		createReleaseTMC, err := gitopia.NewWSEvents(ctx, CreateReleaseQuery)
-		if err != nil {
-			eventErrChan <- errors.WithMessage(err, "create release tm error")
-			return
-		}
-		createReleaseDone, createReleaseSubscribeErr := createReleaseTMC.Subscribe(ctx, func(ctx context.Context, eventBuf []byte) error {
+	subscriptions := []eventSubscription{
+		{query: InvokeMergePullRequestQuery, handler: mergeHandler.Handle},
+		{query: InvokeDaoMergePullRequestQuery, handler: daoMergeHandler.Handle},
+		{query: ChallengeCreatedQuery, handler: challengeHandler.Handle},
+		{query: CreateReleaseQuery, handler: func(ctx context.Context, eventBuf []byte) error {
 			return releaseHandler.Handle(ctx, eventBuf, handler.EventCreateReleaseType)
-		})
-
-		daoCreateReleaseTMC, err := gitopia.NewWSEvents(ctx, DaoCreateReleaseQuery)
-		if err != nil {
-			eventErrChan <- errors.WithMessage(err, "create dao release tm error")
-			return
-		}
-		daoCreateReleaseDone, daoCreateReleaseSubscribeErr := daoCreateReleaseTMC.Subscribe(ctx, daoReleaseHandler.Handle)
-
-		updateReleaseTMC, err := gitopia.NewWSEvents(ctx, UpdateReleaseQuery)
-		if err != nil {
-			eventErrChan <- errors.WithMessage(err, "update release tm error")
-			return
-		}
-		updateReleaseDone, updateReleaseSubscribeErr := updateReleaseTMC.Subscribe(ctx, func(ctx context.Context, eventBuf []byte) error {
+		}},
+		{query: DaoCreateReleaseQuery, handler: daoReleaseHandler.Handle},
+		{query: UpdateReleaseQuery, handler: func(ctx context.Context, eventBuf []byte) error {
 			return releaseHandler.Handle(ctx, eventBuf, handler.EventUpdateReleaseType)
-		})
-
-		deleteReleaseTMC, err := gitopia.NewWSEvents(ctx, DeleteReleaseQuery)
-		if err != nil {
-			eventErrChan <- errors.WithMessage(err, "delete release tm error")
-			return
-		}
-		deleteReleaseDone, deleteReleaseSubscribeErr := deleteReleaseTMC.Subscribe(ctx, func(ctx context.Context, eventBuf []byte) error {
+		}},
+		{query: DeleteReleaseQuery, handler: func(ctx context.Context, eventBuf []byte) error {
 			return releaseHandler.Handle(ctx, eventBuf, handler.EventDeleteReleaseType)
+		}},
+		{query: DeleteRepositoryQuery, handler: deleteRepoHandler.Handle},
+	}
+
+	if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
+		subscriptions = append(subscriptions,
+			eventSubscription{query: PackfileUpdatedQuery, handler: packfileUpdatedHandler.Handle},
+			eventSubscription{query: PackfileDeletedQuery, handler: packfileDeletedHandler.Handle},
+			eventSubscription{query: ReleaseAssetUpdatedQuery, handler: releaseAssetUpdatedHandler.Handle},
+			eventSubscription{query: ReleaseAssetDeletedQuery, handler: releaseAssetDeletedHandler.Handle},
+			eventSubscription{query: LfsObjectUpdatedQuery, handler: lfsObjectUpdatedHandler.Handle},
+			eventSubscription{query: LfsObjectDeletedQuery, handler: lfsObjectDeletedHandler.Handle},
+		)
+	}
+
+	g, gCtx := errgroup.WithContext(ctx)
+	for _, sub := range subscriptions {
+		s := sub // capture loop variable
+		g.Go(func() error {
+			return subscribeToEvent(gCtx, s.query, s.handler)
 		})
+	}
 
-		// Subscribe to repository deletion events
-		deleteRepoTMC, err := gitopia.NewWSEvents(ctx, DeleteRepositoryQuery)
-		if err != nil {
-			eventErrChan <- errors.WithMessage(err, "delete repository tm error")
-			return
-		}
-		deleteRepoDone, deleteRepoSubscribeErr := deleteRepoTMC.Subscribe(ctx, deleteRepoHandler.Handle)
+	return g.Wait()
+}
 
-		// Only create and subscribe to events if external pinning is enabled
-		var packfileUpdatedDone, packfileDeletedDone, releaseAssetUpdatedDone, releaseAssetDeletedDone, lfsObjectUpdatedDone, lfsObjectDeletedDone <-chan struct{}
-		var packfileUpdatedSubscribeErr, packfileDeletedSubscribeErr, releaseAssetUpdatedSubscribeErr, releaseAssetDeletedSubscribeErr, lfsObjectUpdatedSubscribeErr, lfsObjectDeletedSubscribeErr <-chan error
-		if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
-			putmc, err := gitopia.NewWSEvents(ctx, PackfileUpdatedQuery)
-			if err != nil {
-				eventErrChan <- errors.WithMessage(err, "tm error")
-				return
-			}
+func subscribeToEvent(ctx context.Context, query string, handler func(context.Context, []byte) error) error {
+	tmc, err := gitopia.NewWSEvents(ctx, query)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create ws event client for query: %s", query)
+	}
 
-			pdmc, err := gitopia.NewWSEvents(ctx, PackfileDeletedQuery)
-			if err != nil {
-				eventErrChan <- errors.WithMessage(err, "tm error")
-				return
-			}
-
-			rautmc, err := gitopia.NewWSEvents(ctx, ReleaseAssetUpdatedQuery)
-			if err != nil {
-				eventErrChan <- errors.WithMessage(err, "tm error")
-				return
-			}
-
-			radtmc, err := gitopia.NewWSEvents(ctx, ReleaseAssetDeletedQuery)
-			if err != nil {
-				eventErrChan <- errors.WithMessage(err, "tm error")
-				return
-			}
-
-			lfsObjectUpdatedTMC, err := gitopia.NewWSEvents(ctx, LfsObjectUpdatedQuery)
-			if err != nil {
-				eventErrChan <- errors.WithMessage(err, "lfs object updated tm error")
-				return
-			}
-
-			lfsObjectDeletedTMC, err := gitopia.NewWSEvents(ctx, LfsObjectDeletedQuery)
-			if err != nil {
-				eventErrChan <- errors.WithMessage(err, "lfs object deleted tm error")
-				return
-			}
-
-			packfileUpdatedDone, packfileUpdatedSubscribeErr = putmc.Subscribe(ctx, packfileUpdatedHandler.Handle)
-			packfileDeletedDone, packfileDeletedSubscribeErr = pdmc.Subscribe(ctx, packfileDeletedHandler.Handle)
-			releaseAssetUpdatedDone, releaseAssetUpdatedSubscribeErr = rautmc.Subscribe(ctx, releaseAssetUpdatedHandler.Handle)
-			releaseAssetDeletedDone, releaseAssetDeletedSubscribeErr = radtmc.Subscribe(ctx, releaseAssetDeletedHandler.Handle)
-			lfsObjectUpdatedDone, lfsObjectUpdatedSubscribeErr = lfsObjectUpdatedTMC.Subscribe(ctx, lfsObjectUpdatedHandler.Handle)
-			lfsObjectDeletedDone, lfsObjectDeletedSubscribeErr = lfsObjectDeletedTMC.Subscribe(ctx, lfsObjectDeletedHandler.Handle)
-		}
-
-		select {
-		case err = <-mergeSubscribeErr:
-			eventErrChan <- errors.WithMessage(err, "merge tm subscribe error")
-		case <-mergeDone:
-			logger.FromContext(ctx).Info("merge done")
-		case err = <-daoMergeSubscribeErr:
-			eventErrChan <- errors.WithMessage(err, "dao merge tm subscribe error")
-		case <-daoMergeDone:
-			logger.FromContext(ctx).Info("dao merge done")
-		case err = <-challengeSubscribeErr:
-			eventErrChan <- errors.WithMessage(err, "challenge tm subscribe error")
-		case <-challengeDone:
-			logger.FromContext(ctx).Info("challenge done")
-		case err = <-packfileUpdatedSubscribeErr:
-			eventErrChan <- errors.WithMessage(err, "packfile updated tm subscribe error")
-		case <-packfileUpdatedDone:
-			logger.FromContext(ctx).Info("packfile updated done")
-		case err = <-packfileDeletedSubscribeErr:
-			eventErrChan <- errors.WithMessage(err, "packfile deleted tm subscribe error")
-		case <-packfileDeletedDone:
-			logger.FromContext(ctx).Info("packfile deleted done")
-		case err = <-releaseAssetUpdatedSubscribeErr:
-			eventErrChan <- errors.WithMessage(err, "release asset updated tm subscribe error")
-		case <-releaseAssetUpdatedDone:
-			logger.FromContext(ctx).Info("release asset updated done")
-		case err = <-releaseAssetDeletedSubscribeErr:
-			eventErrChan <- errors.WithMessage(err, "release asset deleted tm subscribe error")
-		case <-releaseAssetDeletedDone:
-			logger.FromContext(ctx).Info("release asset deleted done")
-		case err = <-lfsObjectUpdatedSubscribeErr:
-			eventErrChan <- errors.WithMessage(err, "lfs object updated tm subscribe error")
-		case <-lfsObjectUpdatedDone:
-			logger.FromContext(ctx).Info("lfs object updated done")
-		case err = <-lfsObjectDeletedSubscribeErr:
-			eventErrChan <- errors.WithMessage(err, "lfs object deleted tm subscribe error")
-		case <-lfsObjectDeletedDone:
-			logger.FromContext(ctx).Info("lfs object deleted done")
-		case err = <-createReleaseSubscribeErr:
-			eventErrChan <- errors.WithMessage(err, "create release tm subscribe error")
-		case <-createReleaseDone:
-			logger.FromContext(ctx).Info("create release done")
-		case err = <-daoCreateReleaseSubscribeErr:
-			eventErrChan <- errors.WithMessage(err, "create dao release tm subscribe error")
-		case <-daoCreateReleaseDone:
-			logger.FromContext(ctx).Info("create dao release done")
-		case err = <-updateReleaseSubscribeErr:
-			eventErrChan <- errors.WithMessage(err, "update release tm subscribe error")
-		case <-updateReleaseDone:
-			logger.FromContext(ctx).Info("update release done")
-		case err = <-deleteReleaseSubscribeErr:
-			eventErrChan <- errors.WithMessage(err, "delete release tm subscribe error")
-		case <-deleteReleaseDone:
-			logger.FromContext(ctx).Info("delete release done")
-		case err = <-deleteRepoSubscribeErr:
-			eventErrChan <- errors.WithMessage(err, "delete repository tm subscribe error")
-		case <-deleteRepoDone:
-			logger.FromContext(ctx).Info("delete repository done")
-		case <-ctx.Done():
-			eventErrChan <- ctx.Err()
-		}
-	}()
-
-	// Start web server in a goroutine
-	webErrChan := make(chan error, 1)
-	go func() {
-		server, err := setupWebServer(cmd)
-		if err != nil {
-			webErrChan <- err
-			return
-		}
-
-		webErrChan <- server.ListenAndServe()
-	}()
-
-	// Wait for either service to error out
+	done, errChan := tmc.Subscribe(ctx, handler)
 	select {
-	case err := <-eventErrChan:
-		return errors.Wrap(err, "event processor error")
-	case err := <-webErrChan:
-		return errors.Wrap(err, "web server error")
+	case err := <-errChan:
+		return errors.Wrapf(err, "subscription error for query: %s", query)
+	case <-done:
+		logrus.Infof("subscription done for query: %s", query)
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
