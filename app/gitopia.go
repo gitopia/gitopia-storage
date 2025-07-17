@@ -27,11 +27,7 @@ type GitopiaProxy struct {
 	batchTxMgr *BatchTxManager
 }
 
-func NewGitopiaProxy(g gitopia.Client) *GitopiaProxy {
-	// Initialize batch transaction manager with 1.6 second batch interval
-	batchTxMgr := NewBatchTxManager(g, BLOCK_TIME)
-	batchTxMgr.Start()
-
+func NewGitopiaProxy(g gitopia.Client, batchTxMgr *BatchTxManager) *GitopiaProxy {
 	return &GitopiaProxy{
 		gc:         g,
 		batchTxMgr: batchTxMgr,

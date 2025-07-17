@@ -64,6 +64,23 @@ func NewStartCmd() *cobra.Command {
 func start(cmd *cobra.Command, args []string) error {
 	g, ctx := errgroup.WithContext(cmd.Context())
 
+	clientCtx := client.GetClientContextFromCmd(cmd)
+	txf, err := tx.NewFactoryCLI(clientCtx, cmd.Flags())
+	if err != nil {
+		return errors.Wrap(err, "error initializing tx factory")
+	}
+	txf = txf.WithGasAdjustment(app.GAS_ADJUSTMENT)
+
+	gitopiaClient, err := gitopia.NewClient(ctx, clientCtx, txf)
+	if err != nil {
+		return errors.WithMessage(err, "gitopia client error")
+	}
+	defer gitopiaClient.Close()
+
+	batchTxManager := app.NewBatchTxManager(gitopiaClient, app.BLOCK_TIME)
+	batchTxManager.Start()
+	defer batchTxManager.Stop()
+
 	// Start pprof server for performance monitoring.
 	g.Go(func() error {
 		return startPprofServer(ctx, 6060)
@@ -77,12 +94,12 @@ func start(cmd *cobra.Command, args []string) error {
 
 	// Start the main web server.
 	g.Go(func() error {
-		return startWebServer(ctx, cmd)
+		return startWebServer(ctx, cmd, batchTxManager)
 	})
 
 	// Start the event processor to handle blockchain events.
 	g.Go(func() error {
-		return startEventProcessor(ctx, cmd)
+		return startEventProcessor(ctx, cmd, gitopiaClient, batchTxManager)
 	})
 
 	logrus.Info("application started")
@@ -127,8 +144,8 @@ func startMemoryMonitor(ctx context.Context) {
 	}
 }
 
-func startWebServer(ctx context.Context, cmd *cobra.Command) error {
-	server, err := setupWebServer(cmd)
+func startWebServer(ctx context.Context, cmd *cobra.Command, batchTxManager *app.BatchTxManager) error {
+	server, err := setupWebServer(cmd, batchTxManager)
 	if err != nil {
 		return errors.Wrap(err, "failed to setup web server")
 	}
@@ -148,7 +165,7 @@ func startWebServer(ctx context.Context, cmd *cobra.Command) error {
 	return nil
 }
 
-func setupWebServer(cmd *cobra.Command) (*http.Server, error) {
+func setupWebServer(cmd *cobra.Command, batchTxManager *app.BatchTxManager) (*http.Server, error) {
 	server, err := internalapp.New(cmd, utils.Config{
 		Dir:        viper.GetString("GIT_REPOS_DIR"),
 		AutoCreate: true,
@@ -158,7 +175,7 @@ func setupWebServer(cmd *cobra.Command) (*http.Server, error) {
 			PreReceive:  "gitopia-pre-receive",
 			PostReceive: "gitopia-post-receive",
 		},
-	})
+	}, batchTxManager)
 	if err != nil {
 		return nil, err
 	}
@@ -213,21 +230,8 @@ type eventSubscription struct {
 	handler func(context.Context, []byte) error
 }
 
-func startEventProcessor(ctx context.Context, cmd *cobra.Command) error {
-	clientCtx := client.GetClientContextFromCmd(cmd)
-	txf, err := tx.NewFactoryCLI(clientCtx, cmd.Flags())
-	if err != nil {
-		return errors.Wrap(err, "error initializing tx factory")
-	}
-	txf = txf.WithGasAdjustment(app.GAS_ADJUSTMENT)
-
-	gc, err := gitopia.NewClient(ctx, clientCtx, txf)
-	if err != nil {
-		return errors.WithMessage(err, "gitopia client error")
-	}
-	defer gc.Close()
-
-	gp := app.NewGitopiaProxy(gc)
+func startEventProcessor(ctx context.Context, cmd *cobra.Command, gitopiaClient gitopia.Client, batchTxManager *app.BatchTxManager) error {
+	gp := app.NewGitopiaProxy(gitopiaClient, batchTxManager)
 
 	ipfsCfg := &ipfsclusterclient.Config{
 		Host:    viper.GetString("IPFS_CLUSTER_PEER_HOST"),

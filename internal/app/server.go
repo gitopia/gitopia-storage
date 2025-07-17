@@ -24,7 +24,7 @@ import (
 )
 
 // New creates a new Server instance with the given configuration.
-func New(cmd *cobra.Command, cfg utils.Config) (*Server, error) {
+func New(cmd *cobra.Command, cfg utils.Config, batchTxManager *app.BatchTxManager) (*Server, error) {
 	ctx, cancel := context.WithCancel(cmd.Context())
 
 	s := &Server{
@@ -57,7 +57,7 @@ func New(cmd *cobra.Command, cfg utils.Config) (*Server, error) {
 		s.Cancel()
 		return nil, errors.Wrap(err, "failed to create gitopia client")
 	}
-	s.GitopiaProxy = app.NewGitopiaProxy(gitopiaClient)
+	s.GitopiaProxy = app.NewGitopiaProxy(gitopiaClient, batchTxManager)
 
 	ipfsCfg := &ipfsclusterclient.Config{
 		Host:    viper.GetString("IPFS_CLUSTER_PEER_HOST"),
