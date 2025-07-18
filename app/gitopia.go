@@ -480,10 +480,7 @@ func (g *GitopiaProxy) CheckPackfileDelete(repositoryId uint64) (bool, error) {
 
 // CheckLFSObjectUpdate verifies if an LFS object update was applied
 func (g *GitopiaProxy) CheckLFSObjectUpdate(repositoryId uint64, oid, expectedCid string) (bool, error) {
-	lfsObject, err := g.LFSObjectByRepositoryIdAndOid(context.Background(), repositoryId, oid)
-	if err != nil {
-		return false, err
-	}
+	lfsObject, _ := g.LFSObjectByRepositoryIdAndOid(context.Background(), repositoryId, oid)
 
 	return lfsObject.Cid == expectedCid, nil
 }
@@ -499,10 +496,8 @@ func (g *GitopiaProxy) CheckLFSObjectDelete(repositoryId uint64, oid string) (bo
 
 // CheckReleaseAssetUpdate verifies if a release asset update was applied
 func (g *GitopiaProxy) CheckReleaseAssetUpdate(repositoryId uint64, tag string, name string, expectedCid string) (bool, error) {
-	releaseAsset, err := g.RepositoryReleaseAsset(context.Background(), repositoryId, tag, name)
-	if err != nil {
-		return false, err
-	}
+	releaseAsset, _ := g.RepositoryReleaseAsset(context.Background(), repositoryId, tag, name)
+
 	return releaseAsset.Cid == expectedCid, nil
 }
 
