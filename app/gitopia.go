@@ -464,10 +464,8 @@ func (g *GitopiaProxy) PollForUpdate(ctx context.Context, checkerFn func() (bool
 
 // CheckPackfileUpdate verifies if a packfile update was applied
 func (g *GitopiaProxy) CheckPackfileUpdate(repositoryId uint64, expectedCid string) (bool, error) {
-	packfile, err := g.RepositoryPackfile(context.Background(), repositoryId)
-	if err != nil {
-		return false, err
-	}
+	packfile, _ := g.RepositoryPackfile(context.Background(), repositoryId)
+
 	return packfile.Cid == expectedCid, nil
 }
 
