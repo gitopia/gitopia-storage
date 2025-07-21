@@ -86,11 +86,18 @@ func New(cmd *cobra.Command, cfg utils.Config, batchTxManager *app.BatchTxManage
 		{Method: "POST", Suffix: "/git-receive-pack", Handler: s.PostRPC, Rpc: "git-receive-pack"},
 	}
 
+	lockHandler := &lfs.LockHandler{}
+
 	s.LfsServices = []LfsService{
 		{Method: "POST", Suffix: "/objects/batch", Handler: basic.ServeBatchHandler},
 		{Method: "GET", Suffix: "/objects/basic", Handler: basic.ServeDownloadHandler},
 		{Method: "PUT", Suffix: "/objects/basic", Handler: lfs.Authenticate(basic.ServeUploadHandler)},
 		{Method: "POST", Suffix: "/objects/basic/verify", Handler: basic.ServeVerifyHandler},
+		// LFS Locks endpoints
+		{Method: "POST", Suffix: "/locks", Handler: lfs.Authenticate(lockHandler.ServeCreateLockHandler)},
+		{Method: "GET", Suffix: "/locks", Handler: lockHandler.ServeListLocksHandler},
+		{Method: "POST", Suffix: "/locks/verify", Handler: lockHandler.ServeVerifyLocksHandler},
+		{Method: "POST", Suffix: "/locks/*/unlock", Handler: lfs.Authenticate(lockHandler.ServeUnlockHandler)},
 	}
 
 	s.CacheManager = utils.NewCacheManager()
