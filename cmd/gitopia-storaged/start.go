@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	_ "net/http/pprof" // Add pprof handlers to default HTTP mux
 	"os"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -243,46 +245,180 @@ func startEventProcessor(ctx context.Context, cmd *cobra.Command, gitopiaClient 
 	daoReleaseHandler := handler.NewDaoCreateReleaseEventHandler(gp, cl)
 	deleteRepoHandler := handler.NewDeleteRepositoryEventHandler(gp, dcc, cl)
 
-	subscriptions := []eventSubscription{
-		{query: InvokeMergePullRequestQuery, handler: mergeHandler.Handle},
-		{query: InvokeDaoMergePullRequestQuery, handler: daoMergeHandler.Handle},
-		{query: ChallengeCreatedQuery, handler: challengeHandler.Handle},
-		{query: CreateReleaseQuery, handler: func(ctx context.Context, eventBuf []byte) error {
-			return releaseHandler.Handle(ctx, eventBuf, handler.EventCreateReleaseType)
-		}},
-		{query: DaoCreateReleaseQuery, handler: daoReleaseHandler.Handle},
-		{query: UpdateReleaseQuery, handler: func(ctx context.Context, eventBuf []byte) error {
-			return releaseHandler.Handle(ctx, eventBuf, handler.EventUpdateReleaseType)
-		}},
-		{query: DeleteReleaseQuery, handler: func(ctx context.Context, eventBuf []byte) error {
-			return releaseHandler.Handle(ctx, eventBuf, handler.EventDeleteReleaseType)
-		}},
-		{query: DeleteRepositoryQuery, handler: deleteRepoHandler.Handle},
+	// Create core WebSocket client for events required by all storage providers
+	coreWSClient, err := gitopia.NewWSEvents(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to create core WebSocket client")
+	}
+	defer coreWSClient.Close()
+
+	// Define core event subscriptions (always required)
+	coreQueries := []string{
+		InvokeMergePullRequestQuery,
+		InvokeDaoMergePullRequestQuery,
+		ChallengeCreatedQuery,
+		CreateReleaseQuery,
+		DaoCreateReleaseQuery,
+		UpdateReleaseQuery,
+		DeleteReleaseQuery,
+		DeleteRepositoryQuery,
 	}
 
-	if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
-		subscriptions = append(subscriptions,
-			eventSubscription{query: PackfileUpdatedQuery, handler: packfileUpdatedHandler.Handle},
-			eventSubscription{query: PackfileDeletedQuery, handler: packfileDeletedHandler.Handle},
-			eventSubscription{query: ReleaseAssetUpdatedQuery, handler: releaseAssetUpdatedHandler.Handle},
-			eventSubscription{query: ReleaseAssetDeletedQuery, handler: releaseAssetDeletedHandler.Handle},
-			eventSubscription{query: LfsObjectUpdatedQuery, handler: lfsObjectUpdatedHandler.Handle},
-			eventSubscription{query: LfsObjectDeletedQuery, handler: lfsObjectDeletedHandler.Handle},
-		)
+	// Subscribe to core events
+	if err := coreWSClient.SubscribeQueries(ctx, coreQueries...); err != nil {
+		return errors.Wrap(err, "failed to subscribe to core events")
+	}
+
+	// Create event handler map for core events
+	coreEventHandlers := map[string]func(context.Context, []byte) error{
+		InvokeMergePullRequestQuery:    mergeHandler.Handle,
+		InvokeDaoMergePullRequestQuery: daoMergeHandler.Handle,
+		ChallengeCreatedQuery:          challengeHandler.Handle,
+		CreateReleaseQuery: func(ctx context.Context, eventBuf []byte) error {
+			return releaseHandler.Handle(ctx, eventBuf, handler.EventCreateReleaseType)
+		},
+		DaoCreateReleaseQuery: daoReleaseHandler.Handle,
+		UpdateReleaseQuery: func(ctx context.Context, eventBuf []byte) error {
+			return releaseHandler.Handle(ctx, eventBuf, handler.EventUpdateReleaseType)
+		},
+		DeleteReleaseQuery: func(ctx context.Context, eventBuf []byte) error {
+			return releaseHandler.Handle(ctx, eventBuf, handler.EventDeleteReleaseType)
+		},
+		DeleteRepositoryQuery: deleteRepoHandler.Handle,
 	}
 
 	g, gCtx := errgroup.WithContext(ctx)
-	for _, sub := range subscriptions {
-		s := sub // capture loop variable
+
+	// Start core event processor
+	g.Go(func() error {
+		done, errChan := coreWSClient.ProcessEvents(gCtx, func(ctx context.Context, eventBuf []byte) error {
+			return routeEventToHandler(ctx, eventBuf, coreEventHandlers)
+		})
+		select {
+		case err := <-errChan:
+			return errors.Wrap(err, "core event processing error")
+		case <-done:
+			logger.FromContext(ctx).Info("core event processing completed")
+			return nil
+		}
+	})
+
+	// Handle external pinning events if enabled
+	if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
+		logger.FromContext(ctx).Info("external pinning enabled, starting external pinning event processor")
+
+		// Create external pinning WebSocket client
+		externalWSClient, err := gitopia.NewWSEvents(ctx)
+		if err != nil {
+			return errors.Wrap(err, "failed to create external pinning WebSocket client")
+		}
+		defer externalWSClient.Close()
+
+		// Define external pinning event subscriptions
+		externalQueries := []string{
+			PackfileUpdatedQuery,
+			PackfileDeletedQuery,
+			ReleaseAssetUpdatedQuery,
+			ReleaseAssetDeletedQuery,
+			LfsObjectUpdatedQuery,
+			LfsObjectDeletedQuery,
+		}
+
+		// Subscribe to external pinning events
+		if err := externalWSClient.SubscribeQueries(ctx, externalQueries...); err != nil {
+			return errors.Wrap(err, "failed to subscribe to external pinning events")
+		}
+
+		// Create event handler map for external pinning events
+		externalEventHandlers := map[string]func(context.Context, []byte) error{
+			PackfileUpdatedQuery:     packfileUpdatedHandler.Handle,
+			PackfileDeletedQuery:     packfileDeletedHandler.Handle,
+			ReleaseAssetUpdatedQuery: releaseAssetUpdatedHandler.Handle,
+			ReleaseAssetDeletedQuery: releaseAssetDeletedHandler.Handle,
+			LfsObjectUpdatedQuery:    lfsObjectUpdatedHandler.Handle,
+			LfsObjectDeletedQuery:    lfsObjectDeletedHandler.Handle,
+		}
+
+		// Start external pinning event processor
 		g.Go(func() error {
-			return subscribeToEvent(gCtx, s.query, s.handler)
+			done, errChan := externalWSClient.ProcessEvents(gCtx, func(ctx context.Context, eventBuf []byte) error {
+				return routeEventToHandler(ctx, eventBuf, externalEventHandlers)
+			})
+			select {
+			case err := <-errChan:
+				return errors.Wrap(err, "external pinning event processing error")
+			case <-done:
+				logger.FromContext(ctx).Info("external pinning event processing completed")
+				return nil
+			}
 		})
 	}
 
 	return g.Wait()
 }
 
-// checkClientBalance verifies that the client account has sufficient balance for storage operations
+// routeEventToHandler routes events to the appropriate handler based on the event content
+// It extracts the query information from the event and calls the corresponding handler
+func routeEventToHandler(ctx context.Context, eventBuf []byte, handlers map[string]func(context.Context, []byte) error) error {
+	// Parse the event to extract query information
+	// The event structure typically contains query information that we can use for routing
+	var eventData map[string]interface{}
+	if err := json.Unmarshal(eventBuf, &eventData); err != nil {
+		return errors.Wrap(err, "failed to parse event data")
+	}
+
+	for query, handler := range handlers {
+		// Check if this event matches the query pattern
+		if shouldHandleEvent(eventBuf, query) {
+			return handler(ctx, eventBuf)
+		}
+	}
+
+	// If no handler matches, log and continue
+	logger.FromContext(ctx).WithField("event", string(eventBuf)).Debug("no handler found for event")
+	return nil
+}
+
+// shouldHandleEvent determines if an event should be handled by a specific query handler
+// This function examines the event content to match it with the appropriate query
+func shouldHandleEvent(eventBuf []byte, query string) bool {
+	// Convert event to string for pattern matching
+	eventStr := string(eventBuf)
+
+	switch {
+	case query == InvokeMergePullRequestQuery:
+		return strings.Contains(eventStr, "InvokeMergePullRequest")
+	case query == InvokeDaoMergePullRequestQuery:
+		return strings.Contains(eventStr, "InvokeDaoMergePullRequest")
+	case query == ChallengeCreatedQuery:
+		return strings.Contains(eventStr, "EventChallengeCreated")
+	case query == CreateReleaseQuery:
+		return strings.Contains(eventStr, "CreateRelease") && !strings.Contains(eventStr, "DaoCreateRelease")
+	case query == DaoCreateReleaseQuery:
+		return strings.Contains(eventStr, "DaoCreateRelease")
+	case query == UpdateReleaseQuery:
+		return strings.Contains(eventStr, "UpdateRelease")
+	case query == DeleteReleaseQuery:
+		return strings.Contains(eventStr, "DeleteRelease")
+	case query == DeleteRepositoryQuery:
+		return strings.Contains(eventStr, "DeleteRepository")
+	case query == PackfileUpdatedQuery:
+		return strings.Contains(eventStr, "EventPackfileUpdated")
+	case query == PackfileDeletedQuery:
+		return strings.Contains(eventStr, "EventPackfileDeleted")
+	case query == ReleaseAssetUpdatedQuery:
+		return strings.Contains(eventStr, "EventReleaseAssetUpdated")
+	case query == ReleaseAssetDeletedQuery:
+		return strings.Contains(eventStr, "EventReleaseAssetDeleted")
+	case query == LfsObjectUpdatedQuery:
+		return strings.Contains(eventStr, "EventLFSObjectUpdated")
+	case query == LfsObjectDeletedQuery:
+		return strings.Contains(eventStr, "EventLFSObjectDeleted")
+	default:
+		return false
+	}
+}
+
 func checkClientBalance(ctx context.Context, gitopiaClient gitopia.Client) error {
 	// Create a GitopiaProxy to access balance checking functionality
 	proxy := app.NewGitopiaProxy(gitopiaClient, nil)
@@ -316,22 +452,4 @@ func checkClientBalance(ctx context.Context, gitopiaClient gitopia.Client) error
 
 	logrus.Info("client balance check passed")
 	return nil
-}
-
-func subscribeToEvent(ctx context.Context, query string, handler func(context.Context, []byte) error) error {
-	tmc, err := gitopia.NewWSEvents(ctx, query)
-	if err != nil {
-		return errors.Wrapf(err, "failed to create ws event client for query: %s", query)
-	}
-
-	done, errChan := tmc.Subscribe(ctx, handler)
-	select {
-	case err := <-errChan:
-		return errors.Wrapf(err, "subscription error for query: %s", query)
-	case <-done:
-		logrus.Infof("subscription done for query: %s", query)
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
 }
