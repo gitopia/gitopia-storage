@@ -84,6 +84,29 @@ func (h *BasicHandler) ServeBatchHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Authenticate only for upload operations
+	if request.Operation == basicOperationUpload {
+		username, password := utils.DecodeBasic(r.Header)
+		if password == "" {
+			responseJSON(w, http.StatusUnauthorized, responseError{
+				Message: "Credentials needed",
+			})
+			return
+		}
+
+		allow, err := utils.ValidateBasicAuth(r, username, password)
+		if !allow || err != nil {
+			if err != nil {
+				log.WithFields(log.Fields{
+					"username": username,
+					"error":    err.Error(),
+				}).Error("Failed to authenticate user")
+			}
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+	}
+
 	// NOTE: We only support basic transfer as of now.
 	transfer := transferBasic
 	scheme := "http"

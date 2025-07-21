@@ -87,7 +87,7 @@ func New(cmd *cobra.Command, cfg utils.Config, batchTxManager *app.BatchTxManage
 	}
 
 	s.LfsServices = []LfsService{
-		{Method: "POST", Suffix: "/objects/batch", Handler: lfs.Authenticate(basic.ServeBatchHandler)},
+		{Method: "POST", Suffix: "/objects/batch", Handler: basic.ServeBatchHandler},
 		{Method: "GET", Suffix: "/objects/basic", Handler: basic.ServeDownloadHandler},
 		{Method: "PUT", Suffix: "/objects/basic", Handler: lfs.Authenticate(basic.ServeUploadHandler)},
 		{Method: "POST", Suffix: "/objects/basic/verify", Handler: basic.ServeVerifyHandler},
