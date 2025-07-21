@@ -115,11 +115,12 @@ func processLFSObjects(ctx context.Context, repositoryId uint64, repoDir string,
 			return err
 		}
 
-		// LFS objects are stored in subdirectories like ab/cdef1234...
-		// We need to reconstruct the full OID
+		// LFS objects are stored in subdirectories like 0b/78/0b7810a9fef2b44e9381e7f4e8ffd699a71e359931ab236bcc356ab8fd2a4575
+		// The filename itself is the complete OID
 		pathParts := strings.Split(relPath, string(filepath.Separator))
-		if len(pathParts) == 2 {
-			oid := pathParts[0] + pathParts[1]
+		if len(pathParts) >= 3 {
+			// Extract the filename (last part) which is the complete OID
+			oid := pathParts[len(pathParts)-1]
 			// Validate OID format (64 hex characters)
 			if len(oid) == 64 {
 				lfsObjects = append(lfsObjects, oid)
