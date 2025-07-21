@@ -245,60 +245,90 @@ func startEventProcessor(ctx context.Context, cmd *cobra.Command, gitopiaClient 
 	daoReleaseHandler := handler.NewDaoCreateReleaseEventHandler(gp, cl)
 	deleteRepoHandler := handler.NewDeleteRepositoryEventHandler(gp, dcc, cl)
 
-	// Create core WebSocket client for events required by all storage providers
-	coreWSClient, err := gitopia.NewWSEvents(ctx)
+	// Create multiple WebSocket clients to distribute subscriptions and avoid hitting the 5 subscription limit
+	
+	// Client 1: Merge and Challenge events (3 subscriptions)
+	client1, err := gitopia.NewWSEvents(ctx)
 	if err != nil {
-		return errors.Wrap(err, "failed to create core WebSocket client")
+		return errors.Wrap(err, "failed to create WebSocket client 1")
 	}
-	defer coreWSClient.Close()
+	defer client1.Close()
 
-	// Define core event subscriptions (always required)
-	coreQueries := []string{
+	client1Queries := []string{
 		InvokeMergePullRequestQuery,
 		InvokeDaoMergePullRequestQuery,
 		ChallengeCreatedQuery,
-		CreateReleaseQuery,
-		DaoCreateReleaseQuery,
-		UpdateReleaseQuery,
-		DeleteReleaseQuery,
-		DeleteRepositoryQuery,
 	}
 
-	// Subscribe to core events
-	if err := coreWSClient.SubscribeQueries(ctx, coreQueries...); err != nil {
-		return errors.Wrap(err, "failed to subscribe to core events")
+	if err := client1.SubscribeQueries(ctx, client1Queries...); err != nil {
+		return errors.Wrap(err, "failed to subscribe to client 1 events")
 	}
 
-	// Create event handler map for core events
-	coreEventHandlers := map[string]func(context.Context, []byte) error{
+	client1EventHandlers := map[string]func(context.Context, []byte) error{
 		InvokeMergePullRequestQuery:    mergeHandler.Handle,
 		InvokeDaoMergePullRequestQuery: daoMergeHandler.Handle,
 		ChallengeCreatedQuery:          challengeHandler.Handle,
+	}
+
+	// Client 2: Release events (5 subscriptions)
+	client2, err := gitopia.NewWSEvents(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to create WebSocket client 2")
+	}
+	defer client2.Close()
+
+	client2Queries := []string{
+		CreateReleaseQuery,
+		UpdateReleaseQuery,
+		DeleteReleaseQuery,
+		DaoCreateReleaseQuery,
+		DeleteRepositoryQuery,
+	}
+
+	if err := client2.SubscribeQueries(ctx, client2Queries...); err != nil {
+		return errors.Wrap(err, "failed to subscribe to client 2 events")
+	}
+
+	client2EventHandlers := map[string]func(context.Context, []byte) error{
 		CreateReleaseQuery: func(ctx context.Context, eventBuf []byte) error {
 			return releaseHandler.Handle(ctx, eventBuf, handler.EventCreateReleaseType)
 		},
-		DaoCreateReleaseQuery: daoReleaseHandler.Handle,
 		UpdateReleaseQuery: func(ctx context.Context, eventBuf []byte) error {
 			return releaseHandler.Handle(ctx, eventBuf, handler.EventUpdateReleaseType)
 		},
 		DeleteReleaseQuery: func(ctx context.Context, eventBuf []byte) error {
 			return releaseHandler.Handle(ctx, eventBuf, handler.EventDeleteReleaseType)
 		},
+		DaoCreateReleaseQuery: daoReleaseHandler.Handle,
 		DeleteRepositoryQuery: deleteRepoHandler.Handle,
 	}
 
 	g, gCtx := errgroup.WithContext(ctx)
 
-	// Start core event processor
+	// Start client 1 event processor
 	g.Go(func() error {
-		done, errChan := coreWSClient.ProcessEvents(gCtx, func(ctx context.Context, eventBuf []byte) error {
-			return routeEventToHandler(ctx, eventBuf, coreEventHandlers)
+		done, errChan := client1.ProcessEvents(gCtx, func(ctx context.Context, eventBuf []byte) error {
+			return routeEventToHandler(ctx, eventBuf, client1EventHandlers)
 		})
 		select {
 		case err := <-errChan:
-			return errors.Wrap(err, "core event processing error")
+			return errors.Wrap(err, "client 1 event processing error")
 		case <-done:
-			logger.FromContext(ctx).Info("core event processing completed")
+			logger.FromContext(ctx).Info("client 1 event processing completed")
+			return nil
+		}
+	})
+
+	// Start client 2 event processor
+	g.Go(func() error {
+		done, errChan := client2.ProcessEvents(gCtx, func(ctx context.Context, eventBuf []byte) error {
+			return routeEventToHandler(ctx, eventBuf, client2EventHandlers)
+		})
+		select {
+		case err := <-errChan:
+			return errors.Wrap(err, "client 2 event processing error")
+		case <-done:
+			logger.FromContext(ctx).Info("client 2 event processing completed")
 			return nil
 		}
 	})
@@ -307,48 +337,76 @@ func startEventProcessor(ctx context.Context, cmd *cobra.Command, gitopiaClient 
 	if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
 		logger.FromContext(ctx).Info("external pinning enabled, starting external pinning event processor")
 
-		// Create external pinning WebSocket client
-		externalWSClient, err := gitopia.NewWSEvents(ctx)
+		// Client 3: Packfile and Release Asset events (4 subscriptions)
+		client3, err := gitopia.NewWSEvents(ctx)
 		if err != nil {
-			return errors.Wrap(err, "failed to create external pinning WebSocket client")
+			return errors.Wrap(err, "failed to create WebSocket client 3")
 		}
-		defer externalWSClient.Close()
+		defer client3.Close()
 
-		// Define external pinning event subscriptions
-		externalQueries := []string{
+		client3Queries := []string{
 			PackfileUpdatedQuery,
 			PackfileDeletedQuery,
 			ReleaseAssetUpdatedQuery,
 			ReleaseAssetDeletedQuery,
-			LfsObjectUpdatedQuery,
-			LfsObjectDeletedQuery,
 		}
 
-		// Subscribe to external pinning events
-		if err := externalWSClient.SubscribeQueries(ctx, externalQueries...); err != nil {
-			return errors.Wrap(err, "failed to subscribe to external pinning events")
+		if err := client3.SubscribeQueries(ctx, client3Queries...); err != nil {
+			return errors.Wrap(err, "failed to subscribe to client 3 events")
 		}
 
-		// Create event handler map for external pinning events
-		externalEventHandlers := map[string]func(context.Context, []byte) error{
+		client3EventHandlers := map[string]func(context.Context, []byte) error{
 			PackfileUpdatedQuery:     packfileUpdatedHandler.Handle,
 			PackfileDeletedQuery:     packfileDeletedHandler.Handle,
 			ReleaseAssetUpdatedQuery: releaseAssetUpdatedHandler.Handle,
 			ReleaseAssetDeletedQuery: releaseAssetDeletedHandler.Handle,
-			LfsObjectUpdatedQuery:    lfsObjectUpdatedHandler.Handle,
-			LfsObjectDeletedQuery:    lfsObjectDeletedHandler.Handle,
 		}
 
-		// Start external pinning event processor
+		// Client 4: LFS Object events (2 subscriptions)
+		client4, err := gitopia.NewWSEvents(ctx)
+		if err != nil {
+			return errors.Wrap(err, "failed to create WebSocket client 4")
+		}
+		defer client4.Close()
+
+		client4Queries := []string{
+			LfsObjectUpdatedQuery,
+			LfsObjectDeletedQuery,
+		}
+
+		if err := client4.SubscribeQueries(ctx, client4Queries...); err != nil {
+			return errors.Wrap(err, "failed to subscribe to client 4 events")
+		}
+
+		client4EventHandlers := map[string]func(context.Context, []byte) error{
+			LfsObjectUpdatedQuery: lfsObjectUpdatedHandler.Handle,
+			LfsObjectDeletedQuery: lfsObjectDeletedHandler.Handle,
+		}
+
+		// Start client 3 event processor
 		g.Go(func() error {
-			done, errChan := externalWSClient.ProcessEvents(gCtx, func(ctx context.Context, eventBuf []byte) error {
-				return routeEventToHandler(ctx, eventBuf, externalEventHandlers)
+			done, errChan := client3.ProcessEvents(gCtx, func(ctx context.Context, eventBuf []byte) error {
+				return routeEventToHandler(ctx, eventBuf, client3EventHandlers)
 			})
 			select {
 			case err := <-errChan:
-				return errors.Wrap(err, "external pinning event processing error")
+				return errors.Wrap(err, "client 3 event processing error")
 			case <-done:
-				logger.FromContext(ctx).Info("external pinning event processing completed")
+				logger.FromContext(ctx).Info("client 3 event processing completed")
+				return nil
+			}
+		})
+
+		// Start client 4 event processor
+		g.Go(func() error {
+			done, errChan := client4.ProcessEvents(gCtx, func(ctx context.Context, eventBuf []byte) error {
+				return routeEventToHandler(ctx, eventBuf, client4EventHandlers)
+			})
+			select {
+			case err := <-errChan:
+				return errors.Wrap(err, "client 4 event processing error")
+			case <-done:
+				logger.FromContext(ctx).Info("client 4 event processing completed")
 				return nil
 			}
 		})
@@ -385,34 +443,34 @@ func shouldHandleEvent(eventBuf []byte, query string) bool {
 	// Convert event to string for pattern matching
 	eventStr := string(eventBuf)
 
-	switch {
-	case query == InvokeMergePullRequestQuery:
+	switch query {
+	case InvokeMergePullRequestQuery:
 		return strings.Contains(eventStr, "InvokeMergePullRequest")
-	case query == InvokeDaoMergePullRequestQuery:
+	case InvokeDaoMergePullRequestQuery:
 		return strings.Contains(eventStr, "InvokeDaoMergePullRequest")
-	case query == ChallengeCreatedQuery:
+	case ChallengeCreatedQuery:
 		return strings.Contains(eventStr, "EventChallengeCreated")
-	case query == CreateReleaseQuery:
+	case CreateReleaseQuery:
 		return strings.Contains(eventStr, "CreateRelease") && !strings.Contains(eventStr, "DaoCreateRelease")
-	case query == DaoCreateReleaseQuery:
+	case DaoCreateReleaseQuery:
 		return strings.Contains(eventStr, "DaoCreateRelease")
-	case query == UpdateReleaseQuery:
+	case UpdateReleaseQuery:
 		return strings.Contains(eventStr, "UpdateRelease")
-	case query == DeleteReleaseQuery:
+	case DeleteReleaseQuery:
 		return strings.Contains(eventStr, "DeleteRelease")
-	case query == DeleteRepositoryQuery:
+	case DeleteRepositoryQuery:
 		return strings.Contains(eventStr, "DeleteRepository")
-	case query == PackfileUpdatedQuery:
+	case PackfileUpdatedQuery:
 		return strings.Contains(eventStr, "EventPackfileUpdated")
-	case query == PackfileDeletedQuery:
+	case PackfileDeletedQuery:
 		return strings.Contains(eventStr, "EventPackfileDeleted")
-	case query == ReleaseAssetUpdatedQuery:
+	case ReleaseAssetUpdatedQuery:
 		return strings.Contains(eventStr, "EventReleaseAssetUpdated")
-	case query == ReleaseAssetDeletedQuery:
+	case ReleaseAssetDeletedQuery:
 		return strings.Contains(eventStr, "EventReleaseAssetDeleted")
-	case query == LfsObjectUpdatedQuery:
+	case LfsObjectUpdatedQuery:
 		return strings.Contains(eventStr, "EventLFSObjectUpdated")
-	case query == LfsObjectDeletedQuery:
+	case LfsObjectDeletedQuery:
 		return strings.Contains(eventStr, "EventLFSObjectDeleted")
 	default:
 		return false
