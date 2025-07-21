@@ -25,6 +25,8 @@ var (
 )
 
 func initConfig() {
+	// Add system config path first, then current directory as fallback
+	viper.AddConfigPath("/etc/gitopia-storage")
 	viper.AddConfigPath(".")
 	if os.Getenv("ENV") == "PRODUCTION" {
 		viper.SetConfigName("config_prod")

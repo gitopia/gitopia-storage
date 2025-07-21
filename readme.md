@@ -205,9 +205,9 @@ Be sure to update this list whenever the set of active storage providers changes
 1.  Copy the production config file to a system location:
     ```sh
     sudo mkdir -p /etc/gitopia-storage
-    sudo cp config_prod.toml /etc/gitopia-storage/config.toml
+    sudo cp config_prod.toml /etc/gitopia-storage/config_prod.toml
     ```
-2.  Edit `/etc/gitopia-storage/config.toml` and set the correct paths and values, especially for your data directories.
+2.  Edit `/etc/gitopia-storage/config_prod.toml` and set the correct paths and values, especially for your data directories.
 
 ### 5. Run the Service
 1.  Create necessary directories:
@@ -286,7 +286,8 @@ Requires=ipfs-cluster.service
 User=gitopia
 Group=gitopia
 Type=simple
-ExecStart=/usr/local/bin/gitopia-storaged start --from gitopia-storage --config /etc/gitopia-storage/config.toml
+Environment=ENV=PRODUCTION
+ExecStart=/usr/local/bin/gitopia-storaged start --from gitopia-storage --keyring-backend test
 Restart=on-failure
 RestartSec=10
 LimitNOFILE=65535
