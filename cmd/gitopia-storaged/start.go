@@ -6,7 +6,6 @@ import (
 	"net/http"
 	_ "net/http/pprof" // Add pprof handlers to default HTTP mux
 	"os"
-	"runtime"
 	"time"
 
 	"github.com/pkg/errors"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/tx"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/gitopia/gitopia-go"
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia-storage/app"
@@ -77,6 +77,11 @@ func start(cmd *cobra.Command, args []string) error {
 	}
 	defer gitopiaClient.Close()
 
+	// Check client account balance before starting services
+	if err := checkClientBalance(ctx, gitopiaClient); err != nil {
+		return errors.WithMessage(err, "client balance check failed")
+	}
+
 	batchTxManager := app.NewBatchTxManager(gitopiaClient, app.BLOCK_TIME)
 	batchTxManager.Start()
 	defer batchTxManager.Stop()
@@ -105,8 +110,6 @@ func start(cmd *cobra.Command, args []string) error {
 	logrus.Info("application started")
 	return g.Wait()
 }
-
-
 
 func startWebServer(ctx context.Context, cmd *cobra.Command, batchTxManager *app.BatchTxManager) error {
 	server, err := setupWebServer(cmd, batchTxManager)
@@ -277,6 +280,42 @@ func startEventProcessor(ctx context.Context, cmd *cobra.Command, gitopiaClient 
 	}
 
 	return g.Wait()
+}
+
+// checkClientBalance verifies that the client account has sufficient balance for storage operations
+func checkClientBalance(ctx context.Context, gitopiaClient gitopia.Client) error {
+	// Create a GitopiaProxy to access balance checking functionality
+	proxy := app.NewGitopiaProxy(gitopiaClient, nil)
+
+	// Get client address
+	clientAddress := proxy.ClientAddress()
+	if clientAddress == "" {
+		return errors.New("client address is empty")
+	}
+
+	// Check client balance
+	balance, err := proxy.CosmosBankBalance(ctx, clientAddress, "ulore")
+	if err != nil {
+		return errors.Wrap(err, "failed to get client balance")
+	}
+
+	minRequiredAmount := sdk.NewInt(100_000_000) // 100 lore
+
+	logrus.WithFields(logrus.Fields{
+		"client_address": clientAddress,
+		"balance":        balance.String(),
+		"denom":          "ulore",
+		"min_required":   minRequiredAmount.String(),
+	}).Info("client balance check")
+
+	// Check if balance is sufficient
+	if balance.Amount.LT(minRequiredAmount) {
+		return errors.Errorf("insufficient balance: have %s, need at least %s for storage operations",
+			balance.String(), minRequiredAmount.String())
+	}
+
+	logrus.Info("client balance check passed")
+	return nil
 }
 
 func subscribeToEvent(ctx context.Context, query string, handler func(context.Context, []byte) error) error {

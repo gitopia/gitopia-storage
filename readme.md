@@ -83,6 +83,9 @@ You need to register your provider on the Gitopia blockchain. You only need to d
 > [!WARNING] 
 > Make sure to sync your ipfs cluster with other active providers before registering your provider. You'll start receiving challenges after registration.
 
+> [!IMPORTANT]
+> In addition to the stake requirement, your Gitopia account must maintain a minimum balance of **100 LORE** to perform storage operations. The storage provider will check this balance on startup and reject operations if insufficient funds are available.
+
 1.  **Import your key:** The container automatically imports the key from the `GITOPIA_OPERATOR_MNEMONIC` in your `.env` file on startup.
 
 2.  **Register the Provider:**
