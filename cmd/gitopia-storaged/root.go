@@ -18,11 +18,36 @@ func NewRootCmd() *cobra.Command {
 	}
 
 	registerStorageProviderCmd := cli.CmdRegisterStorageProvider()
+	updateStorageProviderCmd := cli.CmdUpdateStorageProvider()
+	withdrawRewardsCmd := cli.CmdWithdrawProviderRewards()
+	increaseStakeCmd := cli.CmdIncreaseStake()
+	decreaseStakeCmd := cli.CmdDecreaseStake()
+	completeDecreaseStakeCmd := cli.CmdCompleteDecreaseStake()
+	reactivateProviderCmd := cli.CmdReactivateProvider()
+	unregisterProviderCmd := cli.CmdUnregisterProvider()
+	completeUnstakeCmd := cli.CmdCompleteUnstake()
+
 	AddGitopiaFlags(registerStorageProviderCmd)
+	AddGitopiaFlags(updateStorageProviderCmd)
+	AddGitopiaFlags(withdrawRewardsCmd)
+	AddGitopiaFlags(increaseStakeCmd)
+	AddGitopiaFlags(decreaseStakeCmd)
+	AddGitopiaFlags(completeDecreaseStakeCmd)
+	AddGitopiaFlags(reactivateProviderCmd)
+	AddGitopiaFlags(unregisterProviderCmd)
+	AddGitopiaFlags(completeUnstakeCmd)
 
 	rootCmd.AddCommand(NewStartCmd())
 	rootCmd.AddCommand(keys.Commands(viper.GetString("WORKING_DIR")))
 	rootCmd.AddCommand(registerStorageProviderCmd)
+	rootCmd.AddCommand(updateStorageProviderCmd)
+	rootCmd.AddCommand(withdrawRewardsCmd)
+	rootCmd.AddCommand(increaseStakeCmd)
+	rootCmd.AddCommand(decreaseStakeCmd)
+	rootCmd.AddCommand(completeDecreaseStakeCmd)
+	rootCmd.AddCommand(reactivateProviderCmd)
+	rootCmd.AddCommand(unregisterProviderCmd)
+	rootCmd.AddCommand(completeUnstakeCmd)
 	rootCmd.AddCommand(NewGetIpfsClusterPeerAddressesCmd())
 	return rootCmd
 }
