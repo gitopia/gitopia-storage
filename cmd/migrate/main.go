@@ -447,6 +447,7 @@ func main() {
 						cid,
 						rootHash,
 						packfileInfo.Size(),
+						"",
 					)
 					if err != nil {
 						progress.FailedRepos[repository.Id] = err.Error()
@@ -688,6 +689,7 @@ func main() {
 							rootHash,
 							fileInfo.Size(),
 							attachment.Sha,
+							"",
 						)
 						if err != nil {
 							progress.FailedReleases[release.Id] = err.Error()

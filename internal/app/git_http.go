@@ -254,7 +254,7 @@ func (s *Server) handleGitReceivePack(w http.ResponseWriter, r *Request, repoID 
 		return fmt.Errorf("failed to compute packfile merkle root: %w", err)
 	}
 
-	if err := s.GitopiaProxy.UpdateRepositoryPackfile(context.Background(), repoID, filepath.Base(packfileName), cid, rootHash, packfileInfo.Size()); err != nil {
+	if err := s.GitopiaProxy.UpdateRepositoryPackfile(context.Background(), repoID, filepath.Base(packfileName), cid, rootHash, packfileInfo.Size(), packfileResp.Packfile.Cid); err != nil {
 		return fmt.Errorf("failed to update repository packfile: %w", err)
 	}
 
