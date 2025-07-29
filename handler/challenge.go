@@ -66,11 +66,6 @@ func (h *ChallengeEventHandler) Handle(ctx context.Context, eventBuf []byte) err
 		return errors.WithMessage(err, "event parse error")
 	}
 
-	// Only process challenges meant for this provider
-	if !h.gc.CheckProvider(event.Provider) {
-		return nil
-	}
-
 	return h.Process(ctx, *event)
 }
 

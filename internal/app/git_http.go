@@ -176,9 +176,11 @@ func (s *Server) handleGitReceivePack(w http.ResponseWriter, r *Request, repoID 
 	}
 
 	var currentSize int64
+	var previousCid string
 	packfileResp, err := s.QueryService.GitopiaRepositoryPackfile(context.Background(), &storagetypes.QueryRepositoryPackfileRequest{RepositoryId: repoID})
 	if err == nil && packfileResp != nil {
 		currentSize = int64(packfileResp.Packfile.Size_)
+		previousCid = packfileResp.Packfile.Cid
 	}
 
 	storageDelta := packfileInfo.Size() - currentSize
@@ -254,13 +256,18 @@ func (s *Server) handleGitReceivePack(w http.ResponseWriter, r *Request, repoID 
 		return fmt.Errorf("failed to compute packfile merkle root: %w", err)
 	}
 
-	if err := s.GitopiaProxy.UpdateRepositoryPackfile(context.Background(), repoID, filepath.Base(packfileName), cid, rootHash, packfileInfo.Size(), packfileResp.Packfile.Cid); err != nil {
+	if err := s.GitopiaProxy.UpdateRepositoryPackfile(context.Background(), repoID, filepath.Base(packfileName), cid, rootHash, packfileInfo.Size(), previousCid); err != nil {
 		return fmt.Errorf("failed to update repository packfile: %w", err)
 	}
 
 	if err := s.GitopiaProxy.PollForUpdate(context.Background(), func() (bool, error) {
 		return s.GitopiaProxy.CheckPackfileUpdate(repoID, cid)
 	}); err != nil {
+		// If the packfile update was not confirmed, unpin the packfile from IPFS cluster
+		if err := utils.UnpinFile(s.IPFSClusterClient, cid); err != nil {
+			return fmt.Errorf("failed to unpin packfile from IPFS cluster: %w", err)
+		}
+
 		if errors.Is(err, context.DeadlineExceeded) {
 			return fmt.Errorf("timeout waiting for packfile update to be confirmed")
 		}
