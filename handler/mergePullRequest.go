@@ -213,7 +213,7 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 	}
 
 	// Handle IPFS operations
-	if err := h.handlePostMergeOperations(ctx, resp, cacheDir); err != nil {
+	if err := h.handlePostMergeOperations(ctx, resp, cacheDir, mergeCommitSha); err != nil {
 		return h.handleError(ctx, err, event.TaskId, "post-merge operations error")
 	}
 
@@ -302,7 +302,7 @@ func (h *InvokeMergePullRequestEventHandler) pushChanges(ctx context.Context, re
 }
 
 // handlePostMergeOperations handles operations after successful merge
-func (h *InvokeMergePullRequestEventHandler) handlePostMergeOperations(ctx context.Context, resp types.PullRequest, cacheDir string) error {
+func (h *InvokeMergePullRequestEventHandler) handlePostMergeOperations(ctx context.Context, resp types.PullRequest, cacheDir string, mergeCommitSha string) error {
 	baseRepoPath := filepath.Join(cacheDir, fmt.Sprintf("%d.git", resp.Base.RepositoryId))
 
 	// Run git gc
@@ -415,14 +415,14 @@ func (h *InvokeMergePullRequestEventHandler) handlePostMergeOperations(ctx conte
 		return errors.WithMessage(err, "compute packfile merkle root error")
 	}
 
-	err = h.gc.UpdateRepositoryPackfile(ctx, resp.Base.RepositoryId, filepath.Base(packfileName), cid, rootHash, packfileInfo.Size(), packfile.Cid)
+	err = h.gc.ProposePackfileUpdate(ctx, resp.Base.RepositoryId, filepath.Base(packfileName), cid, rootHash, packfileInfo.Size(), packfile.Cid, mergeCommitSha)
 	if err != nil {
 		return errors.WithMessage(err, "update repository packfile error")
 	}
 
 	// Wait for packfile update to be confirmed with a timeout of 10 seconds
 	err = h.gc.PollForUpdate(ctx, func() (bool, error) {
-		return h.gc.CheckPackfileUpdate(resp.Base.RepositoryId, cid)
+		return h.gc.CheckProposePackfileUpdate(resp.Base.RepositoryId)
 	})
 	if err != nil {
 		return errors.WithMessage(err, "failed to verify packfile update")

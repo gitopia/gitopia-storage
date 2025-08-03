@@ -148,7 +148,6 @@ func (h *ChallengeEventHandler) Process(ctx context.Context, event ChallengeEven
 
 	// Submit challenge response
 	err = h.gc.SubmitChallenge(ctx,
-		event.Provider,
 		event.ChallengeId,
 		chunkHash,
 		&storagetypes.Proof{

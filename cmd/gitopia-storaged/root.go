@@ -23,7 +23,7 @@ func NewRootCmd() *cobra.Command {
 	increaseStakeCmd := cli.CmdIncreaseStake()
 	decreaseStakeCmd := cli.CmdDecreaseStake()
 	completeDecreaseStakeCmd := cli.CmdCompleteDecreaseStake()
-	reactivateProviderCmd := cli.CmdReactivateProvider()
+	unjailProviderCmd := cli.CmdUnjailProvider()
 	unregisterProviderCmd := cli.CmdUnregisterProvider()
 	completeUnstakeCmd := cli.CmdCompleteUnstake()
 
@@ -33,7 +33,7 @@ func NewRootCmd() *cobra.Command {
 	AddGitopiaFlags(increaseStakeCmd)
 	AddGitopiaFlags(decreaseStakeCmd)
 	AddGitopiaFlags(completeDecreaseStakeCmd)
-	AddGitopiaFlags(reactivateProviderCmd)
+	AddGitopiaFlags(unjailProviderCmd)
 	AddGitopiaFlags(unregisterProviderCmd)
 	AddGitopiaFlags(completeUnstakeCmd)
 
@@ -45,7 +45,7 @@ func NewRootCmd() *cobra.Command {
 	rootCmd.AddCommand(increaseStakeCmd)
 	rootCmd.AddCommand(decreaseStakeCmd)
 	rootCmd.AddCommand(completeDecreaseStakeCmd)
-	rootCmd.AddCommand(reactivateProviderCmd)
+	rootCmd.AddCommand(unjailProviderCmd)
 	rootCmd.AddCommand(unregisterProviderCmd)
 	rootCmd.AddCommand(completeUnstakeCmd)
 	rootCmd.AddCommand(NewGetIpfsClusterPeerAddressesCmd())

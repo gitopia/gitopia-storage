@@ -133,6 +133,22 @@ func (g *GitopiaProxy) UpdateRepositoryPackfile(ctx context.Context, repositoryI
 	return g.batchTxMgr.AddToBatch(ctx, msg)
 }
 
+func (g *GitopiaProxy) ProposePackfileUpdate(ctx context.Context, repositoryId uint64, name string, cid string, rootHash []byte, size int64, oldCid string, mergeCommitSha string) error {
+	msg := &storagetypes.MsgProposeRepositoryPackfileUpdate{
+		Creator:        g.gc.Address().String(),
+		RepositoryId:   repositoryId,
+		Name:           name,
+		Cid:            cid,
+		RootHash:       rootHash,
+		Size_:          uint64(size),
+		OldCid:         oldCid,
+		MergeCommitSha: mergeCommitSha,
+	}
+
+	// Use batch transaction manager
+	return g.batchTxMgr.AddToBatch(ctx, msg)
+}
+
 func (g *GitopiaProxy) DeleteRepositoryPackfile(ctx context.Context, repositoryId uint64, ownerId string) error {
 	msg := &storagetypes.MsgDeleteRepositoryPackfile{
 		Creator:      g.gc.Address().String(),
@@ -144,9 +160,9 @@ func (g *GitopiaProxy) DeleteRepositoryPackfile(ctx context.Context, repositoryI
 	return g.batchTxMgr.AddToBatch(ctx, msg)
 }
 
-func (g *GitopiaProxy) SubmitChallenge(ctx context.Context, creator string, challengeId uint64, data []byte, proof *storagetypes.Proof) error {
+func (g *GitopiaProxy) SubmitChallenge(ctx context.Context, challengeId uint64, data []byte, proof *storagetypes.Proof) error {
 	msg := &storagetypes.MsgSubmitChallengeResponse{
-		Creator:     creator,
+		Creator:     g.gc.Address().String(),
 		ChallengeId: challengeId,
 		Data:        data,
 		Proof:       proof,
@@ -382,6 +398,20 @@ func (g *GitopiaProxy) UpdateLFSObject(ctx context.Context, repositoryId uint64,
 	return g.batchTxMgr.AddToBatch(ctx, msg)
 }
 
+func (g *GitopiaProxy) ProposeLFSObjectUpdate(ctx context.Context, repositoryId uint64, oid string, cid string, rootHash []byte, size int64) error {
+	msg := &storagetypes.MsgProposeLFSObjectUpdate{
+		Creator:      g.gc.Address().String(),
+		RepositoryId: repositoryId,
+		Oid:          oid,
+		Cid:          cid,
+		RootHash:     rootHash,
+		Size_:        uint64(size),
+	}
+
+	// Use batch transaction manager
+	return g.batchTxMgr.AddToBatch(ctx, msg)
+}
+
 func (g *GitopiaProxy) DeleteLFSObject(ctx context.Context, repositoryId uint64, oid string, ownerId string) error {
 	msg := &storagetypes.MsgDeleteLFSObject{
 		Creator:      g.gc.Address().String(),
@@ -471,6 +501,16 @@ func (g *GitopiaProxy) CheckPackfileUpdate(repositoryId uint64, expectedCid stri
 	return packfile.Cid == expectedCid, nil
 }
 
+// CheckProposePackfileUpdate verifies if a packfile update was proposed
+func (g *GitopiaProxy) CheckProposePackfileUpdate(repositoryId uint64) (bool, error) {
+	packfileUpdateProposal, err := g.PackfileUpdateProposal(context.Background(), repositoryId, g.gc.Address().String())
+	if err != nil {
+		return false, err
+	}
+
+	return packfileUpdateProposal.Cid != "", nil
+}
+
 // CheckPackfileDelete verifies if a packfile delete was applied
 func (g *GitopiaProxy) CheckPackfileDelete(repositoryId uint64) (bool, error) {
 	_, err := g.RepositoryPackfile(context.Background(), repositoryId)
@@ -485,6 +525,16 @@ func (g *GitopiaProxy) CheckLFSObjectUpdate(repositoryId uint64, oid, expectedCi
 	lfsObject, _ := g.LFSObjectByRepositoryIdAndOid(context.Background(), repositoryId, oid)
 
 	return lfsObject.Cid == expectedCid, nil
+}
+
+// CheckProposeLFSObjectUpdate verifies if an LFS object update was proposed
+func (g *GitopiaProxy) CheckProposeLFSObjectUpdate(repositoryId uint64) (bool, error) {
+	lfsObjectUpdateProposal, err := g.LFSObjectUpdateProposal(context.Background(), repositoryId, g.gc.Address().String())
+	if err != nil {
+		return false, err
+	}
+
+	return len(lfsObjectUpdateProposal) > 0, nil
 }
 
 // CheckLFSObjectDelete verifies if an LFS object delete was applied
@@ -519,4 +569,30 @@ func (g *GitopiaProxy) CheckPullRequestUpdate(repositoryId uint64, pullRequestIi
 		return false, err
 	}
 	return pullRequest.MergeCommitSha == mergeCommitSha, nil
+}
+
+// PackfileUpdateProposal returns the packfile update proposal for a repository and user
+func (g *GitopiaProxy) PackfileUpdateProposal(ctx context.Context, repositoryId uint64, user string) (storagetypes.ProposedPackfileUpdate, error) {
+	resp, err := g.gc.QueryClient().Storage.PackfileUpdateProposal(ctx, &storagetypes.QueryPackfileUpdateProposalRequest{
+		RepositoryId: repositoryId,
+		User:         user,
+	})
+	if err != nil {
+		return storagetypes.ProposedPackfileUpdate{}, errors.WithMessage(err, "query error")
+	}
+
+	return resp.PackfileUpdateProposal, nil
+}
+
+// LFSObjectUpdateProposal returns the LFS object update proposal for a repository and user
+func (g *GitopiaProxy) LFSObjectUpdateProposal(ctx context.Context, repositoryId uint64, user string) ([]storagetypes.ProposedLFSObjectUpdate, error) {
+	resp, err := g.gc.QueryClient().Storage.LFSObjectUpdateProposal(ctx, &storagetypes.QueryLFSObjectUpdateProposalRequest{
+		RepositoryId: repositoryId,
+		User:         user,
+	})
+	if err != nil {
+		return nil, errors.WithMessage(err, "query error")
+	}
+
+	return resp.LfsObjectProposal, nil
 }
