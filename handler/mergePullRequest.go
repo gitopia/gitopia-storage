@@ -217,23 +217,6 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 		return h.handleError(ctx, err, event.TaskId, "post-merge operations error")
 	}
 
-	// Update pull request state and repository branch reference
-	if err := h.gc.MergePullRequest(ctx, event.RepositoryId, event.PullRequestIid, mergeCommitSha, event.TaskId); err != nil {
-		return h.handleError(ctx, err, event.TaskId, "set pull request state error")
-	}
-
-	// Wait for pull request update to be confirmed with a timeout of 10 seconds
-	err = h.gc.PollForUpdate(context.Background(), func() (bool, error) {
-		return h.gc.CheckPullRequestUpdate(event.RepositoryId, event.PullRequestIid, mergeCommitSha)
-	})
-	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return h.handleError(ctx, err, event.TaskId, "timeout waiting for pull request update to be confirmed")
-		} else {
-			return h.handleError(ctx, err, event.TaskId, "failed to verify pull request update")
-		}
-	}
-
 	h.logOperation(ctx, "merge_completed", map[string]interface{}{
 		"creator":          event.Creator,
 		"repository_id":    event.RepositoryId,

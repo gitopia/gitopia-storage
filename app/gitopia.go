@@ -279,19 +279,6 @@ func (g *GitopiaProxy) RepositoryPackfile(ctx context.Context, repositoryId uint
 	return resp.Packfile, nil
 }
 
-func (g *GitopiaProxy) MergePullRequest(ctx context.Context, repositoryId uint64, pullRequestIid uint64, mergeCommitSha string, taskId uint64) error {
-	msg := &storagetypes.MsgMergePullRequest{
-		Creator:        g.gc.Address().String(),
-		RepositoryId:   repositoryId,
-		PullRequestIid: pullRequestIid,
-		MergeCommitSha: mergeCommitSha,
-		TaskId:         taskId,
-	}
-
-	// Use batch transaction manager
-	return g.batchTxMgr.AddToBatch(ctx, msg)
-}
-
 func (g *GitopiaProxy) StorageParams(ctx context.Context) (storagetypes.Params, error) {
 	resp, err := g.gc.QueryClient().Storage.Params(ctx, &storagetypes.QueryParamsRequest{})
 	if err != nil {
