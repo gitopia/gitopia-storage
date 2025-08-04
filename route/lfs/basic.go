@@ -196,7 +196,7 @@ func (h *BasicHandler) ServeUploadHandler(w http.ResponseWriter, r *http.Request
 
 	// Wait for LFS object update to be confirmed with a timeout of 10 seconds
 	err = h.GitopiaProxy.PollForUpdate(context.Background(), func() (bool, error) {
-		return h.GitopiaProxy.CheckProposeLFSObjectUpdate(repoId)
+		return h.GitopiaProxy.CheckProposeLFSObjectUpdate(repoId, string(oid))
 	})
 
 	if err != nil {

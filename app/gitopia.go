@@ -515,13 +515,13 @@ func (g *GitopiaProxy) CheckLFSObjectUpdate(repositoryId uint64, oid, expectedCi
 }
 
 // CheckProposeLFSObjectUpdate verifies if an LFS object update was proposed
-func (g *GitopiaProxy) CheckProposeLFSObjectUpdate(repositoryId uint64) (bool, error) {
-	lfsObjectUpdateProposal, err := g.LFSObjectUpdateProposal(context.Background(), repositoryId, g.gc.Address().String())
+func (g *GitopiaProxy) CheckProposeLFSObjectUpdate(repositoryId uint64, oid string) (bool, error) {
+	lfsObjectUpdateProposal, err := g.LFSObjectUpdateProposal(context.Background(), repositoryId, oid, g.gc.Address().String())
 	if err != nil {
 		return false, err
 	}
 
-	return len(lfsObjectUpdateProposal) > 0, nil
+	return lfsObjectUpdateProposal.Cid != "", nil
 }
 
 // CheckLFSObjectDelete verifies if an LFS object delete was applied
@@ -572,13 +572,14 @@ func (g *GitopiaProxy) PackfileUpdateProposal(ctx context.Context, repositoryId 
 }
 
 // LFSObjectUpdateProposal returns the LFS object update proposal for a repository and user
-func (g *GitopiaProxy) LFSObjectUpdateProposal(ctx context.Context, repositoryId uint64, user string) ([]storagetypes.ProposedLFSObjectUpdate, error) {
+func (g *GitopiaProxy) LFSObjectUpdateProposal(ctx context.Context, repositoryId uint64, oid string, user string) (storagetypes.ProposedLFSObjectUpdate, error) {
 	resp, err := g.gc.QueryClient().Storage.LFSObjectUpdateProposal(ctx, &storagetypes.QueryLFSObjectUpdateProposalRequest{
 		RepositoryId: repositoryId,
+		Oid:          oid,
 		User:         user,
 	})
 	if err != nil {
-		return nil, errors.WithMessage(err, "query error")
+		return storagetypes.ProposedLFSObjectUpdate{}, errors.WithMessage(err, "query error")
 	}
 
 	return resp.LfsObjectProposal, nil
