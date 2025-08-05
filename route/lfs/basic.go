@@ -186,6 +186,13 @@ func (h *BasicHandler) ServeUploadHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Check lfs object already exists
+	_, err = h.GitopiaProxy.LFSObjectByRepositoryIdAndOid(context.Background(), repoId, string(oid))
+	if err == nil {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	// First update the LFS object
 	err = h.GitopiaProxy.ProposeLFSObjectUpdate(context.Background(), repoId, string(oid), cid, rootHash, size)
 	if err != nil {
