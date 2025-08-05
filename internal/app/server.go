@@ -175,7 +175,7 @@ func (s *ServerWrapper) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		allow, err := s.Server.AuthFunc(token, req)
+		allow, address, err := s.Server.AuthFunc(token, req)
 		if !allow || err != nil {
 			if err != nil {
 				utils.LogError("auth", err)
@@ -183,6 +183,7 @@ func (s *ServerWrapper) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
+		req.Address = address
 	}
 
 	if !repoExists(req.RepoPath) && s.Server.Config.AutoCreate {

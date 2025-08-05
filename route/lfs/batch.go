@@ -1,6 +1,7 @@
 package lfs
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -94,7 +95,7 @@ func (h *BasicHandler) ServeBatchHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 
-		allow, err := utils.ValidateBasicAuth(r, username, password)
+		allow, address, err := utils.ValidateBasicAuth(r, username, password)
 		if !allow || err != nil {
 			if err != nil {
 				log.WithFields(log.Fields{
@@ -105,6 +106,10 @@ func (h *BasicHandler) ServeBatchHandler(w http.ResponseWriter, r *http.Request)
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
+
+		// Add the address to the request context
+		ctx := context.WithValue(r.Context(), "address", address)
+		r = r.WithContext(ctx)
 	}
 
 	// NOTE: We only support basic transfer as of now.

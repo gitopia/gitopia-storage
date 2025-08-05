@@ -196,7 +196,8 @@ func (h *BasicHandler) ServeUploadHandler(w http.ResponseWriter, r *http.Request
 
 	// Wait for LFS object update to be confirmed with a timeout of 10 seconds
 	err = h.GitopiaProxy.PollForUpdate(context.Background(), func() (bool, error) {
-		return h.GitopiaProxy.CheckProposeLFSObjectUpdate(repoId, string(oid))
+		address := r.Context().Value("address").(string)
+		return h.GitopiaProxy.CheckProposeLFSObjectUpdate(repoId, string(oid), address)
 	})
 
 	if err != nil {
@@ -274,7 +275,7 @@ func Authenticate(h http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		allow, err := utils.ValidateBasicAuth(r, username, password)
+		allow, address, err := utils.ValidateBasicAuth(r, username, password)
 		if !allow || err != nil {
 			if err != nil {
 				log.WithFields(log.Fields{
@@ -286,6 +287,10 @@ func Authenticate(h http.HandlerFunc) http.HandlerFunc {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
+
+		// Add the address to the request context
+		ctx := context.WithValue(r.Context(), "address", address)
+		r = r.WithContext(ctx)
 
 		h(w, r)
 	}

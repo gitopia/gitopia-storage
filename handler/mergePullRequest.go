@@ -213,7 +213,7 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 	}
 
 	// Handle IPFS operations
-	if err := h.handlePostMergeOperations(ctx, resp, cacheDir, mergeCommitSha); err != nil {
+	if err := h.handlePostMergeOperations(ctx, resp, cacheDir, mergeCommitSha, event.Creator); err != nil {
 		return h.handleError(ctx, err, event.TaskId, "post-merge operations error")
 	}
 
@@ -285,7 +285,7 @@ func (h *InvokeMergePullRequestEventHandler) pushChanges(ctx context.Context, re
 }
 
 // handlePostMergeOperations handles operations after successful merge
-func (h *InvokeMergePullRequestEventHandler) handlePostMergeOperations(ctx context.Context, resp types.PullRequest, cacheDir string, mergeCommitSha string) error {
+func (h *InvokeMergePullRequestEventHandler) handlePostMergeOperations(ctx context.Context, resp types.PullRequest, cacheDir string, mergeCommitSha string, user string) error {
 	baseRepoPath := filepath.Join(cacheDir, fmt.Sprintf("%d.git", resp.Base.RepositoryId))
 
 	// Run git gc
@@ -405,7 +405,7 @@ func (h *InvokeMergePullRequestEventHandler) handlePostMergeOperations(ctx conte
 
 	// Wait for packfile update to be confirmed with a timeout of 10 seconds
 	err = h.gc.PollForUpdate(ctx, func() (bool, error) {
-		return h.gc.CheckProposePackfileUpdate(resp.Base.RepositoryId)
+		return h.gc.CheckProposePackfileUpdate(resp.Base.RepositoryId, user)
 	})
 	if err != nil {
 		return errors.WithMessage(err, "failed to verify packfile update")

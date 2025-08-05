@@ -261,7 +261,7 @@ func (s *Server) handleGitReceivePack(w http.ResponseWriter, r *Request, repoID 
 	}
 
 	if err := s.GitopiaProxy.PollForUpdate(context.Background(), func() (bool, error) {
-		return s.GitopiaProxy.CheckProposePackfileUpdate(repoID)
+		return s.GitopiaProxy.CheckProposePackfileUpdate(repoID, r.Address)
 	}); err != nil {
 		// If the packfile update was not confirmed, unpin the packfile from IPFS cluster
 		if err := utils.UnpinFile(s.IPFSClusterClient, cid); err != nil {

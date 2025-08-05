@@ -32,7 +32,7 @@ type Server struct {
 	Config            utils.Config
 	Services          []Service
 	LfsServices       []LfsService
-	AuthFunc          func(string, *Request) (bool, error)
+	AuthFunc          func(string, *Request) (bool, string, error)
 	QueryService      QueryService
 	GitopiaProxy      *app.GitopiaProxy
 	IPFSClusterClient ipfsclusterclient.Client
@@ -49,4 +49,5 @@ type Request struct {
 	*http.Request
 	RepoName string
 	RepoPath string
+	Address  string
 }

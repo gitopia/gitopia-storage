@@ -489,8 +489,8 @@ func (g *GitopiaProxy) CheckPackfileUpdate(repositoryId uint64, expectedCid stri
 }
 
 // CheckProposePackfileUpdate verifies if a packfile update was proposed
-func (g *GitopiaProxy) CheckProposePackfileUpdate(repositoryId uint64) (bool, error) {
-	packfileUpdateProposal, err := g.PackfileUpdateProposal(context.Background(), repositoryId, g.gc.Address().String())
+func (g *GitopiaProxy) CheckProposePackfileUpdate(repositoryId uint64, user string) (bool, error) {
+	packfileUpdateProposal, err := g.PackfileUpdateProposal(context.Background(), repositoryId, user)
 	if err != nil {
 		return false, err
 	}
@@ -515,8 +515,8 @@ func (g *GitopiaProxy) CheckLFSObjectUpdate(repositoryId uint64, oid, expectedCi
 }
 
 // CheckProposeLFSObjectUpdate verifies if an LFS object update was proposed
-func (g *GitopiaProxy) CheckProposeLFSObjectUpdate(repositoryId uint64, oid string) (bool, error) {
-	lfsObjectUpdateProposal, err := g.LFSObjectUpdateProposal(context.Background(), repositoryId, oid, g.gc.Address().String())
+func (g *GitopiaProxy) CheckProposeLFSObjectUpdate(repositoryId uint64, oid string, user string) (bool, error) {
+	lfsObjectUpdateProposal, err := g.LFSObjectUpdateProposal(context.Background(), repositoryId, oid, user)
 	if err != nil {
 		return false, err
 	}
