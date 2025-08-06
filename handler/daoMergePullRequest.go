@@ -19,7 +19,6 @@ type InvokeDaoMergePullRequestEvent struct {
 	Admin        string
 	RepositoryId uint64
 	PullIid      uint64
-	TaskId       uint64
 	TxHeight     uint64
 	Provider     string
 }
@@ -49,15 +48,6 @@ func (e *InvokeDaoMergePullRequestEvent) UnMarshal(eventBuf []byte) error {
 		return errors.Wrap(err, "error parsing pull request iid")
 	}
 
-	taskIdStr, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+types.EventAttributeTaskIdKey, "[0]")
-	if err != nil {
-		return errors.Wrap(err, "error parsing task id")
-	}
-	taskId, err := strconv.ParseUint(taskIdStr, 10, 64)
-	if err != nil {
-		return errors.Wrap(err, "error parsing task id")
-	}
-
 	h, err := jsonparser.GetString(eventBuf, "events", "tx.height", "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing tx height")
@@ -75,7 +65,6 @@ func (e *InvokeDaoMergePullRequestEvent) UnMarshal(eventBuf []byte) error {
 	e.Admin = admin
 	e.RepositoryId = repositoryId
 	e.PullIid = iid
-	e.TaskId = taskId
 	e.TxHeight = height
 	e.Provider = provider
 
@@ -123,17 +112,8 @@ func (h *InvokeDaoMergePullRequestEventHandler) Process(ctx context.Context, eve
 		"admin":         event.Admin,
 		"repository-id": event.RepositoryId,
 		"pull-iid":      event.PullIid,
-		"task-id":       event.TaskId,
 		"tx-height":     event.TxHeight,
 	}).Info("Processing dao merge pull request event")
-
-	res, err := h.gc.Task(ctx, event.TaskId)
-	if err != nil {
-		return err
-	}
-	if res.State != types.StatePending { // Task is already processed
-		return nil
-	}
 
 	// Get dao address from repository
 	repository, err := h.gc.Repository(ctx, event.RepositoryId)
@@ -145,7 +125,6 @@ func (h *InvokeDaoMergePullRequestEventHandler) Process(ctx context.Context, eve
 		Creator:        repository.Owner.Id,
 		RepositoryId:   event.RepositoryId,
 		PullRequestIid: event.PullIid,
-		TaskId:         event.TaskId,
 		TxHeight:       event.TxHeight,
 	}
 

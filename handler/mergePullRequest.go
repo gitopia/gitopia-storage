@@ -35,7 +35,6 @@ type InvokeMergePullRequestEvent struct {
 	Creator        string
 	RepositoryId   uint64
 	PullRequestIid uint64
-	TaskId         uint64
 	TxHeight       uint64
 	Provider       string
 }
@@ -65,15 +64,6 @@ func (e *InvokeMergePullRequestEvent) UnMarshal(eventBuf []byte) error {
 		return errors.Wrap(err, "error parsing pull request iid")
 	}
 
-	taskIdStr, err := jsonparser.GetString(eventBuf, "events", "message.TaskId", "[0]")
-	if err != nil {
-		return errors.Wrap(err, "error parsing task id")
-	}
-	taskId, err := strconv.ParseUint(taskIdStr, 10, 64)
-	if err != nil {
-		return errors.Wrap(err, "error parsing task id")
-	}
-
 	h, err := jsonparser.GetString(eventBuf, "events", "tx.height", "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing tx height")
@@ -91,7 +81,6 @@ func (e *InvokeMergePullRequestEvent) UnMarshal(eventBuf []byte) error {
 	e.Creator = creator
 	e.RepositoryId = repositoryId
 	e.PullRequestIid = iid
-	e.TaskId = taskId
 	e.TxHeight = height
 	e.Provider = provider
 
@@ -139,23 +128,13 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 		"creator":          event.Creator,
 		"repository_id":    event.RepositoryId,
 		"pull_request_iid": event.PullRequestIid,
-		"task_id":          event.TaskId,
 		"tx_height":        event.TxHeight,
 	})
-
-	// Check task state
-	res, err := h.gc.Task(ctx, event.TaskId)
-	if err != nil {
-		return h.handleError(ctx, err, event.TaskId, "task query error")
-	}
-	if res.State != types.StatePending {
-		return nil
-	}
 
 	// Get pull request details
 	resp, err := h.gc.PullRequest(ctx, event.RepositoryId, event.PullRequestIid)
 	if err != nil {
-		return h.handleError(ctx, err, event.TaskId, "pull request query error")
+		return errors.WithMessage(err, "pull request query error")
 	}
 
 	// Prepare repositories
@@ -168,13 +147,13 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 		defer utils.UnlockRepository(resp.Head.RepositoryId)
 	}
 	if err := h.prepareRepositories(ctx, resp, cacheDir); err != nil {
-		return h.handleError(ctx, err, event.TaskId, "repository preparation error")
+		return errors.WithMessage(err, "repository preparation error")
 	}
 
 	// Get repository name
 	headRepositoryName, err := h.gc.RepositoryName(ctx, resp.Head.RepositoryId)
 	if err != nil {
-		return h.handleError(ctx, err, event.TaskId, "repository name query error")
+		return errors.WithMessage(err, "repository name query error")
 	}
 
 	message := fmt.Sprintf("Merge pull request #%v from %s/%s", resp.Iid, headRepositoryName, resp.Head.Branch)
@@ -182,7 +161,7 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 	// Create quarantine repository
 	quarantineRepoPath, err := utils.CreateQuarantineRepo(resp.Base.RepositoryId, resp.Head.RepositoryId, resp.Base.Branch, resp.Head.Branch)
 	if err != nil {
-		return h.handleError(ctx, err, event.TaskId, "create quarantine repo error")
+		return errors.WithMessage(err, "create quarantine repo error")
 	}
 	defer os.RemoveAll(quarantineRepoPath)
 
@@ -198,30 +177,29 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 	// Perform merge
 	mergeStyle := utils.MergeStyleMerge
 	if err := h.performMerge(ctx, mergeStyle, resp, quarantineRepoPath, env, message); err != nil {
-		return h.handleError(ctx, err, event.TaskId, "merge operation error")
+		return errors.WithMessage(err, "merge operation error")
 	}
 
 	// Get merge commit SHA
 	mergeCommitSha, err := utils.GetFullCommitSha(quarantineRepoPath, "base")
 	if err != nil {
-		return h.handleError(ctx, err, event.TaskId, "merge commit sha error")
+		return errors.WithMessage(err, "merge commit sha error")
 	}
 
 	// Push changes
 	if err := h.pushChanges(ctx, resp, quarantineRepoPath, env, mergeStyle); err != nil {
-		return h.handleError(ctx, err, event.TaskId, "push changes error")
+		return errors.WithMessage(err, "push changes error")
 	}
 
 	// Handle IPFS operations
 	if err := h.handlePostMergeOperations(ctx, resp, cacheDir, mergeCommitSha, event.Creator); err != nil {
-		return h.handleError(ctx, err, event.TaskId, "post-merge operations error")
+		return errors.WithMessage(err, "post-merge operations error")
 	}
 
 	h.logOperation(ctx, "merge_completed", map[string]interface{}{
 		"creator":          event.Creator,
 		"repository_id":    event.RepositoryId,
 		"pull_request_iid": event.PullRequestIid,
-		"task_id":          event.TaskId,
 		"tx_height":        event.TxHeight,
 	})
 	return nil
@@ -434,23 +412,6 @@ func (h *InvokeMergePullRequestEventHandler) handlePostMergeOperations(ctx conte
 	}
 
 	return nil
-}
-
-// handleError is a helper function for common error handling pattern
-func (h *InvokeMergePullRequestEventHandler) handleError(ctx context.Context, err error, taskId uint64, message string) error {
-	if err == nil {
-		return nil
-	}
-	// Truncate error message if needed
-	errMsg := err.Error()
-	if len(errMsg) > maxErrorLength {
-		errMsg = errMsg[:maxErrorLength]
-	}
-	updateErr := h.gc.UpdateTask(ctx, taskId, types.StateFailure, errMsg)
-	if updateErr != nil {
-		return errors.WithMessage(updateErr, "update task error")
-	}
-	return errors.WithMessage(err, message)
 }
 
 // runGitCommandWithTimeout executes a git command with a timeout
