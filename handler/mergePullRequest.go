@@ -376,7 +376,7 @@ func (h *InvokeMergePullRequestEventHandler) handlePostMergeOperations(ctx conte
 		return errors.WithMessage(err, "compute packfile merkle root error")
 	}
 
-	err = h.gc.ProposePackfileUpdate(ctx, resp.Base.RepositoryId, filepath.Base(packfileName), cid, rootHash, packfileInfo.Size(), packfile.Cid, mergeCommitSha)
+	err = h.gc.ProposePackfileUpdate(ctx, user, resp.Base.RepositoryId, filepath.Base(packfileName), cid, rootHash, packfileInfo.Size(), packfile.Cid, mergeCommitSha)
 	if err != nil {
 		return errors.WithMessage(err, "update repository packfile error")
 	}

@@ -126,6 +126,7 @@ func (h *InvokeDaoMergePullRequestEventHandler) Process(ctx context.Context, eve
 		RepositoryId:   event.RepositoryId,
 		PullRequestIid: event.PullIid,
 		TxHeight:       event.TxHeight,
+		Provider:       event.Provider,
 	}
 
 	// Create a new InvokeMergePullRequestEventHandler to reuse its Process method
