@@ -233,7 +233,7 @@ func startEventProcessor(ctx context.Context, cmd *cobra.Command, gitopiaClient 
 	}
 
 	mergeHandler := handler.NewInvokeMergePullRequestEventHandler(gp, mcc, cl)
-	daoMergeHandler := handler.NewInvokeDaoMergePullRequestEventHandler(gp, dmcc, cl)
+	daoMergeHandler := handler.NewInvokeMergePullRequestEventHandler(gp, dmcc, cl)
 	challengeHandler := handler.NewChallengeEventHandler(gp)
 	packfileUpdatedHandler := handler.NewPackfileUpdatedEventHandler(gp)
 	packfileDeletedHandler := handler.NewPackfileDeletedEventHandler(gp)
@@ -246,7 +246,7 @@ func startEventProcessor(ctx context.Context, cmd *cobra.Command, gitopiaClient 
 	deleteRepoHandler := handler.NewDeleteRepositoryEventHandler(gp, dcc, cl)
 
 	// Create multiple WebSocket clients to distribute subscriptions and avoid hitting the 5 subscription limit
-	
+
 	// Client 1: Merge and Challenge events (3 subscriptions)
 	client1, err := gitopia.NewWSEvents(ctx)
 	if err != nil {
