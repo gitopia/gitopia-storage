@@ -11,6 +11,7 @@ import (
 	"github.com/gitopia/gitopia-storage/app/consumer"
 	"github.com/gitopia/gitopia-storage/utils"
 	"github.com/gitopia/gitopia/v6/x/gitopia/types"
+	storagetypes "github.com/gitopia/gitopia/v6/x/storage/types"
 	ipfsclusterclient "github.com/ipfs-cluster/ipfs-cluster/api/rest/client"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -114,13 +115,13 @@ func (h *DeleteRepositoryEventHandler) Process(ctx context.Context, event Delete
 		return errors.Wrap(err, "failed to get repository packfile")
 	}
 
-	if err := h.gc.DeleteRepositoryPackfile(ctx, event.RepositoryId, event.RepositoryOwnerId); err != nil {
-		return errors.Wrap(err, "failed to delete repository packfile")
+	if err := h.gc.ProposePackfileUpdate(ctx, event.Creator, event.RepositoryId, packfile.Name, packfile.Cid, packfile.RootHash, int64(packfile.Size_), packfile.OldCid, ""); err != nil {
+		return errors.Wrap(err, "failed to propose packfile update")
 	}
 
 	// Wait for packfile delete to be confirmed with a timeout of 10 seconds
 	err = h.gc.PollForUpdate(ctx, func() (bool, error) {
-		return h.gc.CheckPackfileDelete(event.RepositoryId)
+		return h.gc.CheckProposePackfileUpdate(event.RepositoryId, event.Creator)
 	})
 	if err != nil {
 		return errors.Wrap(err, "failed to verify packfile delete")
@@ -147,35 +148,33 @@ func (h *DeleteRepositoryEventHandler) Process(ctx context.Context, event Delete
 		return errors.Wrap(err, "failed to get repository release assets")
 	}
 
-	for _, asset := range assets {
-		if err := h.gc.DeleteReleaseAsset(ctx, asset.RepositoryId, asset.Tag, asset.Name, event.RepositoryOwnerId); err != nil {
-			return errors.Wrap(err, "failed to delete release asset")
+	releases, err := h.gc.RepositoryReleaseAll(ctx, event.RepositoryOwnerId, event.RepositoryName)
+	if err != nil {
+		return errors.Wrap(err, "failed to get repository releases")
+	}
+
+	for _, release := range releases {
+
+		var assetUpdates []*storagetypes.ReleaseAssetUpdate
+		for _, asset := range assets {
+			if asset.Tag == release.TagName {
+				assetUpdates = append(assetUpdates, &storagetypes.ReleaseAssetUpdate{
+					Name:   asset.Name,
+					Delete: true,
+				})
+			}
 		}
 
-		// Wait for release asset delete to be confirmed with a timeout of 10 seconds
+		if err := h.gc.ProposeReleaseAssetsUpdate(ctx, event.Creator, event.RepositoryId, release.TagName, assetUpdates); err != nil {
+			return errors.Wrap(err, "failed to propose release asset update")
+		}
+
+		// Wait for release assets delete to be confirmed with a timeout of 10 seconds
 		err = h.gc.PollForUpdate(ctx, func() (bool, error) {
-			return h.gc.CheckReleaseAssetDelete(event.RepositoryId, asset.Tag, asset.Name)
+			return h.gc.CheckProposeReleaseAssetsUpdate(event.RepositoryId, release.TagName, event.Creator)
 		})
 		if err != nil {
 			return errors.Wrap(err, "failed to verify release asset delete")
-		}
-
-		// check reference count
-		refCount, err := h.gc.StorageCidReferenceCount(ctx, asset.Cid)
-		if err != nil {
-			return errors.Wrap(err, "failed to get reference count")
-		}
-		if refCount == 0 {
-			err := utils.UnpinFile(h.ipfsClusterClient, asset.Cid)
-			if err != nil {
-				logger.WithFields(logrus.Fields{
-					"repository_id":   event.RepositoryId,
-					"repository_name": event.RepositoryName,
-					"name":            asset.Name,
-					"cid":             asset.Cid,
-				}).WithError(err).Error("failed to unpin file from IPFS Cluster")
-			}
-
 		}
 	}
 
@@ -185,33 +184,16 @@ func (h *DeleteRepositoryEventHandler) Process(ctx context.Context, event Delete
 	}
 
 	for _, lfsObject := range lfsObjects {
-		if err := h.gc.DeleteLFSObject(ctx, lfsObject.RepositoryId, lfsObject.Oid, event.RepositoryOwnerId); err != nil {
-			return errors.Wrap(err, "failed to delete lfs object")
+		if err := h.gc.ProposeLFSObjectUpdate(ctx, event.Creator, event.RepositoryId, lfsObject.Oid, "", []byte{}, 0); err != nil {
+			return errors.Wrap(err, "failed to propose lfs object update")
 		}
 
 		// Wait for LFS object delete to be confirmed with a timeout of 10 seconds
 		err = h.gc.PollForUpdate(ctx, func() (bool, error) {
-			return h.gc.CheckLFSObjectDelete(lfsObject.RepositoryId, lfsObject.Oid)
+			return h.gc.CheckProposeLFSObjectUpdate(event.RepositoryId, lfsObject.Oid, event.Creator)
 		})
 		if err != nil {
 			return errors.Wrap(err, "failed to verify LFS object delete")
-		}
-
-		// check reference count
-		refCount, err := h.gc.StorageCidReferenceCount(ctx, lfsObject.Cid)
-		if err != nil {
-			return errors.Wrap(err, "failed to get reference count")
-		}
-		if refCount == 0 {
-			err := utils.UnpinFile(h.ipfsClusterClient, lfsObject.Cid)
-			if err != nil {
-				logger.WithFields(logrus.Fields{
-					"repository_id":   event.RepositoryId,
-					"repository_name": event.RepositoryName,
-					"oid":             lfsObject.Oid,
-					"cid":             lfsObject.Cid,
-				}).WithError(err).Error("failed to unpin file from IPFS Cluster")
-			}
 		}
 	}
 

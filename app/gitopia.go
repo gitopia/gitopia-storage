@@ -150,17 +150,6 @@ func (g *GitopiaProxy) ProposePackfileUpdate(ctx context.Context, user string, r
 	return g.batchTxMgr.AddToBatch(ctx, msg)
 }
 
-func (g *GitopiaProxy) DeleteRepositoryPackfile(ctx context.Context, repositoryId uint64, ownerId string) error {
-	msg := &storagetypes.MsgDeleteRepositoryPackfile{
-		Creator:      g.gc.Address().String(),
-		RepositoryId: repositoryId,
-		OwnerId:      ownerId,
-	}
-
-	// Use batch transaction manager
-	return g.batchTxMgr.AddToBatch(ctx, msg)
-}
-
 func (g *GitopiaProxy) SubmitChallenge(ctx context.Context, challengeId uint64, data []byte, proof *storagetypes.Proof) error {
 	msg := &storagetypes.MsgSubmitChallengeResponse{
 		Creator:     g.gc.Address().String(),
@@ -352,19 +341,6 @@ func (g *GitopiaProxy) StorageCidReferenceCount(ctx context.Context, cid string)
 	return resp.Count, nil
 }
 
-func (g *GitopiaProxy) DeleteReleaseAsset(ctx context.Context, repositoryId uint64, tag string, name string, ownerId string) error {
-	msg := &storagetypes.MsgDeleteReleaseAsset{
-		Creator:      g.gc.Address().String(),
-		RepositoryId: repositoryId,
-		Tag:          tag,
-		Name:         name,
-		OwnerId:      ownerId,
-	}
-
-	// Use batch transaction manager
-	return g.batchTxMgr.AddToBatch(ctx, msg)
-}
-
 func (g *GitopiaProxy) ActiveProviders(ctx context.Context) ([]storagetypes.Provider, error) {
 	resp, err := g.gc.QueryClient().Storage.ActiveProviders(ctx, &storagetypes.QueryActiveProvidersRequest{})
 	if err != nil {
@@ -441,18 +417,6 @@ func (g *GitopiaProxy) ProposeLFSObjectUpdate(ctx context.Context, user string, 
 	return g.batchTxMgr.AddToBatch(ctx, msg)
 }
 
-func (g *GitopiaProxy) DeleteLFSObject(ctx context.Context, repositoryId uint64, oid string, ownerId string) error {
-	msg := &storagetypes.MsgDeleteLFSObject{
-		Creator:      g.gc.Address().String(),
-		RepositoryId: repositoryId,
-		Oid:          oid,
-		OwnerId:      ownerId,
-	}
-
-	// Use batch transaction manager
-	return g.batchTxMgr.AddToBatch(ctx, msg)
-}
-
 func (g *GitopiaProxy) LFSObject(ctx context.Context, id uint64) (storagetypes.LFSObject, error) {
 	resp, err := g.gc.QueryClient().Storage.LFSObject(ctx, &storagetypes.QueryLFSObjectRequest{
 		Id: id,
@@ -523,13 +487,6 @@ func (g *GitopiaProxy) PollForUpdate(ctx context.Context, checkerFn func() (bool
 	}
 }
 
-// CheckPackfileUpdate verifies if a packfile update was applied
-func (g *GitopiaProxy) CheckPackfileUpdate(repositoryId uint64, expectedCid string) (bool, error) {
-	packfile, _ := g.RepositoryPackfile(context.Background(), repositoryId)
-
-	return packfile.Cid == expectedCid, nil
-}
-
 // CheckProposePackfileUpdate verifies if a packfile update was proposed
 func (g *GitopiaProxy) CheckProposePackfileUpdate(repositoryId uint64, user string) (bool, error) {
 	packfileUpdateProposal, err := g.PackfileUpdateProposal(context.Background(), repositoryId, user)
@@ -543,22 +500,6 @@ func (g *GitopiaProxy) CheckProposePackfileUpdate(repositoryId uint64, user stri
 	return packfileUpdateProposal.Cid != "", nil
 }
 
-// CheckPackfileDelete verifies if a packfile delete was applied
-func (g *GitopiaProxy) CheckPackfileDelete(repositoryId uint64) (bool, error) {
-	_, err := g.RepositoryPackfile(context.Background(), repositoryId)
-	if err != nil && strings.Contains(err.Error(), "packfile not found") {
-		return true, nil
-	}
-	return false, err
-}
-
-// CheckLFSObjectUpdate verifies if an LFS object update was applied
-func (g *GitopiaProxy) CheckLFSObjectUpdate(repositoryId uint64, oid, expectedCid string) (bool, error) {
-	lfsObject, _ := g.LFSObjectByRepositoryIdAndOid(context.Background(), repositoryId, oid)
-
-	return lfsObject.Cid == expectedCid, nil
-}
-
 // CheckProposeLFSObjectUpdate verifies if an LFS object update was proposed
 func (g *GitopiaProxy) CheckProposeLFSObjectUpdate(repositoryId uint64, oid string, user string) (bool, error) {
 	lfsObjectUpdateProposal, err := g.LFSObjectUpdateProposal(context.Background(), repositoryId, oid, user)
@@ -570,31 +511,6 @@ func (g *GitopiaProxy) CheckProposeLFSObjectUpdate(repositoryId uint64, oid stri
 	}
 
 	return lfsObjectUpdateProposal.Cid != "", nil
-}
-
-// CheckLFSObjectDelete verifies if an LFS object delete was applied
-func (g *GitopiaProxy) CheckLFSObjectDelete(repositoryId uint64, oid string) (bool, error) {
-	_, err := g.LFSObjectByRepositoryIdAndOid(context.Background(), repositoryId, oid)
-	if err != nil && strings.Contains(err.Error(), "LFS object not found") {
-		return true, nil
-	}
-	return false, err
-}
-
-// CheckReleaseAssetUpdate verifies if a release asset update was applied
-func (g *GitopiaProxy) CheckReleaseAssetUpdate(repositoryId uint64, tag string, name string, expectedCid string) (bool, error) {
-	releaseAsset, _ := g.RepositoryReleaseAsset(context.Background(), repositoryId, tag, name)
-
-	return releaseAsset.Cid == expectedCid, nil
-}
-
-// CheckReleaseAssetDelete verifies if a release asset delete was applied
-func (g *GitopiaProxy) CheckReleaseAssetDelete(repositoryId uint64, tag string, name string) (bool, error) {
-	_, err := g.RepositoryReleaseAsset(context.Background(), repositoryId, tag, name)
-	if err != nil && strings.Contains(err.Error(), "release asset not found") {
-		return true, nil
-	}
-	return false, err
 }
 
 // CheckPullRequestUpdate verifies if a pull request update was applied
@@ -631,4 +547,17 @@ func (g *GitopiaProxy) LFSObjectUpdateProposal(ctx context.Context, repositoryId
 	}
 
 	return resp.LfsObjectProposal, nil
+}
+
+// RepositoryReleaseAll return all releases for a repository
+func (g *GitopiaProxy) RepositoryReleaseAll(ctx context.Context, ownerId string, repositoryName string) ([]*types.Release, error) {
+	resp, err := g.gc.QueryClient().Gitopia.RepositoryReleaseAll(ctx, &types.QueryAllRepositoryReleaseRequest{
+		Id:             ownerId,
+		RepositoryName: repositoryName,
+	})
+	if err != nil {
+		return nil, errors.WithMessage(err, "query error")
+	}
+
+	return resp.Release, nil
 }
