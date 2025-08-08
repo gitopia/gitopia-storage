@@ -289,6 +289,46 @@ func (g *GitopiaProxy) StorageParams(ctx context.Context) (storagetypes.Params, 
 	return resp.Params, nil
 }
 
+// ProposeReleaseAssetsUpdate submits a proposal to update multiple release assets for a given tag
+func (g *GitopiaProxy) ProposeReleaseAssetsUpdate(ctx context.Context, user string, repositoryId uint64, tag string, assets []*storagetypes.ReleaseAssetUpdate) error {
+	msg := &storagetypes.MsgProposeReleaseAssetsUpdate{
+		Creator:      g.gc.Address().String(),
+		User:         user,
+		RepositoryId: repositoryId,
+		Tag:          tag,
+		Assets:       assets,
+	}
+
+	return g.batchTxMgr.AddToBatch(ctx, msg)
+}
+
+// ReleaseAssetsUpdateProposal fetches a release assets update proposal for a repo, tag and user
+func (g *GitopiaProxy) ReleaseAssetsUpdateProposal(ctx context.Context, repositoryId uint64, tag string, user string) (storagetypes.ProposedReleaseAssetsUpdate, error) {
+	resp, err := g.gc.QueryClient().Storage.ReleaseAssetsUpdateProposal(ctx, &storagetypes.QueryReleaseAssetsUpdateProposalRequest{
+		RepositoryId: repositoryId,
+		Tag:          tag,
+		User:         user,
+	})
+	if err != nil {
+		return storagetypes.ProposedReleaseAssetsUpdate{}, errors.WithMessage(err, "query error")
+	}
+
+	return resp.ReleaseAssetsProposal, nil
+}
+
+// CheckProposeReleaseAssetsUpdate verifies if a release assets update proposal exists
+func (g *GitopiaProxy) CheckProposeReleaseAssetsUpdate(repositoryId uint64, tag string, user string) (bool, error) {
+	proposal, err := g.ReleaseAssetsUpdateProposal(context.Background(), repositoryId, tag, user)
+	if err != nil {
+		if strings.Contains(err.Error(), "release assets update proposal not found") {
+			return false, nil
+		}
+		return false, err
+	}
+
+	return len(proposal.Assets) > 0, nil
+}
+
 func (g *GitopiaProxy) CosmosBankBalance(ctx context.Context, address, denom string) (sdk.Coin, error) {
 	resp, err := g.gc.QueryClient().Bank.Balance(ctx, &banktypes.QueryBalanceRequest{
 		Address: address,

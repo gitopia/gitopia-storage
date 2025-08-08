@@ -242,7 +242,7 @@ func startEventProcessor(ctx context.Context, cmd *cobra.Command, gitopiaClient 
 	lfsObjectUpdatedHandler := handler.NewLfsObjectUpdatedEventHandler(gp)
 	lfsObjectDeletedHandler := handler.NewLfsObjectDeletedEventHandler(gp)
 	releaseHandler := handler.NewReleaseEventHandler(gp, cl)
-	daoReleaseHandler := handler.NewDaoCreateReleaseEventHandler(gp, cl)
+	daoReleaseHandler := handler.NewReleaseEventHandler(gp, cl)
 	deleteRepoHandler := handler.NewDeleteRepositoryEventHandler(gp, dcc, cl)
 
 	// Create multiple WebSocket clients to distribute subscriptions and avoid hitting the 5 subscription limit
