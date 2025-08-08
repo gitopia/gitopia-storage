@@ -42,6 +42,7 @@ const (
 	ReleaseAssetDeletedQuery       = "tm.event='Tx' AND gitopia.gitopia.storage.EventReleaseAssetDeleted.repository_id EXISTS"
 	LfsObjectUpdatedQuery          = "tm.event='Tx' AND gitopia.gitopia.storage.EventLFSObjectUpdated.repository_id EXISTS"
 	LfsObjectDeletedQuery          = "tm.event='Tx' AND gitopia.gitopia.storage.EventLFSObjectDeleted.repository_id EXISTS"
+	DeleteStorageObjectQuery       = "tm.event='Tx' AND gitopia.gitopia.storage.EventDeleteStorageObject.repository_id EXISTS"
 	CreateReleaseQuery             = "tm.event='Tx' AND message.action='CreateRelease'"
 	UpdateReleaseQuery             = "tm.event='Tx' AND message.action='UpdateRelease'"
 	DeleteReleaseQuery             = "tm.event='Tx' AND message.action='DeleteRelease'"
@@ -241,6 +242,7 @@ func startEventProcessor(ctx context.Context, cmd *cobra.Command, gitopiaClient 
 	releaseAssetDeletedHandler := handler.NewReleaseAssetDeletedEventHandler(gp)
 	lfsObjectUpdatedHandler := handler.NewLfsObjectUpdatedEventHandler(gp)
 	lfsObjectDeletedHandler := handler.NewLfsObjectDeletedEventHandler(gp)
+	deleteStorageObjectHandler := handler.NewDeleteStorageObjectEventHandler(gp, cl)
 	releaseHandler := handler.NewReleaseEventHandler(gp, cl)
 	daoReleaseHandler := handler.NewReleaseEventHandler(gp, cl)
 	deleteRepoHandler := handler.NewDeleteRepositoryEventHandler(gp, dcc, cl)
@@ -258,6 +260,7 @@ func startEventProcessor(ctx context.Context, cmd *cobra.Command, gitopiaClient 
 		InvokeMergePullRequestQuery,
 		InvokeDaoMergePullRequestQuery,
 		ChallengeCreatedQuery,
+		DeleteStorageObjectQuery,
 	}
 
 	if err := client1.SubscribeQueries(ctx, client1Queries...); err != nil {
@@ -268,6 +271,7 @@ func startEventProcessor(ctx context.Context, cmd *cobra.Command, gitopiaClient 
 		InvokeMergePullRequestQuery:    mergeHandler.Handle,
 		InvokeDaoMergePullRequestQuery: daoMergeHandler.Handle,
 		ChallengeCreatedQuery:          challengeHandler.Handle,
+		DeleteStorageObjectQuery:       deleteStorageObjectHandler.Handle,
 	}
 
 	// Client 2: Release events (5 subscriptions)
@@ -299,7 +303,9 @@ func startEventProcessor(ctx context.Context, cmd *cobra.Command, gitopiaClient 
 		DeleteReleaseQuery: func(ctx context.Context, eventBuf []byte) error {
 			return releaseHandler.Handle(ctx, eventBuf, handler.EventDeleteReleaseType)
 		},
-		DaoCreateReleaseQuery: daoReleaseHandler.Handle,
+		DaoCreateReleaseQuery: func(ctx context.Context, eventBuf []byte) error {
+			return daoReleaseHandler.Handle(ctx, eventBuf, handler.EventCreateReleaseType)
+		},
 		DeleteRepositoryQuery: deleteRepoHandler.Handle,
 	}
 
@@ -450,6 +456,8 @@ func shouldHandleEvent(eventBuf []byte, query string) bool {
 		return strings.Contains(eventStr, "InvokeDaoMergePullRequest")
 	case ChallengeCreatedQuery:
 		return strings.Contains(eventStr, "EventChallengeCreated")
+	case DeleteStorageObjectQuery:
+		return strings.Contains(eventStr, "EventStorageObjectDeleted")
 	case CreateReleaseQuery:
 		return strings.Contains(eventStr, "CreateRelease") && !strings.Contains(eventStr, "DaoCreateRelease")
 	case DaoCreateReleaseQuery:

@@ -263,35 +263,10 @@ func (s *Server) handleGitReceivePack(w http.ResponseWriter, r *Request, repoID 
 	if err := s.GitopiaProxy.PollForUpdate(context.Background(), func() (bool, error) {
 		return s.GitopiaProxy.CheckProposePackfileUpdate(repoID, r.Address)
 	}); err != nil {
-		// If the packfile update was not confirmed, unpin the packfile from IPFS cluster
-		if err := utils.UnpinFile(s.IPFSClusterClient, cid); err != nil {
-			return fmt.Errorf("failed to unpin packfile from IPFS cluster: %w", err)
-		}
-
 		if errors.Is(err, context.DeadlineExceeded) {
-			return fmt.Errorf("timeout waiting for packfile update to be confirmed")
+			return fmt.Errorf("timeout waiting for packfile update proposal")
 		}
-		return fmt.Errorf("failed to verify packfile update: %w", err)
-	}
-
-	if packfileResp != nil && packfileResp.Packfile.Cid != "" {
-		refCountResp, err := s.QueryService.StorageCidReferenceCount(context.Background(), &storagetypes.QueryCidReferenceCountRequest{Cid: packfileResp.Packfile.Cid})
-		if err != nil {
-			return fmt.Errorf("failed to get packfile reference count: %w", err)
-		}
-
-		if refCountResp.Count == 0 {
-			if err := utils.UnpinFile(s.IPFSClusterClient, packfileResp.Packfile.Cid); err != nil {
-				return fmt.Errorf("failed to unpin packfile from IPFS cluster: %w", err)
-			}
-
-			log.WithFields(log.Fields{
-				"operation":     "unpin packfile",
-				"repository_id": repoID,
-				"packfile_name": filepath.Base(packfileName),
-				"cid":           packfileResp.Packfile.Cid,
-			}).Info("successfully unpinned packfile")
-		}
+		return fmt.Errorf("failed to verify packfile update proposal: %w", err)
 	}
 
 	log.WithFields(log.Fields{

@@ -389,28 +389,6 @@ func (h *InvokeMergePullRequestEventHandler) handlePostMergeOperations(ctx conte
 		return errors.WithMessage(err, "failed to verify packfile update")
 	}
 
-	// Unpin old packfile from IPFS cluster
-	if packfile.Cid != "" {
-		// Get packfile reference count
-		refCount, err := h.gc.StorageCidReferenceCount(ctx, packfile.Cid)
-		if err != nil {
-			return errors.WithMessage(err, "failed to get packfile reference count")
-		}
-
-		if refCount == 0 {
-			err = utils.UnpinFile(h.ipfsClusterClient, packfile.Cid)
-			if err != nil {
-				return errors.WithMessage(err, "failed to unpin packfile from IPFS cluster")
-			}
-
-			h.logOperation(ctx, "unpin packfile", map[string]interface{}{
-				"repository_id": resp.Base.RepositoryId,
-				"packfile_name": filepath.Base(packfileName),
-				"cid":           packfile.Cid,
-			})
-		}
-	}
-
 	return nil
 }
 
