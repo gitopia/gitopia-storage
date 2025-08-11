@@ -30,6 +30,7 @@ const (
 )
 
 type ReleaseEvent struct {
+	Creator           string
 	RepositoryId      uint64
 	RepositoryOwnerId string
 	Tag               string
@@ -38,6 +39,12 @@ type ReleaseEvent struct {
 }
 
 func (e *ReleaseEvent) UnMarshal(eventBuf []byte) error {
+	creator, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+gitopiatypes.EventAttributeCreatorKey, "[0]")
+	if err != nil {
+		return errors.Wrap(err, "error parsing creator")
+	}
+	creator = strings.Trim(creator, "\"")
+
 	repoIdStr, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+gitopiatypes.EventAttributeRepoIdKey, "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing repository id")
@@ -78,6 +85,7 @@ func (e *ReleaseEvent) UnMarshal(eventBuf []byte) error {
 	}
 	provider = strings.Trim(provider, "\"")
 
+	e.Creator = creator
 	e.RepositoryId = repoId
 	e.RepositoryOwnerId = repoOwnerId
 	e.Tag = tag
@@ -271,7 +279,7 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 		}
 
 		if len(updates) > 0 {
-			if err := h.gc.ProposeReleaseAssetsUpdate(ctx, event.RepositoryOwnerId, event.RepositoryId, event.Tag, updates); err != nil {
+			if err := h.gc.ProposeReleaseAssetsUpdate(ctx, event.Creator, event.RepositoryId, event.Tag, updates); err != nil {
 				logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
 					"repository_id": event.RepositoryId,
 					"tag":           event.Tag,
@@ -281,7 +289,7 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 
 			// Wait for proposal to show up
 			if err := h.gc.PollForUpdate(ctx, func() (bool, error) {
-				return h.gc.CheckProposeReleaseAssetsUpdate(event.RepositoryId, event.Tag, event.RepositoryOwnerId)
+				return h.gc.CheckProposeReleaseAssetsUpdate(event.RepositoryId, event.Tag, event.Creator)
 			}); err != nil {
 				if errors.Is(err, context.DeadlineExceeded) {
 					logger.FromContext(ctx).WithError(err).Error("timeout waiting for release assets update proposal")
@@ -373,7 +381,7 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 		}
 
 		if len(updates) > 0 {
-			if err := h.gc.ProposeReleaseAssetsUpdate(ctx, event.RepositoryOwnerId, event.RepositoryId, event.Tag, updates); err != nil {
+			if err := h.gc.ProposeReleaseAssetsUpdate(ctx, event.Creator, event.RepositoryId, event.Tag, updates); err != nil {
 				logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
 					"repository_id": event.RepositoryId,
 					"tag":           event.Tag,
@@ -383,7 +391,7 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 
 			// Wait for proposal to show up
 			if err := h.gc.PollForUpdate(ctx, func() (bool, error) {
-				return h.gc.CheckProposeReleaseAssetsUpdate(event.RepositoryId, event.Tag, event.RepositoryOwnerId)
+				return h.gc.CheckProposeReleaseAssetsUpdate(event.RepositoryId, event.Tag, event.Creator)
 			}); err != nil {
 				if errors.Is(err, context.DeadlineExceeded) {
 					logger.FromContext(ctx).WithError(err).Error("timeout waiting for release assets update proposal")
@@ -410,7 +418,7 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 			})
 		}
 		if len(updates) > 0 {
-			if err := h.gc.ProposeReleaseAssetsUpdate(ctx, event.RepositoryOwnerId, event.RepositoryId, event.Tag, updates); err != nil {
+			if err := h.gc.ProposeReleaseAssetsUpdate(ctx, event.Creator, event.RepositoryId, event.Tag, updates); err != nil {
 				logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
 					"repository_id": event.RepositoryId,
 					"tag":           event.Tag,
@@ -420,7 +428,7 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 
 			// Wait for proposal to show up
 			if err := h.gc.PollForUpdate(ctx, func() (bool, error) {
-				return h.gc.CheckProposeReleaseAssetsUpdate(event.RepositoryId, event.Tag, event.RepositoryOwnerId)
+				return h.gc.CheckProposeReleaseAssetsUpdate(event.RepositoryId, event.Tag, event.Creator)
 			}); err != nil {
 				if errors.Is(err, context.DeadlineExceeded) {
 					logger.FromContext(ctx).WithError(err).Error("timeout waiting for release assets delete proposal")
