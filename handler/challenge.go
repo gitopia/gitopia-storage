@@ -87,7 +87,6 @@ func (h *ChallengeEventHandler) Process(ctx context.Context, event ChallengeEven
 		"challenge_type": challenge.ChallengeType,
 		"content_id":     challenge.ContentId,
 		"chunk_index":    challenge.ChunkIndex,
-		"root_hash":      challenge.RootHash,
 	}).Info("challenge details retrieved")
 
 	// Get packfile from IPFS using challenge CID
