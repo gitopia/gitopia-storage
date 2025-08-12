@@ -457,7 +457,7 @@ func shouldHandleEvent(eventBuf []byte, query string) bool {
 	case ChallengeCreatedQuery:
 		return strings.Contains(eventStr, "EventChallengeCreated")
 	case DeleteStorageObjectQuery:
-		return strings.Contains(eventStr, "EventStorageObjectDeleted")
+		return strings.Contains(eventStr, "EventDeleteStorageObject")
 	case CreateReleaseQuery:
 		return strings.Contains(eventStr, "CreateRelease") && !strings.Contains(eventStr, "DaoCreateRelease")
 	case DaoCreateReleaseQuery:
