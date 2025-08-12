@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"strings"
 
 	"github.com/buger/jsonparser"
 	"github.com/gitopia/gitopia-go/logger"
@@ -29,6 +30,7 @@ func (h *DeleteStorageObjectEventHandler) Handle(ctx context.Context, eventBuf [
 	if err != nil {
 		return errors.Wrap(err, "error parsing provider")
 	}
+	provider = strings.Trim(provider, "\"")
 
 	// Skip processing if message is not meant for this provider
 	if !h.gc.CheckProvider(provider) {
@@ -36,11 +38,20 @@ func (h *DeleteStorageObjectEventHandler) Handle(ctx context.Context, eventBuf [
 	}
 
 	var cids []string
-	_, err = jsonparser.ArrayEach(eventBuf, func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
-		cids = append(cids, string(value))
-	}, "events", "gitopia.gitopia.storage.EventDeleteStorageObject.cids", "[0]")
+	cidsValue, err := jsonparser.GetString(eventBuf, "events", "gitopia.gitopia.storage.EventDeleteStorageObject.cids", "[0]")
 	if err != nil {
-		return errors.Wrap(err, "error parsing cids")
+		return errors.Wrap(err, "error parsing cids value")
+	}
+
+	// Trim the quotes from the value string
+	cidsValue = strings.Trim(cidsValue, "\"")
+
+	// Parse the JSON array string
+	_, err = jsonparser.ArrayEach([]byte(cidsValue), func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
+		cids = append(cids, strings.Trim(string(value), "\""))
+	})
+	if err != nil {
+		return errors.Wrap(err, "error parsing cids array")
 	}
 
 	for _, cid := range cids {
