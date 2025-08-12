@@ -96,24 +96,27 @@ func (h *ChallengeEventHandler) Process(ctx context.Context, event ChallengeEven
 	}
 
 	var cid string
-	if challenge.ChallengeType == storagetypes.ChallengeType_CHALLENGE_TYPE_PACKFILE {
+	switch challenge.ChallengeType {
+	case storagetypes.ChallengeType_CHALLENGE_TYPE_PACKFILE:
 		packfile, err := h.gc.Packfile(ctx, challenge.ContentId)
 		if err != nil {
 			return errors.WithMessage(err, "failed to get packfile from Gitopia")
 		}
 		cid = packfile.Cid
-	} else if challenge.ChallengeType == storagetypes.ChallengeType_CHALLENGE_TYPE_RELEASE_ASSET {
+	case storagetypes.ChallengeType_CHALLENGE_TYPE_RELEASE_ASSET:
 		release, err := h.gc.ReleaseAsset(ctx, challenge.ContentId)
 		if err != nil {
 			return errors.WithMessage(err, "failed to get release asset from Gitopia")
 		}
 		cid = release.Cid
-	} else {
+	case storagetypes.ChallengeType_CHALLENGE_TYPE_LFS_OBJECT:
 		lfsObject, err := h.gc.LFSObject(ctx, challenge.ContentId)
 		if err != nil {
 			return errors.WithMessage(err, "failed to get lfs object from Gitopia")
 		}
 		cid = lfsObject.Cid
+	default:
+		return errors.New("invalid challenge type")
 	}
 
 	p, err := path.NewPath("/ipfs/" + cid)
