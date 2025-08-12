@@ -37,11 +37,8 @@ const (
 	InvokeDaoMergePullRequestQuery = "tm.event='Tx' AND message.action='InvokeDaoMergePullRequest'"
 	ChallengeCreatedQuery          = "tm.event='NewBlock' AND gitopia.gitopia.storage.EventChallengeCreated.challenge_id EXISTS"
 	PackfileUpdatedQuery           = "tm.event='Tx' AND gitopia.gitopia.storage.EventPackfileUpdated.repository_id EXISTS"
-	PackfileDeletedQuery           = "tm.event='Tx' AND gitopia.gitopia.storage.EventPackfileDeleted.repository_id EXISTS"
-	ReleaseAssetUpdatedQuery       = "tm.event='Tx' AND gitopia.gitopia.storage.EventReleaseAssetUpdated.repository_id EXISTS"
-	ReleaseAssetDeletedQuery       = "tm.event='Tx' AND gitopia.gitopia.storage.EventReleaseAssetDeleted.repository_id EXISTS"
+	ReleaseAssetsUpdatedQuery      = "tm.event='Tx' AND gitopia.gitopia.storage.EventReleaseAssetsUpdated.repository_id EXISTS"
 	LfsObjectUpdatedQuery          = "tm.event='Tx' AND gitopia.gitopia.storage.EventLFSObjectUpdated.repository_id EXISTS"
-	LfsObjectDeletedQuery          = "tm.event='Tx' AND gitopia.gitopia.storage.EventLFSObjectDeleted.repository_id EXISTS"
 	DeleteStorageObjectQuery       = "tm.event='Tx' AND gitopia.gitopia.storage.EventDeleteStorageObject.repository_id EXISTS"
 	CreateReleaseQuery             = "tm.event='Tx' AND message.action='CreateRelease'"
 	UpdateReleaseQuery             = "tm.event='Tx' AND message.action='UpdateRelease'"
@@ -237,11 +234,8 @@ func startEventProcessor(ctx context.Context, cmd *cobra.Command, gitopiaClient 
 	daoMergeHandler := handler.NewInvokeMergePullRequestEventHandler(gp, dmcc, cl)
 	challengeHandler := handler.NewChallengeEventHandler(gp)
 	packfileUpdatedHandler := handler.NewPackfileUpdatedEventHandler(gp)
-	packfileDeletedHandler := handler.NewPackfileDeletedEventHandler(gp)
-	releaseAssetUpdatedHandler := handler.NewReleaseAssetUpdatedEventHandler(gp)
-	releaseAssetDeletedHandler := handler.NewReleaseAssetDeletedEventHandler(gp)
+	releaseAssetsUpdatedHandler := handler.NewReleaseAssetsUpdatedEventHandler(gp)
 	lfsObjectUpdatedHandler := handler.NewLfsObjectUpdatedEventHandler(gp)
-	lfsObjectDeletedHandler := handler.NewLfsObjectDeletedEventHandler(gp)
 	deleteStorageObjectHandler := handler.NewDeleteStorageObjectEventHandler(gp, cl)
 	releaseHandler := handler.NewReleaseEventHandler(gp, cl)
 	daoReleaseHandler := handler.NewReleaseEventHandler(gp, cl)
@@ -352,9 +346,8 @@ func startEventProcessor(ctx context.Context, cmd *cobra.Command, gitopiaClient 
 
 		client3Queries := []string{
 			PackfileUpdatedQuery,
-			PackfileDeletedQuery,
-			ReleaseAssetUpdatedQuery,
-			ReleaseAssetDeletedQuery,
+			ReleaseAssetsUpdatedQuery,
+			LfsObjectUpdatedQuery,
 		}
 
 		if err := client3.SubscribeQueries(ctx, client3Queries...); err != nil {
@@ -362,31 +355,9 @@ func startEventProcessor(ctx context.Context, cmd *cobra.Command, gitopiaClient 
 		}
 
 		client3EventHandlers := map[string]func(context.Context, []byte) error{
-			PackfileUpdatedQuery:     packfileUpdatedHandler.Handle,
-			PackfileDeletedQuery:     packfileDeletedHandler.Handle,
-			ReleaseAssetUpdatedQuery: releaseAssetUpdatedHandler.Handle,
-			ReleaseAssetDeletedQuery: releaseAssetDeletedHandler.Handle,
-		}
-
-		// Client 4: LFS Object events (2 subscriptions)
-		client4, err := gitopia.NewWSEvents(ctx)
-		if err != nil {
-			return errors.Wrap(err, "failed to create WebSocket client 4")
-		}
-		defer client4.Close()
-
-		client4Queries := []string{
-			LfsObjectUpdatedQuery,
-			LfsObjectDeletedQuery,
-		}
-
-		if err := client4.SubscribeQueries(ctx, client4Queries...); err != nil {
-			return errors.Wrap(err, "failed to subscribe to client 4 events")
-		}
-
-		client4EventHandlers := map[string]func(context.Context, []byte) error{
-			LfsObjectUpdatedQuery: lfsObjectUpdatedHandler.Handle,
-			LfsObjectDeletedQuery: lfsObjectDeletedHandler.Handle,
+			PackfileUpdatedQuery:      packfileUpdatedHandler.Handle,
+			ReleaseAssetsUpdatedQuery: releaseAssetsUpdatedHandler.Handle,
+			LfsObjectUpdatedQuery:     lfsObjectUpdatedHandler.Handle,
 		}
 
 		// Start client 3 event processor
@@ -399,20 +370,6 @@ func startEventProcessor(ctx context.Context, cmd *cobra.Command, gitopiaClient 
 				return errors.Wrap(err, "client 3 event processing error")
 			case <-done:
 				logger.FromContext(ctx).Info("client 3 event processing completed")
-				return nil
-			}
-		})
-
-		// Start client 4 event processor
-		g.Go(func() error {
-			done, errChan := client4.ProcessEvents(gCtx, func(ctx context.Context, eventBuf []byte) error {
-				return routeEventToHandler(ctx, eventBuf, client4EventHandlers)
-			})
-			select {
-			case err := <-errChan:
-				return errors.Wrap(err, "client 4 event processing error")
-			case <-done:
-				logger.FromContext(ctx).Info("client 4 event processing completed")
 				return nil
 			}
 		})
@@ -470,16 +427,10 @@ func shouldHandleEvent(eventBuf []byte, query string) bool {
 		return strings.Contains(eventStr, "DeleteRepository")
 	case PackfileUpdatedQuery:
 		return strings.Contains(eventStr, "EventPackfileUpdated")
-	case PackfileDeletedQuery:
-		return strings.Contains(eventStr, "EventPackfileDeleted")
-	case ReleaseAssetUpdatedQuery:
-		return strings.Contains(eventStr, "EventReleaseAssetUpdated")
-	case ReleaseAssetDeletedQuery:
-		return strings.Contains(eventStr, "EventReleaseAssetDeleted")
+	case ReleaseAssetsUpdatedQuery:
+		return strings.Contains(eventStr, "EventReleaseAssetsUpdated")
 	case LfsObjectUpdatedQuery:
 		return strings.Contains(eventStr, "EventLFSObjectUpdated")
-	case LfsObjectDeletedQuery:
-		return strings.Contains(eventStr, "EventLFSObjectDeleted")
 	default:
 		return false
 	}

@@ -216,17 +216,12 @@ func (g GitopiaProxy) ReleaseAsset(ctx context.Context, id uint64) (storagetypes
 	return resp.ReleaseAsset, nil
 }
 
-func (g *GitopiaProxy) UpdateReleaseAsset(ctx context.Context, repositoryId uint64, tag string, name string, cid string, rootHash []byte, size int64, sha256 string, oldCid string) error {
-	msg := &storagetypes.MsgUpdateReleaseAsset{
+func (g *GitopiaProxy) UpdateReleaseAssets(ctx context.Context, repositoryId uint64, tag string, assets []*storagetypes.ReleaseAssetUpdate) error {
+	msg := &storagetypes.MsgUpdateReleaseAssets{
 		Creator:      g.gc.Address().String(),
 		RepositoryId: repositoryId,
 		Tag:          tag,
-		Name:         name,
-		Cid:          cid,
-		RootHash:     rootHash,
-		Size_:        uint64(size),
-		Sha256:       sha256,
-		OldCid:       oldCid,
+		Assets:       assets,
 	}
 
 	// Use batch transaction manager
