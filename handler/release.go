@@ -328,7 +328,10 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 		// Then process additions/changes
 		for _, attachment := range event.Attachments {
 			existingAsset, exists := existingAssets[attachment.Name]
-			// Pin the (new version of) attachment
+			if exists && existingAsset.Sha256 == attachment.Sha {
+				continue
+			}
+
 			newCid, err := h.pinAttachment(ctx, attachment)
 			if err != nil {
 				logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
