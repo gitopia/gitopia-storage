@@ -244,7 +244,9 @@ func UploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			oldSize = int64(res.ReleaseAsset.Size_)
+			if res != nil {
+				oldSize = int64(res.ReleaseAsset.Size_)
+			}
 
 			releaseRes, err := queryClient.Gitopia.RepositoryRelease(context.Background(), &types.QueryGetRepositoryReleaseRequest{
 				Id:             repoRes.Repository.Owner.Id,
