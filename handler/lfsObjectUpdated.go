@@ -21,6 +21,7 @@ type LfsObjectUpdatedEvent struct {
 	RepositoryId uint64
 	Oid          string
 	Cid          string
+	Deleted      bool
 }
 
 func (e *LfsObjectUpdatedEvent) UnMarshal(eventBuf []byte) error {
@@ -46,9 +47,15 @@ func (e *LfsObjectUpdatedEvent) UnMarshal(eventBuf []byte) error {
 	}
 	cid = strings.Trim(cid, "\"")
 
+	deleted, err := jsonparser.GetBoolean(eventBuf, "events", EventLFSObjectUpdatedType+"."+"deleted", "[0]")
+	if err != nil {
+		return errors.Wrap(err, "error parsing deleted")
+	}
+
 	e.RepositoryId = repoId
 	e.Oid = oid
 	e.Cid = cid
+	e.Deleted = deleted
 
 	return nil
 }
@@ -85,44 +92,67 @@ func (h *LfsObjectUpdatedEventHandler) Handle(ctx context.Context, eventBuf []by
 }
 
 func (h *LfsObjectUpdatedEventHandler) Process(ctx context.Context, event LfsObjectUpdatedEvent) error {
-	logger.FromContext(ctx).WithFields(logrus.Fields{
-		"repository_id": event.RepositoryId,
-		"oid":           event.Oid,
-		"cid":           event.Cid,
-	}).Info("processing lfs object updated event")
+	if event.Deleted {
+		logger.FromContext(ctx).WithFields(logrus.Fields{
+			"repository_id": event.RepositoryId,
+			"oid":           event.Oid,
+			"cid":           event.Cid,
+		}).Info("processing lfs object deleted event")
 
-	// Pin to Pinata if enabled
-	if h.pinataClient != nil && event.Cid != "" {
-		cacheDir := viper.GetString("LFS_OBJECTS_DIR")
-
-		// check if lfs object is cached
-		cached, err := utils.IsLFSObjectCached(event.Oid)
-		if err != nil {
-			logger.FromContext(ctx).WithError(err).Error("failed to check if lfs object is cached")
-		}
-		if !cached {
-			err := utils.DownloadLFSObject(event.Cid, event.Oid)
+		// Unpin from Pinata if enabled
+		if h.pinataClient != nil && event.Oid != "" {
+			err := h.pinataClient.UnpinFile(ctx, event.Oid)
 			if err != nil {
-				logger.FromContext(ctx).WithError(err).Error("failed to cache lfs object")
+				logger.FromContext(ctx).WithError(err).Error("failed to unpin file from Pinata")
+				// Don't fail the process, just log the error
+			} else {
+				logger.FromContext(ctx).WithFields(logrus.Fields{
+					"repository_id": event.RepositoryId,
+					"oid":           event.Oid,
+					"cid":           event.Cid,
+				}).Info("successfully unpinned from Pinata")
 			}
 		}
+	} else {
+		logger.FromContext(ctx).WithFields(logrus.Fields{
+			"repository_id": event.RepositoryId,
+			"oid":           event.Oid,
+			"cid":           event.Cid,
+		}).Info("processing lfs object updated event")
 
-		lfsObjectPath := path.Join(cacheDir, event.Oid)
-		resp, err := h.pinataClient.PinFile(ctx, lfsObjectPath, event.Oid)
-		if err != nil {
-			logger.FromContext(ctx).WithFields(logrus.Fields{
-				"repository_id": event.RepositoryId,
-				"oid":           event.Oid,
-				"cid":           event.Cid,
-			}).WithError(err).Error("failed to pin file to Pinata")
-			// Don't fail the process, just log the error
-		} else {
-			logger.FromContext(ctx).WithFields(logrus.Fields{
-				"repository_id": event.RepositoryId,
-				"oid":           event.Oid,
-				"cid":           event.Cid,
-				"pinata_id":     resp.Data.ID,
-			}).Info("successfully pinned to Pinata")
+		// Pin to Pinata if enabled
+		if h.pinataClient != nil && event.Cid != "" {
+			cacheDir := viper.GetString("LFS_OBJECTS_DIR")
+
+			// check if lfs object is cached
+			cached, err := utils.IsLFSObjectCached(event.Oid)
+			if err != nil {
+				logger.FromContext(ctx).WithError(err).Error("failed to check if lfs object is cached")
+			}
+			if !cached {
+				err := utils.DownloadLFSObject(event.Cid, event.Oid)
+				if err != nil {
+					logger.FromContext(ctx).WithError(err).Error("failed to cache lfs object")
+				}
+			}
+
+			lfsObjectPath := path.Join(cacheDir, event.Oid)
+			resp, err := h.pinataClient.PinFile(ctx, lfsObjectPath, event.Oid)
+			if err != nil {
+				logger.FromContext(ctx).WithFields(logrus.Fields{
+					"repository_id": event.RepositoryId,
+					"oid":           event.Oid,
+					"cid":           event.Cid,
+				}).WithError(err).Error("failed to pin file to Pinata")
+				// Don't fail the process, just log the error
+			} else {
+				logger.FromContext(ctx).WithFields(logrus.Fields{
+					"repository_id": event.RepositoryId,
+					"oid":           event.Oid,
+					"cid":           event.Cid,
+					"pinata_id":     resp.Data.ID,
+				}).Info("successfully pinned to Pinata")
+			}
 		}
 	}
 
