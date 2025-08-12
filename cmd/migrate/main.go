@@ -22,6 +22,7 @@ import (
 	"github.com/gitopia/gitopia-storage/pkg/merkleproof"
 	"github.com/gitopia/gitopia-storage/utils"
 	gitopiatypes "github.com/gitopia/gitopia/v6/x/gitopia/types"
+	storagetypes "github.com/gitopia/gitopia/v6/x/storage/types"
 	"github.com/ipfs-cluster/ipfs-cluster/api"
 	ipfsclusterclient "github.com/ipfs-cluster/ipfs-cluster/api/rest/client"
 	"github.com/ipfs/boxo/files"
@@ -539,6 +540,7 @@ func main() {
 						return errors.Wrap(err, "error getting repository")
 					}
 
+					assets := make([]*storagetypes.ReleaseAssetUpdate, 0)
 					for _, attachment := range release.Attachments {
 						attachmentDir := viper.GetString("ATTACHMENT_DIR")
 
@@ -679,28 +681,27 @@ func main() {
 							return errors.Wrap(err, "error getting file size")
 						}
 
-						// Update release asset on chain
-						err = gitopiaProxy.UpdateReleaseAsset(
-							ctx,
-							release.RepositoryId,
-							release.TagName,
-							attachment.Name,
-							attachmentCid.String(),
-							rootHash,
-							fileInfo.Size(),
-							attachment.Sha,
-							"",
-						)
-						if err != nil {
-							progress.FailedReleases[release.Id] = err.Error()
-							progress.LastFailedRelease = release.Id
-							if err := saveProgress(progress); err != nil {
-								return errors.Wrap(err, "failed to save progress")
-							}
-							return errors.Wrap(err, "error updating release asset")
+						// Collect release asset for batch update
+						asset := &storagetypes.ReleaseAssetUpdate{
+							Name:     attachment.Name,
+							Cid:      attachmentCid.String(),
+							RootHash: rootHash,
+							Size_:    uint64(fileInfo.Size()),
+							Sha256:   attachment.Sha,
 						}
+						assets = append(assets, asset)
 
 						fmt.Printf("Successfully migrated attachment %s for release %s\n", attachment.Name, release.TagName)
+					}
+
+					err = gitopiaProxy.UpdateReleaseAssets(ctx, release.RepositoryId, release.TagName, assets)
+					if err != nil {
+						progress.FailedReleases[release.Id] = err.Error()
+						progress.LastFailedRelease = release.Id
+						if err := saveProgress(progress); err != nil {
+							return errors.Wrap(err, "failed to save progress")
+						}
+						return errors.Wrap(err, "error updating release assets")
 					}
 
 					// Remove from failed releases if it was previously failed
