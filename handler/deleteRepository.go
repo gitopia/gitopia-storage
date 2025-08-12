@@ -115,7 +115,7 @@ func (h *DeleteRepositoryEventHandler) Process(ctx context.Context, event Delete
 		return errors.Wrap(err, "failed to get repository packfile")
 	}
 
-	if err := h.gc.ProposePackfileUpdate(ctx, event.Creator, event.RepositoryId, packfile.Name, packfile.Cid, packfile.RootHash, int64(packfile.Size_), packfile.OldCid, ""); err != nil {
+	if err := h.gc.ProposePackfileUpdate(ctx, event.Creator, event.RepositoryId, packfile.Name, packfile.Cid, packfile.RootHash, int64(packfile.Size_), packfile.OldCid, "", true); err != nil {
 		return errors.Wrap(err, "failed to propose packfile update")
 	}
 
@@ -184,7 +184,7 @@ func (h *DeleteRepositoryEventHandler) Process(ctx context.Context, event Delete
 	}
 
 	for _, lfsObject := range lfsObjects {
-		if err := h.gc.ProposeLFSObjectUpdate(ctx, event.Creator, event.RepositoryId, lfsObject.Oid, "", []byte{}, 0); err != nil {
+		if err := h.gc.ProposeLFSObjectUpdate(ctx, event.Creator, event.RepositoryId, lfsObject.Oid, "", []byte{}, 0, true); err != nil {
 			return errors.Wrap(err, "failed to propose lfs object update")
 		}
 

@@ -133,7 +133,7 @@ func (g *GitopiaProxy) UpdateRepositoryPackfile(ctx context.Context, repositoryI
 	return g.batchTxMgr.AddToBatch(ctx, msg)
 }
 
-func (g *GitopiaProxy) ProposePackfileUpdate(ctx context.Context, user string, repositoryId uint64, name string, cid string, rootHash []byte, size int64, oldCid string, mergeCommitSha string) error {
+func (g *GitopiaProxy) ProposePackfileUpdate(ctx context.Context, user string, repositoryId uint64, name string, cid string, rootHash []byte, size int64, oldCid string, mergeCommitSha string, delete bool) error {
 	msg := &storagetypes.MsgProposeRepositoryPackfileUpdate{
 		Creator:        g.gc.Address().String(),
 		User:           user,
@@ -144,6 +144,7 @@ func (g *GitopiaProxy) ProposePackfileUpdate(ctx context.Context, user string, r
 		Size_:          uint64(size),
 		OldCid:         oldCid,
 		MergeCommitSha: mergeCommitSha,
+		Delete:         delete,
 	}
 
 	// Use batch transaction manager
@@ -397,7 +398,7 @@ func (g *GitopiaProxy) UpdateLFSObject(ctx context.Context, repositoryId uint64,
 	return g.batchTxMgr.AddToBatch(ctx, msg)
 }
 
-func (g *GitopiaProxy) ProposeLFSObjectUpdate(ctx context.Context, user string, repositoryId uint64, oid string, cid string, rootHash []byte, size int64) error {
+func (g *GitopiaProxy) ProposeLFSObjectUpdate(ctx context.Context, user string, repositoryId uint64, oid string, cid string, rootHash []byte, size int64, delete bool) error {
 	msg := &storagetypes.MsgProposeLFSObjectUpdate{
 		Creator:      g.gc.Address().String(),
 		User:         user,
@@ -406,6 +407,7 @@ func (g *GitopiaProxy) ProposeLFSObjectUpdate(ctx context.Context, user string, 
 		Cid:          cid,
 		RootHash:     rootHash,
 		Size_:        uint64(size),
+		Delete:       delete,
 	}
 
 	// Use batch transaction manager

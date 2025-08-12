@@ -196,7 +196,7 @@ func (h *BasicHandler) ServeUploadHandler(w http.ResponseWriter, r *http.Request
 	user := r.Context().Value("address").(string)
 
 	// First update the LFS object
-	err = h.GitopiaProxy.ProposeLFSObjectUpdate(context.Background(), user, repoId, string(oid), cid, rootHash, size)
+	err = h.GitopiaProxy.ProposeLFSObjectUpdate(context.Background(), user, repoId, string(oid), cid, rootHash, size, false)
 	if err != nil {
 		internalServerError(w)
 		log.WithError(err).Error("failed to propose lfs object update")

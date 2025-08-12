@@ -25,6 +25,7 @@ type PackfileUpdatedEvent struct {
 	OldCid       string
 	NewName      string
 	OldName      string
+	Deleted      bool
 }
 
 func (e *PackfileUpdatedEvent) UnMarshal(eventBuf []byte) error {
@@ -62,11 +63,17 @@ func (e *PackfileUpdatedEvent) UnMarshal(eventBuf []byte) error {
 	}
 	oldName = strings.Trim(oldName, "\"")
 
+	deleted, err := jsonparser.GetBoolean(eventBuf, "events", EventPackfileUpdatedType+"."+"deleted", "[0]")
+	if err != nil {
+		return errors.Wrap(err, "error parsing deleted field")
+	}
+
 	e.RepositoryId = repoId
 	e.NewCid = newCid
 	e.OldCid = oldCid
 	e.NewName = newName
 	e.OldName = oldName
+	e.Deleted = deleted
 
 	return nil
 }
@@ -107,10 +114,11 @@ func (h *PackfileUpdatedEventHandler) Process(ctx context.Context, event Packfil
 		"repository_id": event.RepositoryId,
 		"new_cid":       event.NewCid,
 		"old_cid":       event.OldCid,
+		"deleted":       event.Deleted,
 	}).Info("processing packfile updated event")
 
 	// Pin to Pinata if enabled
-	if h.pinataClient != nil && event.NewCid != "" {
+	if h.pinataClient != nil && event.NewCid != "" && !event.Deleted {
 		cacheDir := viper.GetString("GIT_REPOS_DIR")
 
 		// cache repo
@@ -138,15 +146,50 @@ func (h *PackfileUpdatedEventHandler) Process(ctx context.Context, event Packfil
 
 	// Unpin old packfile from Pinata if enabled
 	if h.pinataClient != nil && event.OldCid != "" && event.OldCid != event.NewCid {
-		err := h.pinataClient.UnpinFile(ctx, event.OldName)
+		refCount, err := h.gc.StorageCidReferenceCount(ctx, event.OldCid)
 		if err != nil {
-			logger.FromContext(ctx).WithError(err).Error("failed to unpin file from Pinata")
+			logger.FromContext(ctx).WithError(err).Error("failed to get packfile reference count")
+			return err
 		}
-		logger.FromContext(ctx).WithFields(logrus.Fields{
-			"repository_id": event.RepositoryId,
-			"old_name":      event.OldName,
-			"old_cid":       event.OldCid,
-		}).Info("unpinned file from Pinata")
+
+		if refCount == 0 {
+			err := h.pinataClient.UnpinFile(ctx, event.OldName)
+			if err != nil {
+				logger.FromContext(ctx).WithError(err).Error("failed to unpin file from Pinata")
+			}
+			logger.FromContext(ctx).WithFields(logrus.Fields{
+				"repository_id": event.RepositoryId,
+				"old_name":      event.OldName,
+				"old_cid":       event.OldCid,
+			}).Info("unpinned file from Pinata")
+		}
 	}
+
+	// Handle deletion case - unpin the packfile from Pinata if deleted and no references exist
+	if h.pinataClient != nil && event.Deleted {
+		refCount, err := h.gc.StorageCidReferenceCount(ctx, event.NewCid)
+		if err != nil {
+			logger.FromContext(ctx).WithError(err).Error("failed to get packfile reference count")
+			return err
+		}
+
+		if refCount == 0 {
+			err := h.pinataClient.UnpinFile(ctx, event.NewName)
+			if err != nil {
+				logger.FromContext(ctx).WithFields(logrus.Fields{
+					"repository_id": event.RepositoryId,
+					"name":          event.NewName,
+					"cid":           event.NewCid,
+				}).WithError(err).Error("failed to unpin packfile from Pinata")
+			} else {
+				logger.FromContext(ctx).WithFields(logrus.Fields{
+					"repository_id": event.RepositoryId,
+					"name":          event.NewName,
+					"cid":           event.NewCid,
+				}).Info("successfully unpinned packfile from Pinata")
+			}
+		}
+	}
+
 	return nil
 }
