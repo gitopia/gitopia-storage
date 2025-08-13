@@ -60,7 +60,15 @@ func (e *ReleaseAssetsUpdatedEvent) UnMarshal(eventBuf []byte) error {
 
 	// Parse assets array
 	assets := make([]ReleaseAssetUpdate, 0)
-	_, err = jsonparser.ArrayEach(eventBuf, func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
+
+	// First get the assets value as a string
+	assetsStr, err := jsonparser.GetString(eventBuf, "events", EventReleaseAssetsUpdatedType+"."+"assets", "[0]")
+	if err != nil {
+		return errors.Wrap(err, "error getting assets string")
+	}
+
+	// Parse the string as JSON array
+	_, err = jsonparser.ArrayEach([]byte(assetsStr), func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
 		if err != nil {
 			return
 		}
@@ -102,7 +110,7 @@ func (e *ReleaseAssetsUpdatedEvent) UnMarshal(eventBuf []byte) error {
 		}
 
 		assets = append(assets, asset)
-	}, "events", EventReleaseAssetsUpdatedType+"."+"assets", "[0]")
+	})
 
 	if err != nil {
 		return errors.Wrap(err, "error parsing assets")
