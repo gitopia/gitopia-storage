@@ -15,11 +15,6 @@ import (
 
 const EventRepositoryDeletedType = "gitopia.gitopia.storage.EventRepositoryDeleted"
 
-type Packfile struct {
-	Name string
-	Cid  string
-}
-
 type ReleaseAsset struct {
 	Name string
 	Cid  string
@@ -35,7 +30,8 @@ type LFSObject struct {
 type RepositoryDeletedEvent struct {
 	RepositoryId  uint64
 	Provider      string
-	Packfile      Packfile
+	PackfileCid   string
+	PackfileName  string
 	ReleaseAssets []ReleaseAsset
 	LfsObjects    []LFSObject
 }
@@ -56,12 +52,14 @@ func (e *RepositoryDeletedEvent) UnMarshal(eventBuf []byte) error {
 		e.Provider = strings.Trim(provider, "\"")
 	}
 
-	packfileJson, _, _, err := jsonparser.Get(eventBuf, "events", EventRepositoryDeletedType+".packfile", "[0]")
+	packfileCid, err := jsonparser.GetString(eventBuf, "events", EventRepositoryDeletedType+".packfile_cid", "[0]")
 	if err == nil {
-		name, _ := jsonparser.GetString(packfileJson, "name")
-		e.Packfile.Name = strings.Trim(name, "\"")
-		cid, _ := jsonparser.GetString(packfileJson, "cid")
-		e.Packfile.Cid = strings.Trim(cid, "\"")
+		e.PackfileCid = strings.Trim(packfileCid, "\"")
+	}
+
+	packfileName, err := jsonparser.GetString(eventBuf, "events", EventRepositoryDeletedType+".packfile_name", "[0]")
+	if err == nil {
+		e.PackfileName = strings.Trim(packfileName, "\"")
 	}
 
 	_, err = jsonparser.ArrayEach(eventBuf, func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
@@ -123,13 +121,13 @@ func (h *RepositoryDeletedEventHandler) Process(ctx context.Context, event Repos
 	}).Info("processing repository deleted event")
 
 	// Delete packfile
-	if event.Packfile.Cid != "" {
+	if event.PackfileCid != "" {
 		if h.pinataClient != nil {
-			err := h.pinataClient.UnpinFile(ctx, event.Packfile.Name)
+			err := h.pinataClient.UnpinFile(ctx, event.PackfileName)
 			if err != nil {
 				logger.FromContext(ctx).WithError(err).Error("failed to unpin packfile from Pinata")
 			} else {
-				logger.FromContext(ctx).WithField("packfile", event.Packfile.Name).Info("unpinned packfile from Pinata")
+				logger.FromContext(ctx).WithField("packfile", event.PackfileName).Info("unpinned packfile from Pinata")
 			}
 		}
 	}
