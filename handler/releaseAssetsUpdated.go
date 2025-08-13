@@ -20,9 +20,9 @@ const EventReleaseAssetsUpdatedType = "gitopia.gitopia.storage.EventReleaseAsset
 
 type ReleaseAssetUpdate struct {
 	Name      string
-	NewCid    string
+	Cid       string
 	OldCid    string
-	NewSha256 string
+	Sha256    string
 	OldSha256 string
 	Delete    bool
 }
@@ -74,7 +74,7 @@ func (e *ReleaseAssetsUpdatedEvent) UnMarshal(eventBuf []byte) error {
 
 		newCid, err := jsonparser.GetString(value, "cid")
 		if err == nil {
-			asset.NewCid = strings.Trim(newCid, "\"")
+			asset.Cid = strings.Trim(newCid, "\"")
 		}
 
 		oldCid, err := jsonparser.GetString(value, "old_cid")
@@ -84,11 +84,13 @@ func (e *ReleaseAssetsUpdatedEvent) UnMarshal(eventBuf []byte) error {
 
 		sha256, err := jsonparser.GetString(value, "sha256")
 		if err == nil {
-			asset.NewSha256 = strings.Trim(sha256, "\"")
+			asset.Sha256 = strings.Trim(sha256, "\"")
 		}
 
-		// old_sha256 is not directly available in the new structure, using sha256 for both
-		asset.OldSha256 = asset.NewSha256
+		oldSha256, err := jsonparser.GetString(value, "old_sha256")
+		if err == nil {
+			asset.OldSha256 = strings.Trim(oldSha256, "\"")
+		}
 
 		// Parse delete field
 		deleteFlag, err := jsonparser.GetBoolean(value, "delete")
@@ -103,41 +105,7 @@ func (e *ReleaseAssetsUpdatedEvent) UnMarshal(eventBuf []byte) error {
 	}, "events", EventReleaseAssetsUpdatedType+"."+"assets", "[0]")
 
 	if err != nil {
-		// If we can't parse assets as array, try to parse as single object (backward compatibility)
-		asset := ReleaseAssetUpdate{}
-
-		name, err := jsonparser.GetString(eventBuf, "events", EventReleaseAssetsUpdatedType+"."+"name", "[0]")
-		if err != nil {
-			return errors.Wrap(err, "error parsing name")
-		}
-		asset.Name = strings.Trim(name, "\"")
-
-		newCid, err := jsonparser.GetString(eventBuf, "events", EventReleaseAssetsUpdatedType+"."+"new_cid", "[0]")
-		if err != nil {
-			return errors.Wrap(err, "error parsing new cid")
-		}
-		asset.NewCid = strings.Trim(newCid, "\"")
-
-		oldCid, err := jsonparser.GetString(eventBuf, "events", EventReleaseAssetsUpdatedType+"."+"old_cid", "[0]")
-		if err != nil {
-			return errors.Wrap(err, "error parsing old cid")
-		}
-		asset.OldCid = strings.Trim(oldCid, "\"")
-
-		newSha256, err := jsonparser.GetString(eventBuf, "events", EventReleaseAssetsUpdatedType+"."+"new_sha256", "[0]")
-		if err != nil {
-			return errors.Wrap(err, "error parsing new sha256")
-		}
-		asset.NewSha256 = strings.Trim(newSha256, "\"")
-
-		oldSha256, err := jsonparser.GetString(eventBuf, "events", EventReleaseAssetsUpdatedType+"."+"old_sha256", "[0]")
-		if err != nil {
-			return errors.Wrap(err, "error parsing old sha256")
-		}
-		asset.OldSha256 = strings.Trim(oldSha256, "\"")
-
-		asset.Delete = false
-		assets = append(assets, asset)
+		return errors.Wrap(err, "error parsing assets")
 	}
 
 	e.RepositoryId = repoId
@@ -184,32 +152,32 @@ func (h *ReleaseAssetsUpdatedEventHandler) Process(ctx context.Context, event Re
 				"repository_id": event.RepositoryId,
 				"tag":           event.Tag,
 				"name":          asset.Name,
-				"cid":           asset.NewCid,
+				"cid":           asset.Cid,
 			}).Info("processing release asset delete")
 
 			// Unpin old asset from Pinata if enabled
-			refCount, err := h.gc.StorageCidReferenceCount(ctx, asset.NewCid)
+			refCount, err := h.gc.StorageCidReferenceCount(ctx, asset.Cid)
 			if err != nil {
 				logger.FromContext(ctx).WithError(err).Error("failed to get attachment reference count")
 				continue // Don't fail the entire process if one asset fails
 			}
 			if refCount == 0 {
-				if asset.NewCid != "" {
-					name := fmt.Sprintf("release-%d-%s-%s-%s", event.RepositoryId, event.Tag, asset.Name, asset.NewSha256)
+				if asset.Cid != "" {
+					name := fmt.Sprintf("release-%d-%s-%s-%s", event.RepositoryId, event.Tag, asset.Name, asset.Sha256)
 					err := h.pinataClient.UnpinFile(ctx, name)
 					if err != nil {
 						logger.FromContext(ctx).WithFields(logrus.Fields{
 							"repository_id": event.RepositoryId,
 							"tag":           event.Tag,
 							"name":          asset.Name,
-							"cid":           asset.NewCid,
+							"cid":           asset.Cid,
 						}).WithError(err).Error("failed to unpin file from Pinata")
 					} else {
 						logger.FromContext(ctx).WithFields(logrus.Fields{
 							"repository_id": event.RepositoryId,
 							"tag":           event.Tag,
 							"name":          asset.Name,
-							"cid":           asset.NewCid,
+							"cid":           asset.Cid,
 						}).Info("successfully unpinned file from Pinata")
 					}
 				}
@@ -220,12 +188,12 @@ func (h *ReleaseAssetsUpdatedEventHandler) Process(ctx context.Context, event Re
 				"repository_id": event.RepositoryId,
 				"tag":           event.Tag,
 				"name":          asset.Name,
-				"new_cid":       asset.NewCid,
+				"new_cid":       asset.Cid,
 				"old_cid":       asset.OldCid,
 			}).Info("processing release asset update")
 
 			// Pin to Pinata if enabled
-			if asset.NewCid != "" {
+			if asset.Cid != "" {
 				cacheDir := viper.GetString("ATTACHMENT_DIR")
 
 				// check if release asset is cached
@@ -234,15 +202,15 @@ func (h *ReleaseAssetsUpdatedEventHandler) Process(ctx context.Context, event Re
 					logger.FromContext(ctx).WithError(err).Error("failed to cache release asset")
 				}
 
-				releaseAssetPath := path.Join(cacheDir, asset.NewSha256)
-				name := fmt.Sprintf("release-%d-%s-%s-%s", event.RepositoryId, event.Tag, asset.Name, asset.NewSha256)
+				releaseAssetPath := path.Join(cacheDir, asset.Sha256)
+				name := fmt.Sprintf("release-%d-%s-%s-%s", event.RepositoryId, event.Tag, asset.Name, asset.Sha256)
 				resp, err := h.pinataClient.PinFile(ctx, releaseAssetPath, name)
 				if err != nil {
 					logger.FromContext(ctx).WithFields(logrus.Fields{
 						"repository_id": event.RepositoryId,
 						"tag":           event.Tag,
 						"name":          asset.Name,
-						"cid":           asset.NewCid,
+						"cid":           asset.Cid,
 					}).WithError(err).Error("failed to pin file to Pinata")
 					// Don't fail the process, just log the error
 				} else {
@@ -250,14 +218,14 @@ func (h *ReleaseAssetsUpdatedEventHandler) Process(ctx context.Context, event Re
 						"repository_id": event.RepositoryId,
 						"tag":           event.Tag,
 						"name":          asset.Name,
-						"cid":           asset.NewCid,
+						"cid":           asset.Cid,
 						"pinata_id":     resp.Data.ID,
 					}).Info("successfully pinned to Pinata")
 				}
 			}
 
 			// Unpin old asset from Pinata if enabled and no longer referenced
-			if asset.OldCid != "" && asset.OldCid != asset.NewCid {
+			if asset.OldCid != "" && asset.OldCid != asset.Cid {
 				refCount, err := h.gc.StorageCidReferenceCount(ctx, asset.OldCid)
 				if err != nil {
 					logger.FromContext(ctx).WithError(err).Error("failed to get attachment reference count")
