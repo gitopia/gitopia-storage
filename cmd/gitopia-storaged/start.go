@@ -44,7 +44,6 @@ const (
 	UpdateReleaseQuery             = "tm.event='Tx' AND message.action='UpdateRelease'"
 	DeleteReleaseQuery             = "tm.event='Tx' AND message.action='DeleteRelease'"
 	DaoCreateReleaseQuery          = "tm.event='Tx' AND message.action='DaoCreateRelease'"
-	DeleteRepositoryQuery          = "tm.event='Tx' AND message.action='DeleteRepository'"
 )
 
 func NewStartCmd() *cobra.Command {
@@ -225,11 +224,6 @@ func startEventProcessor(ctx context.Context, cmd *cobra.Command, gitopiaClient 
 		return errors.WithMessage(err, "error creating consumer client")
 	}
 
-	dcc, err := consumer.NewClient("deleteRepositoryEvent")
-	if err != nil {
-		return errors.WithMessage(err, "error creating consumer client")
-	}
-
 	mergeHandler := handler.NewInvokeMergePullRequestEventHandler(gp, mcc, cl)
 	daoMergeHandler := handler.NewInvokeMergePullRequestEventHandler(gp, dmcc, cl)
 	challengeHandler := handler.NewChallengeEventHandler(gp)
@@ -239,7 +233,6 @@ func startEventProcessor(ctx context.Context, cmd *cobra.Command, gitopiaClient 
 	deleteStorageObjectHandler := handler.NewDeleteStorageObjectEventHandler(gp, cl)
 	releaseHandler := handler.NewReleaseEventHandler(gp, cl)
 	daoReleaseHandler := handler.NewReleaseEventHandler(gp, cl)
-	deleteRepoHandler := handler.NewDeleteRepositoryEventHandler(gp, dcc, cl)
 
 	// Create multiple WebSocket clients to distribute subscriptions and avoid hitting the 5 subscription limit
 
@@ -280,7 +273,6 @@ func startEventProcessor(ctx context.Context, cmd *cobra.Command, gitopiaClient 
 		UpdateReleaseQuery,
 		DeleteReleaseQuery,
 		DaoCreateReleaseQuery,
-		DeleteRepositoryQuery,
 	}
 
 	if err := client2.SubscribeQueries(ctx, client2Queries...); err != nil {
@@ -300,7 +292,6 @@ func startEventProcessor(ctx context.Context, cmd *cobra.Command, gitopiaClient 
 		DaoCreateReleaseQuery: func(ctx context.Context, eventBuf []byte) error {
 			return daoReleaseHandler.Handle(ctx, eventBuf, handler.EventCreateReleaseType)
 		},
-		DeleteRepositoryQuery: deleteRepoHandler.Handle,
 	}
 
 	g, gCtx := errgroup.WithContext(ctx)
@@ -423,8 +414,6 @@ func shouldHandleEvent(eventBuf []byte, query string) bool {
 		return strings.Contains(eventStr, "UpdateRelease")
 	case DeleteReleaseQuery:
 		return strings.Contains(eventStr, "DeleteRelease")
-	case DeleteRepositoryQuery:
-		return strings.Contains(eventStr, "DeleteRepository")
 	case PackfileUpdatedQuery:
 		return strings.Contains(eventStr, "EventPackfileUpdated")
 	case ReleaseAssetsUpdatedQuery:
