@@ -47,9 +47,14 @@ func (e *LfsObjectUpdatedEvent) UnMarshal(eventBuf []byte) error {
 	}
 	cid = strings.Trim(cid, "\"")
 
-	deleted, err := jsonparser.GetBoolean(eventBuf, "events", EventLFSObjectUpdatedType+"."+"deleted", "[0]")
+	deletedStr, err := jsonparser.GetString(eventBuf, "events", EventLFSObjectUpdatedType+"."+"deleted", "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing deleted")
+	}
+	deletedStr = strings.Trim(deletedStr, "\"")
+	deleted, err := strconv.ParseBool(deletedStr)
+	if err != nil {
+		return errors.Wrap(err, "error parsing deleted field as boolean")
 	}
 
 	e.RepositoryId = repoId
