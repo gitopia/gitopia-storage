@@ -21,13 +21,13 @@ type DeleteRepositoryEvent struct {
 }
 
 func (e *DeleteRepositoryEvent) UnMarshal(eventBuf []byte) error {
-	creator, err := jsonparser.GetString(eventBuf, "events", "message.creator", "[0]")
+	creator, err := jsonparser.GetString(eventBuf, "events", "message.Creator", "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing creator")
 	}
 	e.Creator = strings.Trim(creator, "\"")
 
-	repoIdStr, err := jsonparser.GetString(eventBuf, "events", "message.repository_id", "[0]")
+	repoIdStr, err := jsonparser.GetString(eventBuf, "events", "message.RepositoryId", "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing repository id")
 	}
@@ -37,7 +37,7 @@ func (e *DeleteRepositoryEvent) UnMarshal(eventBuf []byte) error {
 	}
 	e.RepositoryId = repoId
 
-	provider, err := jsonparser.GetString(eventBuf, "events", "message.provider", "[0]")
+	provider, err := jsonparser.GetString(eventBuf, "events", "message.Provider", "[0]")
 	if err != nil {
 		return errors.Wrap(err, "error parsing provider")
 	}
