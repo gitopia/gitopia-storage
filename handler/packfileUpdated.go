@@ -83,11 +83,7 @@ type PackfileUpdatedEventHandler struct {
 	pinataClient *PinataClient
 }
 
-func NewPackfileUpdatedEventHandler(g *app.GitopiaProxy) PackfileUpdatedEventHandler {
-	var pinataClient *PinataClient
-	if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
-		pinataClient = NewPinataClient(viper.GetString("PINATA_JWT"))
-	}
+func NewPackfileUpdatedEventHandler(g *app.GitopiaProxy, pinataClient *PinataClient) PackfileUpdatedEventHandler {
 	return PackfileUpdatedEventHandler{
 		gc:           g,
 		pinataClient: pinataClient,
@@ -95,11 +91,6 @@ func NewPackfileUpdatedEventHandler(g *app.GitopiaProxy) PackfileUpdatedEventHan
 }
 
 func (h *PackfileUpdatedEventHandler) Handle(ctx context.Context, eventBuf []byte) error {
-	// Skip processing if external pinning is not enabled
-	if !viper.GetBool("ENABLE_EXTERNAL_PINNING") {
-		return nil
-	}
-
 	event := &PackfileUpdatedEvent{}
 	err := event.UnMarshal(eventBuf)
 	if err != nil {
@@ -117,8 +108,7 @@ func (h *PackfileUpdatedEventHandler) Process(ctx context.Context, event Packfil
 		"deleted":       event.Deleted,
 	}).Info("processing packfile updated event")
 
-	// Pin to Pinata if enabled
-	if h.pinataClient != nil && event.NewCid != "" && !event.Deleted {
+	if event.NewCid != "" && !event.Deleted {
 		cacheDir := viper.GetString("GIT_REPOS_DIR")
 
 		// cache repo
@@ -144,8 +134,8 @@ func (h *PackfileUpdatedEventHandler) Process(ctx context.Context, event Packfil
 		}
 	}
 
-	// Unpin old packfile from Pinata if enabled
-	if h.pinataClient != nil && event.OldCid != "" && event.OldCid != event.NewCid {
+	// Unpin old packfile from Pinata
+	if event.OldCid != "" && event.OldCid != event.NewCid {
 		refCount, err := h.gc.StorageCidReferenceCount(ctx, event.OldCid)
 		if err != nil {
 			logger.FromContext(ctx).WithError(err).Error("failed to get packfile reference count")
@@ -166,7 +156,7 @@ func (h *PackfileUpdatedEventHandler) Process(ctx context.Context, event Packfil
 	}
 
 	// Handle deletion case - unpin the packfile from Pinata if deleted and no references exist
-	if h.pinataClient != nil && event.Deleted {
+	if event.Deleted {
 		refCount, err := h.gc.StorageCidReferenceCount(ctx, event.NewCid)
 		if err != nil {
 			logger.FromContext(ctx).WithError(err).Error("failed to get packfile reference count")

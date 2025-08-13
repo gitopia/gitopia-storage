@@ -40,6 +40,7 @@ const (
 	ReleaseAssetsUpdatedQuery      = "tm.event='Tx' AND gitopia.gitopia.storage.EventReleaseAssetsUpdated.repository_id EXISTS"
 	LfsObjectUpdatedQuery          = "tm.event='Tx' AND gitopia.gitopia.storage.EventLFSObjectUpdated.repository_id EXISTS"
 	DeleteStorageObjectQuery       = "tm.event='Tx' AND gitopia.gitopia.storage.EventDeleteStorageObject.repository_id EXISTS"
+	RepositoryDeletedQuery         = "tm.event='Tx' AND gitopia.gitopia.storage.EventRepositoryDeleted.repository_id EXISTS"
 	CreateReleaseQuery             = "tm.event='Tx' AND message.action='CreateRelease'"
 	UpdateReleaseQuery             = "tm.event='Tx' AND message.action='UpdateRelease'"
 	DeleteReleaseQuery             = "tm.event='Tx' AND message.action='DeleteRelease'"
@@ -224,19 +225,25 @@ func startEventProcessor(ctx context.Context, cmd *cobra.Command, gitopiaClient 
 		return errors.WithMessage(err, "error creating consumer client")
 	}
 
+	var pinataClient *handler.PinataClient
+	if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
+		pinataClient = handler.NewPinataClient(viper.GetString("PINATA_JWT"))
+	}
+
 	mergeHandler := handler.NewInvokeMergePullRequestEventHandler(gp, mcc, cl)
 	daoMergeHandler := handler.NewInvokeMergePullRequestEventHandler(gp, dmcc, cl)
 	challengeHandler := handler.NewChallengeEventHandler(gp)
-	packfileUpdatedHandler := handler.NewPackfileUpdatedEventHandler(gp)
-	releaseAssetsUpdatedHandler := handler.NewReleaseAssetsUpdatedEventHandler(gp)
-	lfsObjectUpdatedHandler := handler.NewLfsObjectUpdatedEventHandler(gp)
+	packfileUpdatedHandler := handler.NewPackfileUpdatedEventHandler(gp, pinataClient)
+	releaseAssetsUpdatedHandler := handler.NewReleaseAssetsUpdatedEventHandler(gp, pinataClient)
+	lfsObjectUpdatedHandler := handler.NewLfsObjectUpdatedEventHandler(gp, pinataClient)
 	deleteStorageObjectHandler := handler.NewDeleteStorageObjectEventHandler(gp, cl)
 	releaseHandler := handler.NewReleaseEventHandler(gp, cl)
 	daoReleaseHandler := handler.NewReleaseEventHandler(gp, cl)
+	repositoryDeletedHandler := handler.NewRepositoryDeletedEventHandler(gp, pinataClient)
 
 	// Create multiple WebSocket clients to distribute subscriptions and avoid hitting the 5 subscription limit
 
-	// Client 1: Merge and Challenge events (3 subscriptions)
+	// Client 1: Merge, Challenge and DeleteStorageObject events (4 subscriptions)
 	client1, err := gitopia.NewWSEvents(ctx)
 	if err != nil {
 		return errors.Wrap(err, "failed to create WebSocket client 1")
@@ -328,7 +335,7 @@ func startEventProcessor(ctx context.Context, cmd *cobra.Command, gitopiaClient 
 	if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
 		logger.FromContext(ctx).Info("external pinning enabled, starting external pinning event processor")
 
-		// Client 3: Packfile and Release Asset events (4 subscriptions)
+		// Client 3: Packfile, Release Asset, LFS Object and RepositoryDeleted events (4 subscriptions)
 		client3, err := gitopia.NewWSEvents(ctx)
 		if err != nil {
 			return errors.Wrap(err, "failed to create WebSocket client 3")
@@ -339,6 +346,7 @@ func startEventProcessor(ctx context.Context, cmd *cobra.Command, gitopiaClient 
 			PackfileUpdatedQuery,
 			ReleaseAssetsUpdatedQuery,
 			LfsObjectUpdatedQuery,
+			RepositoryDeletedQuery,
 		}
 
 		if err := client3.SubscribeQueries(ctx, client3Queries...); err != nil {
@@ -349,6 +357,7 @@ func startEventProcessor(ctx context.Context, cmd *cobra.Command, gitopiaClient 
 			PackfileUpdatedQuery:      packfileUpdatedHandler.Handle,
 			ReleaseAssetsUpdatedQuery: releaseAssetsUpdatedHandler.Handle,
 			LfsObjectUpdatedQuery:     lfsObjectUpdatedHandler.Handle,
+			RepositoryDeletedQuery:    repositoryDeletedHandler.Handle,
 		}
 
 		// Start client 3 event processor
@@ -420,6 +429,8 @@ func shouldHandleEvent(eventBuf []byte, query string) bool {
 		return strings.Contains(eventStr, "EventReleaseAssetsUpdated")
 	case LfsObjectUpdatedQuery:
 		return strings.Contains(eventStr, "EventLFSObjectUpdated")
+	case RepositoryDeletedQuery:
+		return strings.Contains(eventStr, "EventRepositoryDeleted")
 	default:
 		return false
 	}

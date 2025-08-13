@@ -65,11 +65,7 @@ type LfsObjectUpdatedEventHandler struct {
 	pinataClient *PinataClient
 }
 
-func NewLfsObjectUpdatedEventHandler(g *app.GitopiaProxy) LfsObjectUpdatedEventHandler {
-	var pinataClient *PinataClient
-	if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
-		pinataClient = NewPinataClient(viper.GetString("PINATA_JWT"))
-	}
+func NewLfsObjectUpdatedEventHandler(g *app.GitopiaProxy, pinataClient *PinataClient) LfsObjectUpdatedEventHandler {
 	return LfsObjectUpdatedEventHandler{
 		gc:           g,
 		pinataClient: pinataClient,
@@ -77,11 +73,6 @@ func NewLfsObjectUpdatedEventHandler(g *app.GitopiaProxy) LfsObjectUpdatedEventH
 }
 
 func (h *LfsObjectUpdatedEventHandler) Handle(ctx context.Context, eventBuf []byte) error {
-	// Skip processing if external pinning is not enabled
-	if !viper.GetBool("ENABLE_EXTERNAL_PINNING") {
-		return nil
-	}
-
 	event := &LfsObjectUpdatedEvent{}
 	err := event.UnMarshal(eventBuf)
 	if err != nil {
@@ -99,8 +90,8 @@ func (h *LfsObjectUpdatedEventHandler) Process(ctx context.Context, event LfsObj
 			"cid":           event.Cid,
 		}).Info("processing lfs object deleted event")
 
-		// Unpin from Pinata if enabled
-		if h.pinataClient != nil && event.Oid != "" {
+		// Unpin from Pinata
+		if event.Oid != "" {
 			err := h.pinataClient.UnpinFile(ctx, event.Oid)
 			if err != nil {
 				logger.FromContext(ctx).WithError(err).Error("failed to unpin file from Pinata")
@@ -120,8 +111,8 @@ func (h *LfsObjectUpdatedEventHandler) Process(ctx context.Context, event LfsObj
 			"cid":           event.Cid,
 		}).Info("processing lfs object updated event")
 
-		// Pin to Pinata if enabled
-		if h.pinataClient != nil && event.Cid != "" {
+		// Pin to Pinata
+		if event.Cid != "" {
 			cacheDir := viper.GetString("LFS_OBJECTS_DIR")
 
 			// check if lfs object is cached

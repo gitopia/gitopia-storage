@@ -153,11 +153,7 @@ type ReleaseAssetsUpdatedEventHandler struct {
 	pinataClient *PinataClient
 }
 
-func NewReleaseAssetsUpdatedEventHandler(g *app.GitopiaProxy) ReleaseAssetsUpdatedEventHandler {
-	var pinataClient *PinataClient
-	if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
-		pinataClient = NewPinataClient(viper.GetString("PINATA_JWT"))
-	}
+func NewReleaseAssetsUpdatedEventHandler(g *app.GitopiaProxy, pinataClient *PinataClient) ReleaseAssetsUpdatedEventHandler {
 	return ReleaseAssetsUpdatedEventHandler{
 		gc:           g,
 		pinataClient: pinataClient,
@@ -165,11 +161,6 @@ func NewReleaseAssetsUpdatedEventHandler(g *app.GitopiaProxy) ReleaseAssetsUpdat
 }
 
 func (h *ReleaseAssetsUpdatedEventHandler) Handle(ctx context.Context, eventBuf []byte) error {
-	// Skip processing if external pinning is not enabled
-	if !viper.GetBool("ENABLE_EXTERNAL_PINNING") {
-		return nil
-	}
-
 	event := &ReleaseAssetsUpdatedEvent{}
 	err := event.UnMarshal(eventBuf)
 	if err != nil {
@@ -203,7 +194,7 @@ func (h *ReleaseAssetsUpdatedEventHandler) Process(ctx context.Context, event Re
 				continue // Don't fail the entire process if one asset fails
 			}
 			if refCount == 0 {
-				if h.pinataClient != nil && asset.NewCid != "" {
+				if asset.NewCid != "" {
 					name := fmt.Sprintf("release-%d-%s-%s-%s", event.RepositoryId, event.Tag, asset.Name, asset.NewSha256)
 					err := h.pinataClient.UnpinFile(ctx, name)
 					if err != nil {
@@ -234,7 +225,7 @@ func (h *ReleaseAssetsUpdatedEventHandler) Process(ctx context.Context, event Re
 			}).Info("processing release asset update")
 
 			// Pin to Pinata if enabled
-			if h.pinataClient != nil && asset.NewCid != "" {
+			if asset.NewCid != "" {
 				cacheDir := viper.GetString("ATTACHMENT_DIR")
 
 				// check if release asset is cached
@@ -273,17 +264,15 @@ func (h *ReleaseAssetsUpdatedEventHandler) Process(ctx context.Context, event Re
 					continue // Don't fail the entire process if one asset fails
 				}
 				if refCount == 0 {
-					if h.pinataClient != nil {
-						name := fmt.Sprintf("release-%d-%s-%s-%s", event.RepositoryId, event.Tag, asset.Name, asset.OldSha256)
-						err := h.pinataClient.UnpinFile(ctx, name)
-						if err != nil {
-							logger.FromContext(ctx).WithFields(logrus.Fields{
-								"repository_id": event.RepositoryId,
-								"tag":           event.Tag,
-								"name":          asset.Name,
-								"cid":           asset.OldCid,
-							}).WithError(err).Error("failed to unpin file from Pinata")
-						}
+					name := fmt.Sprintf("release-%d-%s-%s-%s", event.RepositoryId, event.Tag, asset.Name, asset.OldSha256)
+					err := h.pinataClient.UnpinFile(ctx, name)
+					if err != nil {
+						logger.FromContext(ctx).WithFields(logrus.Fields{
+							"repository_id": event.RepositoryId,
+							"tag":           event.Tag,
+							"name":          asset.Name,
+							"cid":           asset.OldCid,
+						}).WithError(err).Error("failed to unpin file from Pinata")
 					}
 				}
 			}
