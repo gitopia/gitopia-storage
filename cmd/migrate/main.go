@@ -195,6 +195,20 @@ func processLFSObjects(ctx context.Context, repositoryId uint64, repoDir string,
 			return errors.Wrapf(err, "error updating LFS object %s for repo %d", oid, repositoryId)
 		}
 
+		// Poll to check if the LFS object was updated
+		fmt.Printf("Verifying LFS object update for oid %s...\n", oid)
+		err = gitopiaProxy.PollForUpdate(ctx, func() (bool, error) {
+			lfsObject, err := gitopiaProxy.LFSObjectByRepositoryIdAndOid(ctx, repositoryId, oid)
+			if err != nil {
+				return false, err
+			}
+
+			return lfsObject.Cid == cid, nil
+		})
+		if err != nil {
+			return errors.Wrapf(err, "failed to verify LFS object update for oid %s", oid)
+		}
+
 		fmt.Printf("Successfully processed LFS object %s (CID: %s)\n", oid, cid)
 	}
 
@@ -459,6 +473,26 @@ func main() {
 						return errors.Wrapf(err, "error updating repository packfile for repo %d", repository.Id)
 					}
 
+					// Poll to check if the packfile was updated
+					fmt.Printf("Verifying packfile update for repository %d...\n", repository.Id)
+					err = gitopiaProxy.PollForUpdate(ctx, func() (bool, error) {
+						packfile, err := gitopiaProxy.RepositoryPackfile(ctx, repository.Id)
+						if err != nil {
+							return false, err
+						}
+						return packfile.Cid == cid, nil
+					})
+					if err != nil {
+						err = errors.Wrapf(err, "failed to verify packfile update for repo %d", repository.Id)
+						progress.FailedRepos[repository.Id] = err.Error()
+						progress.LastFailedRepo = repository.Id
+						if err := saveProgress(progress); err != nil {
+							return errors.Wrap(err, "failed to save progress")
+						}
+						return err
+					}
+					fmt.Printf("Packfile update for repository %d verified.\n", repository.Id)
+
 					// Handle LFS objects for osmosis-labs/osmosis repository
 					if repository.Owner.Id == "gitopia1vp8p5xag26epvzs0ujx6m5x2enjy5p8qe3yrjysuenhn22wfu3ls4j2fyw" && repository.Name == "osmosis" {
 						fmt.Printf("Processing LFS objects for repository %d (osmosis-labs/osmosis)\n", repository.Id)
@@ -703,6 +737,45 @@ func main() {
 						}
 						return errors.Wrap(err, "error updating release assets")
 					}
+
+					// Poll to check if the release assets were updated
+					fmt.Printf("Verifying release assets update for release %s...\n", release.TagName)
+					err = gitopiaProxy.PollForUpdate(ctx, func() (bool, error) {
+						updatedAssets, err := gitopiaProxy.RepositoryReleaseAssets(ctx, release.RepositoryId, release.TagName)
+						if err != nil {
+							return false, err
+						}
+
+						if len(updatedAssets) != len(assets) {
+							return false, nil
+						}
+
+						// Create a map of expected assets for easy lookup
+						expectedAssets := make(map[string]*storagetypes.ReleaseAssetUpdate)
+						for _, asset := range assets {
+							expectedAssets[asset.Name] = asset
+						}
+
+						for _, updatedAsset := range updatedAssets {
+							expected := expectedAssets[updatedAsset.Name]
+							if updatedAsset.Cid != expected.Cid {
+								// CID mismatch
+								return false, nil
+							}
+						}
+
+						return true, nil
+					})
+					if err != nil {
+						err = errors.Wrapf(err, "failed to verify release assets update for release %s", release.TagName)
+						progress.FailedReleases[release.Id] = err.Error()
+						progress.LastFailedRelease = release.Id
+						if err := saveProgress(progress); err != nil {
+							return errors.Wrap(err, "failed to save progress")
+						}
+						return err
+					}
+					fmt.Printf("Release assets update for release %s verified.\n", release.TagName)
 
 					// Remove from failed releases if it was previously failed
 					delete(progress.FailedReleases, release.Id)
