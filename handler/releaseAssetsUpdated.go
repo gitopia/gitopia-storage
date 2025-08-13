@@ -104,9 +104,6 @@ func (e *ReleaseAssetsUpdatedEvent) UnMarshal(eventBuf []byte) error {
 		deleteFlag, err := jsonparser.GetBoolean(value, "delete")
 		if err == nil {
 			asset.Delete = deleteFlag
-		} else {
-			// delete field might not be present, defaulting to false
-			asset.Delete = false
 		}
 
 		assets = append(assets, asset)
@@ -163,31 +160,29 @@ func (h *ReleaseAssetsUpdatedEventHandler) Process(ctx context.Context, event Re
 				"cid":           asset.Cid,
 			}).Info("processing release asset delete")
 
-			// Unpin old asset from Pinata if enabled
-			refCount, err := h.gc.StorageCidReferenceCount(ctx, asset.Cid)
+			// Unpin old asset from Pinata
+			refCount, err := h.gc.StorageCidReferenceCount(ctx, asset.OldCid)
 			if err != nil {
 				logger.FromContext(ctx).WithError(err).Error("failed to get attachment reference count")
 				continue // Don't fail the entire process if one asset fails
 			}
 			if refCount == 0 {
-				if asset.Cid != "" {
-					name := fmt.Sprintf("release-%d-%s-%s-%s", event.RepositoryId, event.Tag, asset.Name, asset.Sha256)
-					err := h.pinataClient.UnpinFile(ctx, name)
-					if err != nil {
-						logger.FromContext(ctx).WithFields(logrus.Fields{
-							"repository_id": event.RepositoryId,
-							"tag":           event.Tag,
-							"name":          asset.Name,
-							"cid":           asset.Cid,
-						}).WithError(err).Error("failed to unpin file from Pinata")
-					} else {
-						logger.FromContext(ctx).WithFields(logrus.Fields{
-							"repository_id": event.RepositoryId,
-							"tag":           event.Tag,
-							"name":          asset.Name,
-							"cid":           asset.Cid,
-						}).Info("successfully unpinned file from Pinata")
-					}
+				name := fmt.Sprintf("release-%d-%s-%s-%s", event.RepositoryId, event.Tag, asset.Name, asset.OldSha256)
+				err := h.pinataClient.UnpinFile(ctx, name)
+				if err != nil {
+					logger.FromContext(ctx).WithFields(logrus.Fields{
+						"repository_id": event.RepositoryId,
+						"tag":           event.Tag,
+						"name":          asset.Name,
+						"cid":           asset.OldCid,
+					}).WithError(err).Error("failed to unpin file from Pinata")
+				} else {
+					logger.FromContext(ctx).WithFields(logrus.Fields{
+						"repository_id": event.RepositoryId,
+						"tag":           event.Tag,
+						"name":          asset.Name,
+						"cid":           asset.OldCid,
+					}).Info("successfully unpinned file from Pinata")
 				}
 			}
 		} else {

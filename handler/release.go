@@ -320,9 +320,10 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 			}
 			if !found {
 				updates = append(updates, &storagetypes.ReleaseAssetUpdate{
-					Name:   existingAsset.Name,
-					OldCid: existingAsset.Cid,
-					Delete: true,
+					Name:      existingAsset.Name,
+					OldCid:    existingAsset.Cid,
+					OldSha256: existingAsset.Sha256,
+					Delete:    true,
 				})
 			}
 		}
@@ -418,9 +419,10 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 		var updates []*storagetypes.ReleaseAssetUpdate
 		for _, existingAsset := range existingAssets {
 			updates = append(updates, &storagetypes.ReleaseAssetUpdate{
-				Name:   existingAsset.Name,
-				OldCid: existingAsset.Cid,
-				Delete: true,
+				Name:      existingAsset.Name,
+				OldCid:    existingAsset.Cid,
+				OldSha256: existingAsset.Sha256,
+				Delete:    true,
 			})
 		}
 		if len(updates) > 0 {
