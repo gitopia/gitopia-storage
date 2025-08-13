@@ -269,12 +269,13 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 			}
 
 			updates = append(updates, &storagetypes.ReleaseAssetUpdate{
-				Name:     attachment.Name,
-				Cid:      cid,
-				RootHash: rootHash,
-				Size_:    uint64(attachment.Size_),
-				Sha256:   attachment.Sha,
-				OldCid:   "",
+				Name:      attachment.Name,
+				Cid:       cid,
+				RootHash:  rootHash,
+				Size_:     uint64(attachment.Size_),
+				Sha256:    attachment.Sha,
+				OldSha256: "",
+				OldCid:    "",
 			})
 		}
 
@@ -362,23 +363,25 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 				// Only include if CID changed
 				if newCid != existingAsset.Cid {
 					updates = append(updates, &storagetypes.ReleaseAssetUpdate{
-						Name:     attachment.Name,
-						Cid:      newCid,
-						RootHash: rootHash,
-						Size_:    uint64(attachment.Size_),
-						Sha256:   attachment.Sha,
-						OldCid:   existingAsset.Cid,
+						Name:      attachment.Name,
+						Cid:       newCid,
+						RootHash:  rootHash,
+						Size_:     uint64(attachment.Size_),
+						Sha256:    attachment.Sha,
+						OldSha256: existingAsset.Sha256,
+						OldCid:    existingAsset.Cid,
 					})
 				}
 			} else {
 				// New attachment
 				updates = append(updates, &storagetypes.ReleaseAssetUpdate{
-					Name:     attachment.Name,
-					Cid:      newCid,
-					RootHash: rootHash,
-					Size_:    uint64(attachment.Size_),
-					Sha256:   attachment.Sha,
-					OldCid:   "",
+					Name:      attachment.Name,
+					Cid:       newCid,
+					RootHash:  rootHash,
+					Size_:     uint64(attachment.Size_),
+					Sha256:    attachment.Sha,
+					OldSha256: "",
+					OldCid:    "",
 				})
 			}
 		}
