@@ -45,6 +45,7 @@ const (
 	UpdateReleaseQuery             = "tm.event='Tx' AND message.action='UpdateRelease'"
 	DeleteReleaseQuery             = "tm.event='Tx' AND message.action='DeleteRelease'"
 	DaoCreateReleaseQuery          = "tm.event='Tx' AND message.action='DaoCreateRelease'"
+	DeleteRepositoryQuery          = "tm.event='Tx' AND message.action='DeleteRepository'"
 )
 
 func NewStartCmd() *cobra.Command {
@@ -104,7 +105,7 @@ func start(cmd *cobra.Command, args []string) error {
 
 	// Start the event processor to handle blockchain events.
 	g.Go(func() error {
-		return startEventProcessor(ctx, cmd, gitopiaClient, batchTxManager)
+		return startEventProcessor(ctx, gitopiaClient, batchTxManager)
 	})
 
 	logrus.Info("application started")
@@ -192,12 +193,7 @@ func setupWebServer(cmd *cobra.Command, batchTxManager *app.BatchTxManager) (*ht
 	}, nil
 }
 
-type eventSubscription struct {
-	query   string
-	handler func(context.Context, []byte) error
-}
-
-func startEventProcessor(ctx context.Context, cmd *cobra.Command, gitopiaClient gitopia.Client, batchTxManager *app.BatchTxManager) error {
+func startEventProcessor(ctx context.Context, gitopiaClient gitopia.Client, batchTxManager *app.BatchTxManager) error {
 	gp := app.NewGitopiaProxy(gitopiaClient, batchTxManager)
 
 	ipfsCfg := &ipfsclusterclient.Config{
@@ -230,15 +226,19 @@ func startEventProcessor(ctx context.Context, cmd *cobra.Command, gitopiaClient 
 		pinataClient = handler.NewPinataClient(viper.GetString("PINATA_JWT"))
 	}
 
+	// core events
 	mergeHandler := handler.NewInvokeMergePullRequestEventHandler(gp, mcc, cl)
 	daoMergeHandler := handler.NewInvokeMergePullRequestEventHandler(gp, dmcc, cl)
 	challengeHandler := handler.NewChallengeEventHandler(gp)
-	packfileUpdatedHandler := handler.NewPackfileUpdatedEventHandler(gp, pinataClient)
-	releaseAssetsUpdatedHandler := handler.NewReleaseAssetsUpdatedEventHandler(gp, pinataClient)
-	lfsObjectUpdatedHandler := handler.NewLfsObjectUpdatedEventHandler(gp, pinataClient)
 	deleteStorageObjectHandler := handler.NewDeleteStorageObjectEventHandler(gp, cl)
 	releaseHandler := handler.NewReleaseEventHandler(gp, cl)
 	daoReleaseHandler := handler.NewReleaseEventHandler(gp, cl)
+	deleteRepositoryHandler := handler.NewDeleteRepositoryEventHandler(gp)
+
+	// events for external pinning
+	packfileUpdatedHandler := handler.NewPackfileUpdatedEventHandler(gp, pinataClient)
+	releaseAssetsUpdatedHandler := handler.NewReleaseAssetsUpdatedEventHandler(gp, pinataClient)
+	lfsObjectUpdatedHandler := handler.NewLfsObjectUpdatedEventHandler(gp, pinataClient)
 	repositoryDeletedHandler := handler.NewRepositoryDeletedEventHandler(gp, pinataClient)
 
 	// Create multiple WebSocket clients to distribute subscriptions and avoid hitting the 5 subscription limit
@@ -280,6 +280,7 @@ func startEventProcessor(ctx context.Context, cmd *cobra.Command, gitopiaClient 
 		UpdateReleaseQuery,
 		DeleteReleaseQuery,
 		DaoCreateReleaseQuery,
+		DeleteRepositoryQuery,
 	}
 
 	if err := client2.SubscribeQueries(ctx, client2Queries...); err != nil {
@@ -298,6 +299,9 @@ func startEventProcessor(ctx context.Context, cmd *cobra.Command, gitopiaClient 
 		},
 		DaoCreateReleaseQuery: func(ctx context.Context, eventBuf []byte) error {
 			return daoReleaseHandler.Handle(ctx, eventBuf, handler.EventCreateReleaseType)
+		},
+		DeleteRepositoryQuery: func(ctx context.Context, eventBuf []byte) error {
+			return deleteRepositoryHandler.Handle(ctx, eventBuf)
 		},
 	}
 
@@ -431,6 +435,8 @@ func shouldHandleEvent(eventBuf []byte, query string) bool {
 		return strings.Contains(eventStr, "EventLFSObjectUpdated")
 	case RepositoryDeletedQuery:
 		return strings.Contains(eventStr, "EventRepositoryDeleted")
+	case DeleteRepositoryQuery:
+		return strings.Contains(eventStr, "DeleteRepository")
 	default:
 		return false
 	}

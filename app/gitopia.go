@@ -151,6 +151,17 @@ func (g *GitopiaProxy) ProposePackfileUpdate(ctx context.Context, user string, r
 	return g.batchTxMgr.AddToBatch(ctx, msg)
 }
 
+func (g *GitopiaProxy) ProposeRepositoryDelete(ctx context.Context, user string, repositoryId uint64, delete bool) error {
+	msg := &storagetypes.MsgProposeRepositoryDelete{
+		Creator:      g.gc.Address().String(),
+		User:         user,
+		RepositoryId: repositoryId,
+	}
+
+	// Use batch transaction manager
+	return g.batchTxMgr.AddToBatch(ctx, msg)
+}
+
 func (g *GitopiaProxy) SubmitChallenge(ctx context.Context, challengeId uint64, data []byte, proof *storagetypes.Proof) error {
 	msg := &storagetypes.MsgSubmitChallengeResponse{
 		Creator:     g.gc.Address().String(),
@@ -497,6 +508,19 @@ func (g *GitopiaProxy) CheckProposePackfileUpdate(repositoryId uint64, user stri
 	return packfileUpdateProposal.Cid != "", nil
 }
 
+// CheckProposeRepositoryDelete verifies if a repository delete was proposed
+func (g *GitopiaProxy) CheckProposeRepositoryDelete(repositoryId uint64, user string) (bool, error) {
+	_, err := g.RepositoryDeleteProposal(context.Background(), repositoryId, user)
+	if err != nil {
+		if strings.Contains(err.Error(), "repository delete proposal not found") {
+			return false, nil // Return false but no error to continue polling
+		}
+		return false, err
+	}
+
+	return true, nil
+}
+
 // CheckProposeLFSObjectUpdate verifies if an LFS object update was proposed
 func (g *GitopiaProxy) CheckProposeLFSObjectUpdate(repositoryId uint64, oid string, user string) (bool, error) {
 	lfsObjectUpdateProposal, err := g.LFSObjectUpdateProposal(context.Background(), repositoryId, oid, user)
@@ -530,6 +554,19 @@ func (g *GitopiaProxy) PackfileUpdateProposal(ctx context.Context, repositoryId 
 	}
 
 	return resp.PackfileUpdateProposal, nil
+}
+
+// RepositoryDeleteProposal returns the repository delete proposal for a repository and user
+func (g *GitopiaProxy) RepositoryDeleteProposal(ctx context.Context, repositoryId uint64, user string) (storagetypes.ProposedRepositoryDelete, error) {
+	resp, err := g.gc.QueryClient().Storage.RepositoryDeleteProposal(ctx, &storagetypes.QueryRepositoryDeleteProposalRequest{
+		RepositoryId: repositoryId,
+		User:         user,
+	})
+	if err != nil {
+		return storagetypes.ProposedRepositoryDelete{}, errors.WithMessage(err, "query error")
+	}
+
+	return resp.RepositoryDeleteProposal, nil
 }
 
 // LFSObjectUpdateProposal returns the LFS object update proposal for a repository and user
