@@ -41,6 +41,7 @@ const (
 	LfsObjectUpdatedQuery          = "tm.event='Tx' AND gitopia.gitopia.storage.EventLFSObjectUpdated.repository_id EXISTS"
 	DeleteStorageObjectQuery       = "tm.event='Tx' AND gitopia.gitopia.storage.EventDeleteStorageObject.repository_id EXISTS"
 	RepositoryDeletedQuery         = "tm.event='Tx' AND gitopia.gitopia.storage.EventRepositoryDeleted.repository_id EXISTS"
+	ProposalTimeoutQuery           = "tm.event='Tx' AND gitopia.gitopia.storage.EventProposalTimeout.provider EXISTS"
 	CreateReleaseQuery             = "tm.event='Tx' AND message.action='CreateRelease'"
 	UpdateReleaseQuery             = "tm.event='Tx' AND message.action='UpdateRelease'"
 	DeleteReleaseQuery             = "tm.event='Tx' AND message.action='DeleteRelease'"
@@ -231,6 +232,7 @@ func startEventProcessor(ctx context.Context, gitopiaClient gitopia.Client, batc
 	daoMergeHandler := handler.NewInvokeMergePullRequestEventHandler(gp, dmcc, cl)
 	challengeHandler := handler.NewChallengeEventHandler(gp)
 	deleteStorageObjectHandler := handler.NewDeleteStorageObjectEventHandler(gp, cl)
+	proposalTimeoutHandler := handler.NewProposalTimeoutHandler(gp, cl)
 	releaseHandler := handler.NewReleaseEventHandler(gp, cl)
 	daoReleaseHandler := handler.NewReleaseEventHandler(gp, cl)
 	deleteRepositoryHandler := handler.NewDeleteRepositoryEventHandler(gp)
@@ -255,6 +257,7 @@ func startEventProcessor(ctx context.Context, gitopiaClient gitopia.Client, batc
 		InvokeDaoMergePullRequestQuery,
 		ChallengeCreatedQuery,
 		DeleteStorageObjectQuery,
+		ProposalTimeoutQuery,
 	}
 
 	if err := client1.SubscribeQueries(ctx, client1Queries...); err != nil {
@@ -266,6 +269,7 @@ func startEventProcessor(ctx context.Context, gitopiaClient gitopia.Client, batc
 		InvokeDaoMergePullRequestQuery: daoMergeHandler.Handle,
 		ChallengeCreatedQuery:          challengeHandler.Handle,
 		DeleteStorageObjectQuery:       deleteStorageObjectHandler.Handle,
+		ProposalTimeoutQuery:           proposalTimeoutHandler.Handle,
 	}
 
 	// Client 2: Release events (5 subscriptions)
@@ -419,6 +423,8 @@ func shouldHandleEvent(eventBuf []byte, query string) bool {
 		return strings.Contains(eventStr, "EventChallengeCreated")
 	case DeleteStorageObjectQuery:
 		return strings.Contains(eventStr, "EventDeleteStorageObject")
+	case ProposalTimeoutQuery:
+		return strings.Contains(eventStr, "EventProposalTimeout")
 	case CreateReleaseQuery:
 		return strings.Contains(eventStr, "CreateRelease") && !strings.Contains(eventStr, "DaoCreateRelease")
 	case DaoCreateReleaseQuery:

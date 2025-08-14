@@ -59,13 +59,13 @@ func (h *DeleteStorageObjectEventHandler) Handle(ctx context.Context, eventBuf [
 			// Get packfile reference count
 			refCount, err := h.gc.StorageCidReferenceCount(ctx, cid)
 			if err != nil {
-				return errors.WithMessage(err, "failed to get packfile reference count")
+				return errors.WithMessage(err, "failed to get cid reference count")
 			}
 
 			if refCount == 0 {
 				err = utils.UnpinFile(h.ipfsClusterClient, cid)
 				if err != nil {
-					return errors.WithMessage(err, "failed to unpin packfile from IPFS cluster")
+					return errors.WithMessage(err, "failed to unpin cid from IPFS cluster")
 				}
 
 				logger.FromContext(ctx).WithFields(logrus.Fields{
