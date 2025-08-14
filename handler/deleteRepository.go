@@ -77,7 +77,7 @@ func (h *DeleteRepositoryEventHandler) Process(ctx context.Context, event Delete
 		return nil
 	}
 
-	err := h.gc.ProposeRepositoryDelete(ctx, h.gc.ClientAddress(), event.RepositoryId, true)
+	err := h.gc.ProposeRepositoryDelete(ctx, event.Creator, event.RepositoryId)
 	if err != nil {
 		return errors.Wrap(err, "failed to propose repository delete")
 	}

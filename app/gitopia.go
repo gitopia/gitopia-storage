@@ -151,7 +151,7 @@ func (g *GitopiaProxy) ProposePackfileUpdate(ctx context.Context, user string, r
 	return g.batchTxMgr.AddToBatch(ctx, msg)
 }
 
-func (g *GitopiaProxy) ProposeRepositoryDelete(ctx context.Context, user string, repositoryId uint64, delete bool) error {
+func (g *GitopiaProxy) ProposeRepositoryDelete(ctx context.Context, user string, repositoryId uint64) error {
 	msg := &storagetypes.MsgProposeRepositoryDelete{
 		Creator:      g.gc.Address().String(),
 		User:         user,
