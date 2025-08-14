@@ -62,32 +62,46 @@ func (e *RepositoryDeletedEvent) UnMarshal(eventBuf []byte) error {
 		e.PackfileName = strings.Trim(packfileName, "\"")
 	}
 
-	_, err = jsonparser.ArrayEach(eventBuf, func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
-		asset := ReleaseAsset{}
-		name, _ := jsonparser.GetString(value, "name")
-		asset.Name = strings.Trim(name, "\"")
-		cid, _ := jsonparser.GetString(value, "cid")
-		asset.Cid = strings.Trim(cid, "\"")
-		sha, _ := jsonparser.GetString(value, "sha256")
-		asset.Sha = strings.Trim(sha, "\"")
-		tag, _ := jsonparser.GetString(value, "tag")
-		asset.Tag = strings.Trim(tag, "\"")
-		e.ReleaseAssets = append(e.ReleaseAssets, asset)
-	}, "events", EventRepositoryDeletedType+".release_assets", "[0]")
-	if err != nil {
+	releaseAssetsStr, err := jsonparser.GetString(eventBuf, "events", EventRepositoryDeletedType+".release_assets", "[0]")
+	if err != nil && err != jsonparser.KeyPathNotFoundError {
 		return errors.Wrap(err, "error parsing release assets")
 	}
 
-	_, err = jsonparser.ArrayEach(eventBuf, func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
-		lfsObject := LFSObject{}
-		oid, _ := jsonparser.GetString(value, "oid")
-		lfsObject.Oid = strings.Trim(oid, "\"")
-		cid, _ := jsonparser.GetString(value, "cid")
-		lfsObject.Cid = strings.Trim(cid, "\"")
-		e.LfsObjects = append(e.LfsObjects, lfsObject)
-	}, "events", EventRepositoryDeletedType+".lfs_objects", "[0]")
-	if err != nil {
+	if err == nil {
+		_, err = jsonparser.ArrayEach([]byte(releaseAssetsStr), func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
+			asset := ReleaseAsset{}
+			name, _ := jsonparser.GetString(value, "name")
+			asset.Name = name
+			cid, _ := jsonparser.GetString(value, "cid")
+			asset.Cid = cid
+			sha, _ := jsonparser.GetString(value, "sha256")
+			asset.Sha = sha
+			tag, _ := jsonparser.GetString(value, "tag")
+			asset.Tag = tag
+			e.ReleaseAssets = append(e.ReleaseAssets, asset)
+		})
+		if err != nil {
+			return errors.Wrap(err, "error parsing release assets")
+		}
+	}
+
+	lfsObjectsStr, err := jsonparser.GetString(eventBuf, "events", EventRepositoryDeletedType+".lfs_objects", "[0]")
+	if err != nil && err != jsonparser.KeyPathNotFoundError {
 		return errors.Wrap(err, "error parsing lfs objects")
+	}
+
+	if err == nil {
+		_, err = jsonparser.ArrayEach([]byte(lfsObjectsStr), func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
+			lfsObject := LFSObject{}
+			oid, _ := jsonparser.GetString(value, "oid")
+			lfsObject.Oid = oid
+			cid, _ := jsonparser.GetString(value, "cid")
+			lfsObject.Cid = cid
+			e.LfsObjects = append(e.LfsObjects, lfsObject)
+		})
+		if err != nil {
+			return errors.Wrap(err, "error parsing lfs objects")
+		}
 	}
 
 	return nil
