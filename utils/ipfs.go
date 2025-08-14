@@ -12,8 +12,8 @@ import (
 func PinFile(ipfsClusterClient ipfsclusterclient.Client, filePath string) (string, error) {
 	paths := []string{filePath}
 	addParams := api.DefaultAddParams()
-	addParams.Recursive = false
-	addParams.Layout = "balanced"
+	addParams.CidVersion = 1
+	addParams.RawLeaves = true
 
 	outputChan := make(chan api.AddedOutput)
 	var cid api.Cid
