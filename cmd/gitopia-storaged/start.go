@@ -2,14 +2,13 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	_ "net/http/pprof" // Add pprof handlers to default HTTP mux
 	"os"
-	"strings"
 	"time"
 
+	"github.com/buger/jsonparser"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -386,66 +385,25 @@ func startEventProcessor(ctx context.Context, gitopiaClient gitopia.Client, batc
 	return g.Wait()
 }
 
-// routeEventToHandler routes events to the appropriate handler based on the event content
-// It extracts the query information from the event and calls the corresponding handler
+// routeEventToHandler routes events to the appropriate handler based on the query field in the event.
 func routeEventToHandler(ctx context.Context, eventBuf []byte, handlers map[string]func(context.Context, []byte) error) error {
-	// Parse the event to extract query information
-	// The event structure typically contains query information that we can use for routing
-	var eventData map[string]interface{}
-	if err := json.Unmarshal(eventBuf, &eventData); err != nil {
-		return errors.Wrap(err, "failed to parse event data")
+	// Extract the query from the event buffer
+	query, err := jsonparser.GetString(eventBuf, "query")
+	if err != nil {
+		// This can happen if the event is not a subscription event, so we just log and ignore
+		logger.FromContext(ctx).WithField("event", string(eventBuf)).WithError(err).Debug("failed to parse query from event, ignoring")
+		return nil
 	}
 
-	for query, handler := range handlers {
-		// Check if this event matches the query pattern
-		if shouldHandleEvent(eventBuf, query) {
-			return handler(ctx, eventBuf)
-		}
+	// Find the handler for this query
+	if handler, ok := handlers[query]; ok {
+		logger.FromContext(ctx).WithFields(logrus.Fields{"query": query}).Debug("routing event to handler")
+		return handler(ctx, eventBuf)
 	}
 
 	// If no handler matches, log and continue
-	logger.FromContext(ctx).WithField("event", string(eventBuf)).Debug("no handler found for event")
+	logger.FromContext(ctx).WithField("query", query).Debug("no handler found for event query")
 	return nil
-}
-
-// shouldHandleEvent determines if an event should be handled by a specific query handler
-// This function examines the event content to match it with the appropriate query
-func shouldHandleEvent(eventBuf []byte, query string) bool {
-	// Convert event to string for pattern matching
-	eventStr := string(eventBuf)
-
-	switch query {
-	case InvokeMergePullRequestQuery:
-		return strings.Contains(eventStr, "InvokeMergePullRequest")
-	case InvokeDaoMergePullRequestQuery:
-		return strings.Contains(eventStr, "InvokeDaoMergePullRequest")
-	case ChallengeCreatedQuery:
-		return strings.Contains(eventStr, "EventChallengeCreated")
-	case DeleteStorageObjectQuery:
-		return strings.Contains(eventStr, "EventDeleteStorageObject")
-	case ProposalTimeoutQuery:
-		return strings.Contains(eventStr, "EventProposalTimeout")
-	case CreateReleaseQuery:
-		return strings.Contains(eventStr, "CreateRelease") && !strings.Contains(eventStr, "DaoCreateRelease")
-	case DaoCreateReleaseQuery:
-		return strings.Contains(eventStr, "DaoCreateRelease")
-	case UpdateReleaseQuery:
-		return strings.Contains(eventStr, "UpdateRelease")
-	case DeleteReleaseQuery:
-		return strings.Contains(eventStr, "DeleteRelease")
-	case PackfileUpdatedQuery:
-		return strings.Contains(eventStr, "EventPackfileUpdated")
-	case ReleaseAssetsUpdatedQuery:
-		return strings.Contains(eventStr, "EventReleaseAssetsUpdated")
-	case LfsObjectUpdatedQuery:
-		return strings.Contains(eventStr, "EventLFSObjectUpdated")
-	case RepositoryDeletedQuery:
-		return strings.Contains(eventStr, "EventRepositoryDeleted")
-	case DeleteRepositoryQuery:
-		return strings.Contains(eventStr, "DeleteRepository")
-	default:
-		return false
-	}
 }
 
 func checkClientBalance(ctx context.Context, gitopiaClient gitopia.Client) error {

@@ -24,45 +24,76 @@ type LfsObjectUpdatedEvent struct {
 	Deleted      bool
 }
 
-func (e *LfsObjectUpdatedEvent) UnMarshal(eventBuf []byte) error {
-	repoIdStr, err := jsonparser.GetString(eventBuf, "events", EventLFSObjectUpdatedType+"."+"repository_id", "[0]")
-	if err != nil {
-		return errors.Wrap(err, "error parsing repository id")
-	}
-	repoIdStr = strings.Trim(repoIdStr, "\"")
-	repoId, err := strconv.ParseUint(repoIdStr, 10, 64)
-	if err != nil {
-		return errors.Wrap(err, "error parsing repository id")
+// Unmarshal parses LFSObjectUpdated events from an event buffer.
+// It can handle multiple events of the same type within a single buffer.
+func Unmarshal(eventBuf []byte) ([]LfsObjectUpdatedEvent, error) {
+	var events []LfsObjectUpdatedEvent
+
+	// Helper to extract string arrays from json
+	extractStringArray := func(key string) ([]string, error) {
+		var result []string
+		value, _, _, err := jsonparser.Get(eventBuf, "events", EventLFSObjectUpdatedType+"."+key)
+		if err != nil {
+			if err == jsonparser.KeyPathNotFoundError {
+				return result, nil // Not found is not an error here
+			}
+			return nil, err
+		}
+		jsonparser.ArrayEach(value, func(v []byte, dt jsonparser.ValueType, offset int, err error) {
+			result = append(result, string(v))
+		})
+		return result, nil
 	}
 
-	oid, err := jsonparser.GetString(eventBuf, "events", EventLFSObjectUpdatedType+"."+"oid", "[0]")
+	repoIDs, err := extractStringArray("repository_id")
 	if err != nil {
-		return errors.Wrap(err, "error parsing oid")
-	}
-	oid = strings.Trim(oid, "\"")
-
-	cid, err := jsonparser.GetString(eventBuf, "events", EventLFSObjectUpdatedType+"."+"cid", "[0]")
-	if err != nil {
-		return errors.Wrap(err, "error parsing cid")
-	}
-	cid = strings.Trim(cid, "\"")
-
-	deletedStr, err := jsonparser.GetString(eventBuf, "events", EventLFSObjectUpdatedType+"."+"deleted", "[0]")
-	if err != nil {
-		return errors.Wrap(err, "error parsing deleted")
-	}
-	deletedStr = strings.Trim(deletedStr, "\"")
-	deleted, err := strconv.ParseBool(deletedStr)
-	if err != nil {
-		return errors.Wrap(err, "error parsing deleted field as boolean")
+		return nil, errors.Wrap(err, "error parsing repository_id")
 	}
 
-	e.RepositoryId = repoId
-	e.Oid = oid
-	e.Cid = cid
-	e.Deleted = deleted
+	oids, err := extractStringArray("oid")
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing oid")
+	}
 
-	return nil
+	cids, err := extractStringArray("cid")
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing cid")
+	}
+
+	deleteds, err := extractStringArray("deleted")
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing deleted")
+	}
+
+	// Basic validation
+	if len(repoIDs) == 0 {
+		return events, nil // No events to process
+	}
+
+	if !(len(repoIDs) == len(oids) && len(repoIDs) == len(cids) && len(repoIDs) == len(deleteds)) {
+		return nil, errors.New("mismatched attribute array lengths for LFSObjectUpdatedEvent")
+	}
+
+	for i := 0; i < len(repoIDs); i++ {
+		repoId, err := strconv.ParseUint(strings.Trim(repoIDs[i], `"`), 10, 64)
+		if err != nil {
+			return nil, errors.Wrap(err, "error parsing repository id")
+		}
+
+		deleted, err := strconv.ParseBool(strings.Trim(deleteds[i], `"`))
+		if err != nil {
+			return nil, errors.Wrap(err, "error parsing deleted flag")
+		}
+
+		events = append(events, LfsObjectUpdatedEvent{
+			RepositoryId: repoId,
+			Oid:          strings.Trim(oids[i], `"`),
+			Cid:          strings.Trim(cids[i], `"`),
+			Deleted:      deleted,
+		})
+	}
+
+	return events, nil
 }
 
 type LfsObjectUpdatedEventHandler struct {
@@ -78,13 +109,22 @@ func NewLfsObjectUpdatedEventHandler(g *app.GitopiaProxy, pinataClient *PinataCl
 }
 
 func (h *LfsObjectUpdatedEventHandler) Handle(ctx context.Context, eventBuf []byte) error {
-	event := &LfsObjectUpdatedEvent{}
-	err := event.UnMarshal(eventBuf)
+	events, err := Unmarshal(eventBuf)
 	if err != nil {
 		return errors.WithMessage(err, "event parse error")
 	}
 
-	return h.Process(ctx, *event)
+	for _, event := range events {
+		if err := h.Process(ctx, event); err != nil {
+			// Log error and continue processing other events
+			logger.FromContext(ctx).WithFields(logrus.Fields{
+				"repository_id": event.RepositoryId,
+				"oid":           event.Oid,
+			}).WithError(err).Error("failed to process LfsObjectUpdatedEvent")
+		}
+	}
+
+	return nil
 }
 
 func (h *LfsObjectUpdatedEventHandler) Process(ctx context.Context, event LfsObjectUpdatedEvent) error {
