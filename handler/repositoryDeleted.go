@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"strings"
 
 	"github.com/buger/jsonparser"
 	"github.com/gitopia/gitopia-go/logger"
@@ -39,48 +38,32 @@ type RepositoryDeletedEvent struct {
 func UnmarshalRepositoryDeletedEvent(eventBuf []byte) ([]RepositoryDeletedEvent, error) {
 	var events []RepositoryDeletedEvent
 
-	// Helper to extract string arrays from json
-	extractStringArray := func(key string) ([]string, error) {
-		var result []string
-		value, _, _, err := jsonparser.Get(eventBuf, "events", EventRepositoryDeletedType+"."+key)
-		if err != nil {
-			if err == jsonparser.KeyPathNotFoundError {
-				return result, nil // Not found is not an error here
-			}
-			return nil, err
-		}
-		jsonparser.ArrayEach(value, func(v []byte, dt jsonparser.ValueType, offset int, err error) {
-			result = append(result, string(v))
-		})
-		return result, nil
-	}
-
-	repoIDs, err := extractStringArray("repository_id")
+	repoIDs, err := ExtractStringArray(eventBuf, EventRepositoryDeletedType, "repository_id")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing repository_id")
 	}
 
-	providers, err := extractStringArray("provider")
+	providers, err := ExtractStringArray(eventBuf, EventRepositoryDeletedType, "provider")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing provider")
 	}
 
-	packfileCids, err := extractStringArray("packfile_cid")
+	packfileCids, err := ExtractStringArray(eventBuf, EventRepositoryDeletedType, "packfile_cid")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing packfile_cid")
 	}
 
-	packfileNames, err := extractStringArray("packfile_name")
+	packfileNames, err := ExtractStringArray(eventBuf, EventRepositoryDeletedType, "packfile_name")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing packfile_name")
 	}
 
-	releaseAssetsArray, err := extractStringArray("release_assets")
+	releaseAssetsArray, err := ExtractStringArray(eventBuf, EventRepositoryDeletedType, "release_assets")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing release_assets")
 	}
 
-	lfsObjectsArray, err := extractStringArray("lfs_objects")
+	lfsObjectsArray, err := ExtractStringArray(eventBuf, EventRepositoryDeletedType, "lfs_objects")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing lfs_objects")
 	}
@@ -95,13 +78,13 @@ func UnmarshalRepositoryDeletedEvent(eventBuf []byte) ([]RepositoryDeletedEvent,
 	}
 
 	for i := 0; i < len(repoIDs); i++ {
-		repoId, err := strconv.ParseUint(strings.Trim(repoIDs[i], `"`), 10, 64)
+		repoId, err := strconv.ParseUint(repoIDs[i], 10, 64)
 		if err != nil {
 			return nil, errors.Wrap(err, "error parsing repository id")
 		}
 
 		var releaseAssets []ReleaseAsset
-		releaseAssetsStr := strings.Trim(releaseAssetsArray[i], `"`)
+		releaseAssetsStr := releaseAssetsArray[i]
 		_, err = jsonparser.ArrayEach([]byte(releaseAssetsStr), func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
 			asset := ReleaseAsset{}
 			name, _ := jsonparser.GetString(value, "name")
@@ -119,7 +102,7 @@ func UnmarshalRepositoryDeletedEvent(eventBuf []byte) ([]RepositoryDeletedEvent,
 		}
 
 		var lfsObjects []LFSObject
-		lfsObjectsStr := strings.Trim(lfsObjectsArray[i], `"`)
+		lfsObjectsStr := lfsObjectsArray[i]
 		_, err = jsonparser.ArrayEach([]byte(lfsObjectsStr), func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
 			lfsObject := LFSObject{}
 			oid, _ := jsonparser.GetString(value, "oid")
@@ -134,9 +117,9 @@ func UnmarshalRepositoryDeletedEvent(eventBuf []byte) ([]RepositoryDeletedEvent,
 
 		events = append(events, RepositoryDeletedEvent{
 			RepositoryId:  repoId,
-			Provider:      strings.Trim(providers[i], `"`),
-			PackfileCid:   strings.Trim(packfileCids[i], `"`),
-			PackfileName:  strings.Trim(packfileNames[i], `"`),
+			Provider:      providers[i],
+			PackfileCid:   packfileCids[i],
+			PackfileName:  packfileNames[i],
 			ReleaseAssets: releaseAssets,
 			LfsObjects:    lfsObjects,
 		})

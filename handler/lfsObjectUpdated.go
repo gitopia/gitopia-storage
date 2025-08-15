@@ -4,9 +4,7 @@ import (
 	"context"
 	"path"
 	"strconv"
-	"strings"
 
-	"github.com/buger/jsonparser"
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia-storage/app"
 	"github.com/gitopia/gitopia-storage/utils"
@@ -29,38 +27,22 @@ type LfsObjectUpdatedEvent struct {
 func Unmarshal(eventBuf []byte) ([]LfsObjectUpdatedEvent, error) {
 	var events []LfsObjectUpdatedEvent
 
-	// Helper to extract string arrays from json
-	extractStringArray := func(key string) ([]string, error) {
-		var result []string
-		value, _, _, err := jsonparser.Get(eventBuf, "events", EventLFSObjectUpdatedType+"."+key)
-		if err != nil {
-			if err == jsonparser.KeyPathNotFoundError {
-				return result, nil // Not found is not an error here
-			}
-			return nil, err
-		}
-		jsonparser.ArrayEach(value, func(v []byte, dt jsonparser.ValueType, offset int, err error) {
-			result = append(result, string(v))
-		})
-		return result, nil
-	}
-
-	repoIDs, err := extractStringArray("repository_id")
+	repoIDs, err := ExtractStringArray(eventBuf, EventLFSObjectUpdatedType, "repository_id")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing repository_id")
 	}
 
-	oids, err := extractStringArray("oid")
+	oids, err := ExtractStringArray(eventBuf, EventLFSObjectUpdatedType, "oid")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing oid")
 	}
 
-	cids, err := extractStringArray("cid")
+	cids, err := ExtractStringArray(eventBuf, EventLFSObjectUpdatedType, "cid")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing cid")
 	}
 
-	deleteds, err := extractStringArray("deleted")
+	deleteds, err := ExtractStringArray(eventBuf, EventLFSObjectUpdatedType, "deleted")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing deleted")
 	}
@@ -75,20 +57,20 @@ func Unmarshal(eventBuf []byte) ([]LfsObjectUpdatedEvent, error) {
 	}
 
 	for i := 0; i < len(repoIDs); i++ {
-		repoId, err := strconv.ParseUint(strings.Trim(repoIDs[i], `"`), 10, 64)
+		repoId, err := strconv.ParseUint(repoIDs[i], 10, 64)
 		if err != nil {
 			return nil, errors.Wrap(err, "error parsing repository id")
 		}
 
-		deleted, err := strconv.ParseBool(strings.Trim(deleteds[i], `"`))
+		deleted, err := strconv.ParseBool(deleteds[i])
 		if err != nil {
 			return nil, errors.Wrap(err, "error parsing deleted flag")
 		}
 
 		events = append(events, LfsObjectUpdatedEvent{
 			RepositoryId: repoId,
-			Oid:          strings.Trim(oids[i], `"`),
-			Cid:          strings.Trim(cids[i], `"`),
+			Oid:          oids[i],
+			Cid:          cids[i],
 			Deleted:      deleted,
 		})
 	}

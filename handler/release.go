@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/buger/jsonparser"
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia-storage/app"
 	"github.com/gitopia/gitopia-storage/pkg/merkleproof"
@@ -40,48 +39,32 @@ type ReleaseEvent struct {
 func UnmarshalReleaseEvent(eventBuf []byte) ([]ReleaseEvent, error) {
 	var events []ReleaseEvent
 
-	// Helper to extract string arrays from json
-	extractStringArray := func(key string) ([]string, error) {
-		var result []string
-		value, _, _, err := jsonparser.Get(eventBuf, "events", "message."+key)
-		if err != nil {
-			if err == jsonparser.KeyPathNotFoundError {
-				return result, nil // Not found is not an error here
-			}
-			return nil, err
-		}
-		jsonparser.ArrayEach(value, func(v []byte, dt jsonparser.ValueType, offset int, err error) {
-			result = append(result, string(v))
-		})
-		return result, nil
-	}
-
-	creators, err := extractStringArray(gitopiatypes.EventAttributeCreatorKey)
+	creators, err := ExtractStringArray(eventBuf, "message", gitopiatypes.EventAttributeCreatorKey)
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing creator")
 	}
 
-	repoIDs, err := extractStringArray(gitopiatypes.EventAttributeRepoIdKey)
+	repoIDs, err := ExtractStringArray(eventBuf, "message", gitopiatypes.EventAttributeRepoIdKey)
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing repository id")
 	}
 
-	repoOwnerIDs, err := extractStringArray(gitopiatypes.EventAttributeRepoOwnerIdKey)
+	repoOwnerIDs, err := ExtractStringArray(eventBuf, "message", gitopiatypes.EventAttributeRepoOwnerIdKey)
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing repository owner id")
 	}
 
-	tags, err := extractStringArray(gitopiatypes.EventAttributeReleaseTagNameKey)
+	tags, err := ExtractStringArray(eventBuf, "message", gitopiatypes.EventAttributeReleaseTagNameKey)
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing tag")
 	}
 
-	attachmentsArray, err := extractStringArray(gitopiatypes.EventAttributeReleaseAttachmentsKey)
+	attachmentsArray, err := ExtractStringArray(eventBuf, "message", gitopiatypes.EventAttributeReleaseAttachmentsKey)
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing attachments")
 	}
 
-	providers, err := extractStringArray(gitopiatypes.EventAttributeProviderKey)
+	providers, err := ExtractStringArray(eventBuf, "message", gitopiatypes.EventAttributeProviderKey)
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing provider")
 	}
@@ -96,25 +79,25 @@ func UnmarshalReleaseEvent(eventBuf []byte) ([]ReleaseEvent, error) {
 	}
 
 	for i := 0; i < len(creators); i++ {
-		repoId, err := strconv.ParseUint(strings.Trim(repoIDs[i], `"`), 10, 64)
+		repoId, err := strconv.ParseUint(repoIDs[i], 10, 64)
 		if err != nil {
 			return nil, errors.Wrap(err, "error parsing repository id")
 		}
 
 		var attachments []gitopiatypes.Attachment
-		attachmentsStr := strings.Trim(attachmentsArray[i], `"`)
+		attachmentsStr := attachmentsArray[i]
 		err = json.Unmarshal([]byte(attachmentsStr), &attachments)
 		if err != nil {
 			return nil, errors.Wrap(err, "error unmarshalling attachments")
 		}
 
 		events = append(events, ReleaseEvent{
-			Creator:           strings.Trim(creators[i], `"`),
+			Creator:           creators[i],
 			RepositoryId:      repoId,
-			RepositoryOwnerId: strings.Trim(repoOwnerIDs[i], `"`),
-			Tag:               strings.Trim(tags[i], `"`),
+			RepositoryOwnerId: repoOwnerIDs[i],
+			Tag:               tags[i],
 			Attachments:       attachments,
-			Provider:          strings.Trim(providers[i], `"`),
+			Provider:          providers[i],
 		})
 	}
 

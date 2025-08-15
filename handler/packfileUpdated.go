@@ -6,9 +6,7 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
-	"strings"
 
-	"github.com/buger/jsonparser"
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia-storage/app"
 	"github.com/gitopia/gitopia-storage/utils"
@@ -31,48 +29,32 @@ type PackfileUpdatedEvent struct {
 func UnmarshalPackfileUpdatedEvent(eventBuf []byte) ([]PackfileUpdatedEvent, error) {
 	var events []PackfileUpdatedEvent
 
-	// Helper to extract string arrays from json
-	extractStringArray := func(key string) ([]string, error) {
-		var result []string
-		value, _, _, err := jsonparser.Get(eventBuf, "events", EventPackfileUpdatedType+"."+key)
-		if err != nil {
-			if err == jsonparser.KeyPathNotFoundError {
-				return result, nil // Not found is not an error here
-			}
-			return nil, err
-		}
-		jsonparser.ArrayEach(value, func(v []byte, dt jsonparser.ValueType, offset int, err error) {
-			result = append(result, string(v))
-		})
-		return result, nil
-	}
-
-	repoIDs, err := extractStringArray("repository_id")
+	repoIDs, err := ExtractStringArray(eventBuf, EventPackfileUpdatedType, "repository_id")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing repository_id")
 	}
 
-	newCids, err := extractStringArray("new_cid")
+	newCids, err := ExtractStringArray(eventBuf, EventPackfileUpdatedType, "new_cid")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing new_cid")
 	}
 
-	oldCids, err := extractStringArray("old_cid")
+	oldCids, err := ExtractStringArray(eventBuf, EventPackfileUpdatedType, "old_cid")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing old_cid")
 	}
 
-	newNames, err := extractStringArray("new_name")
+	newNames, err := ExtractStringArray(eventBuf, EventPackfileUpdatedType, "new_name")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing new_name")
 	}
 
-	oldNames, err := extractStringArray("old_name")
+	oldNames, err := ExtractStringArray(eventBuf, EventPackfileUpdatedType, "old_name")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing old_name")
 	}
 
-	deleteds, err := extractStringArray("deleted")
+	deleteds, err := ExtractStringArray(eventBuf, EventPackfileUpdatedType, "deleted")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing deleted")
 	}
@@ -87,22 +69,22 @@ func UnmarshalPackfileUpdatedEvent(eventBuf []byte) ([]PackfileUpdatedEvent, err
 	}
 
 	for i := 0; i < len(repoIDs); i++ {
-		repoId, err := strconv.ParseUint(strings.Trim(repoIDs[i], `"`), 10, 64)
+		repoId, err := strconv.ParseUint(repoIDs[i], 10, 64)
 		if err != nil {
 			return nil, errors.Wrap(err, "error parsing repository id")
 		}
 
-		deleted, err := strconv.ParseBool(strings.Trim(deleteds[i], `"`))
+		deleted, err := strconv.ParseBool(deleteds[i])
 		if err != nil {
 			return nil, errors.Wrap(err, "error parsing deleted flag")
 		}
 
 		events = append(events, PackfileUpdatedEvent{
 			RepositoryId: repoId,
-			NewCid:       strings.Trim(newCids[i], `"`),
-			OldCid:       strings.Trim(oldCids[i], `"`),
-			NewName:      strings.Trim(newNames[i], `"`),
-			OldName:      strings.Trim(oldNames[i], `"`),
+			NewCid:       newCids[i],
+			OldCid:       oldCids[i],
+			NewName:      newNames[i],
+			OldName:      oldNames[i],
 			Deleted:      deleted,
 		})
 	}

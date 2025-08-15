@@ -37,38 +37,22 @@ type ReleaseAssetsUpdatedEvent struct {
 func UnmarshalReleaseAssetsUpdatedEvent(eventBuf []byte) ([]ReleaseAssetsUpdatedEvent, error) {
 	var events []ReleaseAssetsUpdatedEvent
 
-	// Helper to extract string arrays from json
-	extractStringArray := func(key string) ([]string, error) {
-		var result []string
-		value, _, _, err := jsonparser.Get(eventBuf, "events", EventReleaseAssetsUpdatedType+"."+key)
-		if err != nil {
-			if err == jsonparser.KeyPathNotFoundError {
-				return result, nil // Not found is not an error here
-			}
-			return nil, err
-		}
-		jsonparser.ArrayEach(value, func(v []byte, dt jsonparser.ValueType, offset int, err error) {
-			result = append(result, string(v))
-		})
-		return result, nil
-	}
-
-	repoIDs, err := extractStringArray("repository_id")
+	repoIDs, err := ExtractStringArray(eventBuf, EventReleaseAssetsUpdatedType, "repository_id")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing repository_id")
 	}
 
-	tags, err := extractStringArray("tag")
+	tags, err := ExtractStringArray(eventBuf, EventReleaseAssetsUpdatedType, "tag")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing tag")
 	}
 
-	providers, err := extractStringArray("provider")
+	providers, err := ExtractStringArray(eventBuf, EventReleaseAssetsUpdatedType, "provider")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing provider")
 	}
 
-	assetsArray, err := extractStringArray("assets")
+	assetsArray, err := ExtractStringArray(eventBuf, EventReleaseAssetsUpdatedType, "assets")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing assets")
 	}
@@ -83,13 +67,13 @@ func UnmarshalReleaseAssetsUpdatedEvent(eventBuf []byte) ([]ReleaseAssetsUpdated
 	}
 
 	for i := 0; i < len(repoIDs); i++ {
-		repoId, err := strconv.ParseUint(strings.Trim(repoIDs[i], `"`), 10, 64)
+		repoId, err := strconv.ParseUint(repoIDs[i], 10, 64)
 		if err != nil {
 			return nil, errors.Wrap(err, "error parsing repository id")
 		}
 
 		var assets []ReleaseAssetUpdate
-		assetsStr := strings.Trim(assetsArray[i], `"`)
+		assetsStr := assetsArray[i]
 		_, err = jsonparser.ArrayEach([]byte(assetsStr), func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
 			if err != nil {
 				return
@@ -136,9 +120,9 @@ func UnmarshalReleaseAssetsUpdatedEvent(eventBuf []byte) ([]ReleaseAssetsUpdated
 
 		events = append(events, ReleaseAssetsUpdatedEvent{
 			RepositoryId: repoId,
-			Tag:          strings.Trim(tags[i], `"`),
+			Tag:          tags[i],
 			Assets:       assets,
-			Provider:     strings.Trim(providers[i], `"`),
+			Provider:     providers[i],
 		})
 	}
 

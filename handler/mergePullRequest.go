@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/buger/jsonparser"
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia-storage/app"
 	"github.com/gitopia/gitopia-storage/app/consumer"
@@ -26,7 +25,6 @@ import (
 )
 
 const (
-	maxErrorLength = 255
 	defaultTimeout = 5 * time.Minute
 )
 
@@ -41,43 +39,27 @@ type InvokeMergePullRequestEvent struct {
 func UnmarshalInvokeMergePullRequestEvent(eventBuf []byte) ([]InvokeMergePullRequestEvent, error) {
 	var events []InvokeMergePullRequestEvent
 
-	// Helper to extract string arrays from json
-	extractStringArray := func(key string) ([]string, error) {
-		var result []string
-		value, _, _, err := jsonparser.Get(eventBuf, "events", "message."+key)
-		if err != nil {
-			if err == jsonparser.KeyPathNotFoundError {
-				return result, nil // Not found is not an error here
-			}
-			return nil, err
-		}
-		jsonparser.ArrayEach(value, func(v []byte, dt jsonparser.ValueType, offset int, err error) {
-			result = append(result, string(v))
-		})
-		return result, nil
-	}
-
-	creators, err := extractStringArray("Creator")
+	creators, err := ExtractStringArray(eventBuf, "message", "Creator")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing creator")
 	}
 
-	repositoryIDs, err := extractStringArray("RepositoryId")
+	repositoryIDs, err := ExtractStringArray(eventBuf, "message", "RepositoryId")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing repository id")
 	}
 
-	pullRequestIids, err := extractStringArray("PullRequestIid")
+	pullRequestIids, err := ExtractStringArray(eventBuf, "message", "PullRequestIid")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing pull request iid")
 	}
 
-	txHeights, err := extractStringArray("tx.height")
+	txHeights, err := ExtractStringArray(eventBuf, "message", "tx.height")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing tx height")
 	}
 
-	providers, err := extractStringArray(types.EventAttributeProviderKey)
+	providers, err := ExtractStringArray(eventBuf, "message", types.EventAttributeProviderKey)
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing provider")
 	}

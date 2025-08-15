@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/buger/jsonparser"
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia-storage/app"
 	"github.com/gitopia/gitopia-storage/pkg/merkleproof"
@@ -31,28 +30,12 @@ type ChallengeEvent struct {
 func UnmarshalChallengeEvent(eventBuf []byte) ([]ChallengeEvent, error) {
 	var events []ChallengeEvent
 
-	// Helper to extract string arrays from json
-	extractStringArray := func(key string) ([]string, error) {
-		var result []string
-		value, _, _, err := jsonparser.Get(eventBuf, "events", EventChallengeCreatedType+"."+key)
-		if err != nil {
-			if err == jsonparser.KeyPathNotFoundError {
-				return result, nil // Not found is not an error here
-			}
-			return nil, err
-		}
-		jsonparser.ArrayEach(value, func(v []byte, dt jsonparser.ValueType, offset int, err error) {
-			result = append(result, string(v))
-		})
-		return result, nil
-	}
-
-	challengeIDs, err := extractStringArray("challenge_id")
+	challengeIDs, err := ExtractStringArray(eventBuf, EventChallengeCreatedType, "challenge_id")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing challenge_id")
 	}
 
-	providers, err := extractStringArray("provider")
+	providers, err := ExtractStringArray(eventBuf, EventChallengeCreatedType, "provider")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing provider")
 	}
@@ -67,14 +50,14 @@ func UnmarshalChallengeEvent(eventBuf []byte) ([]ChallengeEvent, error) {
 	}
 
 	for i := 0; i < len(challengeIDs); i++ {
-		challengeId, err := strconv.ParseUint(strings.Trim(challengeIDs[i], `"`), 10, 64)
+		challengeId, err := strconv.ParseUint(challengeIDs[i], 10, 64)
 		if err != nil {
 			return nil, errors.Wrap(err, "error parsing challenge id")
 		}
 
 		events = append(events, ChallengeEvent{
 			ChallengeId: challengeId,
-			Provider:    strings.Trim(providers[i], `"`),
+			Provider:    providers[i],
 		})
 	}
 

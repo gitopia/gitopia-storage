@@ -3,16 +3,12 @@ package handler
 import (
 	"context"
 	"strconv"
-	"strings"
 
-	"github.com/buger/jsonparser"
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia-storage/app"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
-
-const EventDeleteRepositoryType = "gitopia.gitopia.gitopia.MsgDeleteRepository"
 
 type DeleteRepositoryEvent struct {
 	Creator      string
@@ -23,33 +19,17 @@ type DeleteRepositoryEvent struct {
 func UnmarshalDeleteRepositoryEvent(eventBuf []byte) ([]DeleteRepositoryEvent, error) {
 	var events []DeleteRepositoryEvent
 
-	// Helper to extract string arrays from json
-	extractStringArray := func(key string) ([]string, error) {
-		var result []string
-		value, _, _, err := jsonparser.Get(eventBuf, "events", "message."+key)
-		if err != nil {
-			if err == jsonparser.KeyPathNotFoundError {
-				return result, nil // Not found is not an error here
-			}
-			return nil, err
-		}
-		jsonparser.ArrayEach(value, func(v []byte, dt jsonparser.ValueType, offset int, err error) {
-			result = append(result, string(v))
-		})
-		return result, nil
-	}
-
-	creators, err := extractStringArray("Creator")
+	creators, err := ExtractStringArray(eventBuf, "message", "Creator")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing creator")
 	}
 
-	repoIDs, err := extractStringArray("RepositoryId")
+	repoIDs, err := ExtractStringArray(eventBuf, "message", "RepositoryId")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing repository id")
 	}
 
-	providers, err := extractStringArray("Provider")
+	providers, err := ExtractStringArray(eventBuf, "message", "Provider")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing provider")
 	}
@@ -64,15 +44,15 @@ func UnmarshalDeleteRepositoryEvent(eventBuf []byte) ([]DeleteRepositoryEvent, e
 	}
 
 	for i := 0; i < len(creators); i++ {
-		repoId, err := strconv.ParseUint(strings.Trim(repoIDs[i], `"`), 10, 64)
+		repoId, err := strconv.ParseUint(repoIDs[i], 10, 64)
 		if err != nil {
 			return nil, errors.Wrap(err, "error parsing repository id")
 		}
 
 		events = append(events, DeleteRepositoryEvent{
-			Creator:      strings.Trim(creators[i], `"`),
+			Creator:      creators[i],
 			RepositoryId: repoId,
-			Provider:     strings.Trim(providers[i], `"`),
+			Provider:     providers[i],
 		})
 	}
 

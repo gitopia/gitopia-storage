@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"strings"
 
 	"github.com/buger/jsonparser"
 	"github.com/gitopia/gitopia-go/logger"
@@ -23,28 +22,12 @@ type DeleteStorageObjectEvent struct {
 func UnmarshalDeleteStorageObjectEvent(eventBuf []byte) ([]DeleteStorageObjectEvent, error) {
 	var events []DeleteStorageObjectEvent
 
-	// Helper to extract string arrays from json
-	extractStringArray := func(key string) ([]string, error) {
-		var result []string
-		value, _, _, err := jsonparser.Get(eventBuf, "events", EventDeleteStorageObjectType+"."+key)
-		if err != nil {
-			if err == jsonparser.KeyPathNotFoundError {
-				return result, nil // Not found is not an error here
-			}
-			return nil, err
-		}
-		jsonparser.ArrayEach(value, func(v []byte, dt jsonparser.ValueType, offset int, err error) {
-			result = append(result, string(v))
-		})
-		return result, nil
-	}
-
-	providers, err := extractStringArray("provider")
+	providers, err := ExtractStringArray(eventBuf, EventDeleteStorageObjectType, "provider")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing provider")
 	}
 
-	cidsArray, err := extractStringArray("cids")
+	cidsArray, err := ExtractStringArray(eventBuf, EventDeleteStorageObjectType, "cids")
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing cids")
 	}
@@ -60,16 +43,16 @@ func UnmarshalDeleteStorageObjectEvent(eventBuf []byte) ([]DeleteStorageObjectEv
 
 	for i := 0; i < len(providers); i++ {
 		var cids []string
-		cidsValue := strings.Trim(cidsArray[i], `"`)
+		cidsValue := cidsArray[i]
 		_, err := jsonparser.ArrayEach([]byte(cidsValue), func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
-			cids = append(cids, strings.Trim(string(value), `"`))
+			cids = append(cids, string(value))
 		})
 		if err != nil {
 			return nil, errors.Wrap(err, "error parsing cids array")
 		}
 
 		events = append(events, DeleteStorageObjectEvent{
-			Provider: strings.Trim(providers[i], `"`),
+			Provider: providers[i],
 			Cids:     cids,
 		})
 	}
