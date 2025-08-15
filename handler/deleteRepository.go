@@ -20,30 +20,63 @@ type DeleteRepositoryEvent struct {
 	Provider     string
 }
 
-func (e *DeleteRepositoryEvent) UnMarshal(eventBuf []byte) error {
-	creator, err := jsonparser.GetString(eventBuf, "events", "message.Creator", "[0]")
-	if err != nil {
-		return errors.Wrap(err, "error parsing creator")
-	}
-	e.Creator = strings.Trim(creator, "\"")
+func UnmarshalDeleteRepositoryEvent(eventBuf []byte) ([]DeleteRepositoryEvent, error) {
+	var events []DeleteRepositoryEvent
 
-	repoIdStr, err := jsonparser.GetString(eventBuf, "events", "message.RepositoryId", "[0]")
-	if err != nil {
-		return errors.Wrap(err, "error parsing repository id")
+	// Helper to extract string arrays from json
+	extractStringArray := func(key string) ([]string, error) {
+		var result []string
+		value, _, _, err := jsonparser.Get(eventBuf, "events", "message."+key)
+		if err != nil {
+			if err == jsonparser.KeyPathNotFoundError {
+				return result, nil // Not found is not an error here
+			}
+			return nil, err
+		}
+		jsonparser.ArrayEach(value, func(v []byte, dt jsonparser.ValueType, offset int, err error) {
+			result = append(result, string(v))
+		})
+		return result, nil
 	}
-	repoId, err := strconv.ParseUint(strings.Trim(repoIdStr, "\""), 10, 64)
-	if err != nil {
-		return errors.Wrap(err, "error parsing repository id")
-	}
-	e.RepositoryId = repoId
 
-	provider, err := jsonparser.GetString(eventBuf, "events", "message.Provider", "[0]")
+	creators, err := extractStringArray("Creator")
 	if err != nil {
-		return errors.Wrap(err, "error parsing provider")
+		return nil, errors.Wrap(err, "error parsing creator")
 	}
-	e.Provider = strings.Trim(provider, "\"")
 
-	return nil
+	repoIDs, err := extractStringArray("RepositoryId")
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing repository id")
+	}
+
+	providers, err := extractStringArray("Provider")
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing provider")
+	}
+
+	// Basic validation
+	if len(creators) == 0 {
+		return events, nil // No events to process
+	}
+
+	if !(len(creators) == len(repoIDs) && len(creators) == len(providers)) {
+		return nil, errors.New("mismatched attribute array lengths for DeleteRepositoryEvent")
+	}
+
+	for i := 0; i < len(creators); i++ {
+		repoId, err := strconv.ParseUint(strings.Trim(repoIDs[i], `"`), 10, 64)
+		if err != nil {
+			return nil, errors.Wrap(err, "error parsing repository id")
+		}
+
+		events = append(events, DeleteRepositoryEvent{
+			Creator:      strings.Trim(creators[i], `"`),
+			RepositoryId: repoId,
+			Provider:     strings.Trim(providers[i], `"`),
+		})
+	}
+
+	return events, nil
 }
 
 type DeleteRepositoryEventHandler struct {
@@ -57,13 +90,22 @@ func NewDeleteRepositoryEventHandler(g *app.GitopiaProxy) DeleteRepositoryEventH
 }
 
 func (h *DeleteRepositoryEventHandler) Handle(ctx context.Context, eventBuf []byte) error {
-	event := &DeleteRepositoryEvent{}
-	err := event.UnMarshal(eventBuf)
+	events, err := UnmarshalDeleteRepositoryEvent(eventBuf)
 	if err != nil {
 		return errors.WithMessage(err, "event parse error")
 	}
 
-	return h.Process(ctx, *event)
+	for _, event := range events {
+		if err := h.Process(ctx, event); err != nil {
+			// Log error and continue processing other events
+			logger.FromContext(ctx).WithFields(logrus.Fields{
+				"repository_id": event.RepositoryId,
+				"provider":      event.Provider,
+			}).WithError(err).Error("failed to process DeleteRepositoryEvent")
+		}
+	}
+
+	return nil
 }
 
 func (h *DeleteRepositoryEventHandler) Process(ctx context.Context, event DeleteRepositoryEvent) error {

@@ -34,91 +34,115 @@ type ReleaseAssetsUpdatedEvent struct {
 	Provider     string
 }
 
-func (e *ReleaseAssetsUpdatedEvent) UnMarshal(eventBuf []byte) error {
-	repoIdStr, err := jsonparser.GetString(eventBuf, "events", EventReleaseAssetsUpdatedType+"."+"repository_id", "[0]")
-	if err != nil {
-		return errors.Wrap(err, "error parsing repository id")
-	}
-	repoIdStr = strings.Trim(repoIdStr, "\"")
-	repoId, err := strconv.ParseUint(repoIdStr, 10, 64)
-	if err != nil {
-		return errors.Wrap(err, "error parsing repository id")
-	}
+func UnmarshalReleaseAssetsUpdatedEvent(eventBuf []byte) ([]ReleaseAssetsUpdatedEvent, error) {
+	var events []ReleaseAssetsUpdatedEvent
 
-	tag, err := jsonparser.GetString(eventBuf, "events", EventReleaseAssetsUpdatedType+"."+"tag", "[0]")
-	if err != nil {
-		return errors.Wrap(err, "error parsing tag")
-	}
-	tag = strings.Trim(tag, "\"")
-
-	provider, err := jsonparser.GetString(eventBuf, "events", EventReleaseAssetsUpdatedType+"."+"provider", "[0]")
-	if err != nil {
-		return errors.Wrap(err, "error parsing provider")
-	} else {
-		provider = strings.Trim(provider, "\"")
-	}
-
-	// Parse assets array
-	assets := make([]ReleaseAssetUpdate, 0)
-
-	// First get the assets value as a string
-	assetsStr, err := jsonparser.GetString(eventBuf, "events", EventReleaseAssetsUpdatedType+"."+"assets", "[0]")
-	if err != nil {
-		return errors.Wrap(err, "error getting assets string")
-	}
-
-	// Parse the string as JSON array
-	_, err = jsonparser.ArrayEach([]byte(assetsStr), func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
+	// Helper to extract string arrays from json
+	extractStringArray := func(key string) ([]string, error) {
+		var result []string
+		value, _, _, err := jsonparser.Get(eventBuf, "events", EventReleaseAssetsUpdatedType+"."+key)
 		if err != nil {
-			return
+			if err == jsonparser.KeyPathNotFoundError {
+				return result, nil // Not found is not an error here
+			}
+			return nil, err
 		}
-
-		asset := ReleaseAssetUpdate{}
-
-		name, err := jsonparser.GetString(value, "name")
-		if err == nil {
-			asset.Name = strings.Trim(name, "\"")
-		}
-
-		newCid, err := jsonparser.GetString(value, "cid")
-		if err == nil {
-			asset.Cid = strings.Trim(newCid, "\"")
-		}
-
-		oldCid, err := jsonparser.GetString(value, "old_cid")
-		if err == nil {
-			asset.OldCid = strings.Trim(oldCid, "\"")
-		}
-
-		sha256, err := jsonparser.GetString(value, "sha256")
-		if err == nil {
-			asset.Sha256 = strings.Trim(sha256, "\"")
-		}
-
-		oldSha256, err := jsonparser.GetString(value, "old_sha256")
-		if err == nil {
-			asset.OldSha256 = strings.Trim(oldSha256, "\"")
-		}
-
-		// Parse delete field
-		deleteFlag, err := jsonparser.GetBoolean(value, "delete")
-		if err == nil {
-			asset.Delete = deleteFlag
-		}
-
-		assets = append(assets, asset)
-	})
-
-	if err != nil {
-		return errors.Wrap(err, "error parsing assets")
+		jsonparser.ArrayEach(value, func(v []byte, dt jsonparser.ValueType, offset int, err error) {
+			result = append(result, string(v))
+		})
+		return result, nil
 	}
 
-	e.RepositoryId = repoId
-	e.Tag = tag
-	e.Assets = assets
-	e.Provider = provider
+	repoIDs, err := extractStringArray("repository_id")
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing repository_id")
+	}
 
-	return nil
+	tags, err := extractStringArray("tag")
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing tag")
+	}
+
+	providers, err := extractStringArray("provider")
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing provider")
+	}
+
+	assetsArray, err := extractStringArray("assets")
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing assets")
+	}
+
+	// Basic validation
+	if len(repoIDs) == 0 {
+		return events, nil // No events to process
+	}
+
+	if !(len(repoIDs) == len(tags) && len(repoIDs) == len(providers) && len(repoIDs) == len(assetsArray)) {
+		return nil, errors.New("mismatched attribute array lengths for ReleaseAssetsUpdatedEvent")
+	}
+
+	for i := 0; i < len(repoIDs); i++ {
+		repoId, err := strconv.ParseUint(strings.Trim(repoIDs[i], `"`), 10, 64)
+		if err != nil {
+			return nil, errors.Wrap(err, "error parsing repository id")
+		}
+
+		var assets []ReleaseAssetUpdate
+		assetsStr := strings.Trim(assetsArray[i], `"`)
+		_, err = jsonparser.ArrayEach([]byte(assetsStr), func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
+			if err != nil {
+				return
+			}
+
+			asset := ReleaseAssetUpdate{}
+
+			name, err := jsonparser.GetString(value, "name")
+			if err == nil {
+				asset.Name = strings.Trim(name, "\"")
+			}
+
+			newCid, err := jsonparser.GetString(value, "cid")
+			if err == nil {
+				asset.Cid = strings.Trim(newCid, "\"")
+			}
+
+			oldCid, err := jsonparser.GetString(value, "old_cid")
+			if err == nil {
+				asset.OldCid = strings.Trim(oldCid, "\"")
+			}
+
+			sha256, err := jsonparser.GetString(value, "sha256")
+			if err == nil {
+				asset.Sha256 = strings.Trim(sha256, "\"")
+			}
+
+			oldSha256, err := jsonparser.GetString(value, "old_sha256")
+			if err == nil {
+				asset.OldSha256 = strings.Trim(oldSha256, "\"")
+			}
+
+			// Parse delete field
+			deleteFlag, err := jsonparser.GetBoolean(value, "delete")
+			if err == nil {
+				asset.Delete = deleteFlag
+			}
+
+			assets = append(assets, asset)
+		})
+		if err != nil {
+			return nil, errors.Wrap(err, "error parsing assets")
+		}
+
+		events = append(events, ReleaseAssetsUpdatedEvent{
+			RepositoryId: repoId,
+			Tag:          strings.Trim(tags[i], `"`),
+			Assets:       assets,
+			Provider:     strings.Trim(providers[i], `"`),
+		})
+	}
+
+	return events, nil
 }
 
 type ReleaseAssetsUpdatedEventHandler struct {
@@ -134,13 +158,22 @@ func NewReleaseAssetsUpdatedEventHandler(g *app.GitopiaProxy, pinataClient *Pina
 }
 
 func (h *ReleaseAssetsUpdatedEventHandler) Handle(ctx context.Context, eventBuf []byte) error {
-	event := &ReleaseAssetsUpdatedEvent{}
-	err := event.UnMarshal(eventBuf)
+	events, err := UnmarshalReleaseAssetsUpdatedEvent(eventBuf)
 	if err != nil {
 		return errors.WithMessage(err, "event parse error")
 	}
 
-	return h.Process(ctx, *event)
+	for _, event := range events {
+		if err := h.Process(ctx, event); err != nil {
+			// Log error and continue processing other events
+			logger.FromContext(ctx).WithFields(logrus.Fields{
+				"repository_id": event.RepositoryId,
+				"tag":           event.Tag,
+			}).WithError(err).Error("failed to process ReleaseAssetsUpdatedEvent")
+		}
+	}
+
+	return nil
 }
 
 func (h *ReleaseAssetsUpdatedEventHandler) Process(ctx context.Context, event ReleaseAssetsUpdatedEvent) error {

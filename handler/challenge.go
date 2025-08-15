@@ -28,27 +28,57 @@ type ChallengeEvent struct {
 	Provider    string
 }
 
-func (e *ChallengeEvent) UnMarshal(eventBuf []byte) error {
-	challengeIdStr, err := jsonparser.GetString(eventBuf, "events", EventChallengeCreatedType+".challenge_id", "[0]")
-	if err != nil {
-		return errors.Wrap(err, "error parsing challenge id")
-	}
-	challengeIdStr = strings.Trim(challengeIdStr, "\"")
-	challengeId, err := strconv.ParseUint(challengeIdStr, 10, 64)
-	if err != nil {
-		return errors.Wrap(err, "error parsing challenge id")
+func UnmarshalChallengeEvent(eventBuf []byte) ([]ChallengeEvent, error) {
+	var events []ChallengeEvent
+
+	// Helper to extract string arrays from json
+	extractStringArray := func(key string) ([]string, error) {
+		var result []string
+		value, _, _, err := jsonparser.Get(eventBuf, "events", EventChallengeCreatedType+"."+key)
+		if err != nil {
+			if err == jsonparser.KeyPathNotFoundError {
+				return result, nil // Not found is not an error here
+			}
+			return nil, err
+		}
+		jsonparser.ArrayEach(value, func(v []byte, dt jsonparser.ValueType, offset int, err error) {
+			result = append(result, string(v))
+		})
+		return result, nil
 	}
 
-	provider, err := jsonparser.GetString(eventBuf, "events", EventChallengeCreatedType+".provider", "[0]")
+	challengeIDs, err := extractStringArray("challenge_id")
 	if err != nil {
-		return errors.Wrap(err, "error parsing provider address")
+		return nil, errors.Wrap(err, "error parsing challenge_id")
 	}
-	provider = strings.Trim(provider, "\"")
 
-	e.ChallengeId = challengeId
-	e.Provider = provider
+	providers, err := extractStringArray("provider")
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing provider")
+	}
 
-	return nil
+	// Basic validation
+	if len(challengeIDs) == 0 {
+		return events, nil // No events to process
+	}
+
+	if len(challengeIDs) != len(providers) {
+		return nil, errors.New("mismatched attribute array lengths for ChallengeEvent")
+	}
+
+	for i := 0; i < len(challengeIDs); i++ {
+		challengeId, err := strconv.ParseUint(strings.Trim(challengeIDs[i], `"`), 10, 64)
+		if err != nil {
+			return nil, errors.Wrap(err, "error parsing challenge id")
+		}
+
+		events = append(events, ChallengeEvent{
+			ChallengeId: challengeId,
+			Provider:    strings.Trim(providers[i], `"`),
+		})
+	}
+
+	return events, nil
 }
 
 type ChallengeEventHandler struct {
@@ -60,13 +90,22 @@ func NewChallengeEventHandler(g *app.GitopiaProxy) *ChallengeEventHandler {
 }
 
 func (h *ChallengeEventHandler) Handle(ctx context.Context, eventBuf []byte) error {
-	event := &ChallengeEvent{}
-	err := event.UnMarshal(eventBuf)
+	events, err := UnmarshalChallengeEvent(eventBuf)
 	if err != nil {
 		return errors.WithMessage(err, "event parse error")
 	}
 
-	return h.Process(ctx, *event)
+	for _, event := range events {
+		if err := h.Process(ctx, event); err != nil {
+			// Log error and continue processing other events
+			logger.FromContext(ctx).WithFields(logrus.Fields{
+				"challenge_id": event.ChallengeId,
+				"provider":     event.Provider,
+			}).WithError(err).Error("failed to process ChallengeEvent")
+		}
+	}
+
+	return nil
 }
 
 func (h *ChallengeEventHandler) Process(ctx context.Context, event ChallengeEvent) error {

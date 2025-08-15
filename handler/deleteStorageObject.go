@@ -13,6 +13,70 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+const EventDeleteStorageObjectType = "gitopia.gitopia.storage.EventDeleteStorageObject"
+
+type DeleteStorageObjectEvent struct {
+	Provider string
+	Cids     []string
+}
+
+func UnmarshalDeleteStorageObjectEvent(eventBuf []byte) ([]DeleteStorageObjectEvent, error) {
+	var events []DeleteStorageObjectEvent
+
+	// Helper to extract string arrays from json
+	extractStringArray := func(key string) ([]string, error) {
+		var result []string
+		value, _, _, err := jsonparser.Get(eventBuf, "events", EventDeleteStorageObjectType+"."+key)
+		if err != nil {
+			if err == jsonparser.KeyPathNotFoundError {
+				return result, nil // Not found is not an error here
+			}
+			return nil, err
+		}
+		jsonparser.ArrayEach(value, func(v []byte, dt jsonparser.ValueType, offset int, err error) {
+			result = append(result, string(v))
+		})
+		return result, nil
+	}
+
+	providers, err := extractStringArray("provider")
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing provider")
+	}
+
+	cidsArray, err := extractStringArray("cids")
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing cids")
+	}
+
+	// Basic validation
+	if len(providers) == 0 {
+		return events, nil // No events to process
+	}
+
+	if len(providers) != len(cidsArray) {
+		return nil, errors.New("mismatched attribute array lengths for DeleteStorageObjectEvent")
+	}
+
+	for i := 0; i < len(providers); i++ {
+		var cids []string
+		cidsValue := strings.Trim(cidsArray[i], `"`)
+		_, err := jsonparser.ArrayEach([]byte(cidsValue), func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
+			cids = append(cids, strings.Trim(string(value), `"`))
+		})
+		if err != nil {
+			return nil, errors.Wrap(err, "error parsing cids array")
+		}
+
+		events = append(events, DeleteStorageObjectEvent{
+			Provider: strings.Trim(providers[i], `"`),
+			Cids:     cids,
+		})
+	}
+
+	return events, nil
+}
+
 type DeleteStorageObjectEventHandler struct {
 	gc                *app.GitopiaProxy
 	ipfsClusterClient ipfsclusterclient.Client
@@ -26,35 +90,30 @@ func NewDeleteStorageObjectEventHandler(g *app.GitopiaProxy, ipfsClusterClient i
 }
 
 func (h *DeleteStorageObjectEventHandler) Handle(ctx context.Context, eventBuf []byte) error {
-	provider, err := jsonparser.GetString(eventBuf, "events", "gitopia.gitopia.storage.EventDeleteStorageObject.provider", "[0]")
+	events, err := UnmarshalDeleteStorageObjectEvent(eventBuf)
 	if err != nil {
-		return errors.Wrap(err, "error parsing provider")
+		return errors.WithMessage(err, "event parse error")
 	}
-	provider = strings.Trim(provider, "\"")
 
+	for _, event := range events {
+		if err := h.Process(ctx, event); err != nil {
+			// Log error and continue processing other events
+			logger.FromContext(ctx).WithFields(logrus.Fields{
+				"provider": event.Provider,
+			}).WithError(err).Error("failed to process DeleteStorageObjectEvent")
+		}
+	}
+
+	return nil
+}
+
+func (h *DeleteStorageObjectEventHandler) Process(ctx context.Context, event DeleteStorageObjectEvent) error {
 	// Skip processing if message is not meant for this provider
-	if !h.gc.CheckProvider(provider) {
+	if !h.gc.CheckProvider(event.Provider) {
 		return nil
 	}
 
-	var cids []string
-	cidsValue, err := jsonparser.GetString(eventBuf, "events", "gitopia.gitopia.storage.EventDeleteStorageObject.cids", "[0]")
-	if err != nil {
-		return errors.Wrap(err, "error parsing cids value")
-	}
-
-	// Trim the quotes from the value string
-	cidsValue = strings.Trim(cidsValue, "\"")
-
-	// Parse the JSON array string
-	_, err = jsonparser.ArrayEach([]byte(cidsValue), func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
-		cids = append(cids, strings.Trim(string(value), "\""))
-	})
-	if err != nil {
-		return errors.Wrap(err, "error parsing cids array")
-	}
-
-	for _, cid := range cids {
+	for _, cid := range event.Cids {
 		if cid != "" {
 			// Get packfile reference count
 			refCount, err := h.gc.StorageCidReferenceCount(ctx, cid)

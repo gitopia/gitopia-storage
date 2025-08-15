@@ -36,38 +36,72 @@ type RepositoryDeletedEvent struct {
 	LfsObjects    []LFSObject
 }
 
-func (e *RepositoryDeletedEvent) UnMarshal(eventBuf []byte) error {
-	repoIdStr, err := jsonparser.GetString(eventBuf, "events", EventRepositoryDeletedType+".repository_id", "[0]")
+func UnmarshalRepositoryDeletedEvent(eventBuf []byte) ([]RepositoryDeletedEvent, error) {
+	var events []RepositoryDeletedEvent
+
+	// Helper to extract string arrays from json
+	extractStringArray := func(key string) ([]string, error) {
+		var result []string
+		value, _, _, err := jsonparser.Get(eventBuf, "events", EventRepositoryDeletedType+"."+key)
+		if err != nil {
+			if err == jsonparser.KeyPathNotFoundError {
+				return result, nil // Not found is not an error here
+			}
+			return nil, err
+		}
+		jsonparser.ArrayEach(value, func(v []byte, dt jsonparser.ValueType, offset int, err error) {
+			result = append(result, string(v))
+		})
+		return result, nil
+	}
+
+	repoIDs, err := extractStringArray("repository_id")
 	if err != nil {
-		return errors.Wrap(err, "error parsing repository id")
+		return nil, errors.Wrap(err, "error parsing repository_id")
 	}
-	repoId, err := strconv.ParseUint(strings.Trim(repoIdStr, "\""), 10, 64)
+
+	providers, err := extractStringArray("provider")
 	if err != nil {
-		return errors.Wrap(err, "error parsing repository id")
-	}
-	e.RepositoryId = repoId
-
-	provider, err := jsonparser.GetString(eventBuf, "events", EventRepositoryDeletedType+".provider", "[0]")
-	if err == nil {
-		e.Provider = strings.Trim(provider, "\"")
+		return nil, errors.Wrap(err, "error parsing provider")
 	}
 
-	packfileCid, err := jsonparser.GetString(eventBuf, "events", EventRepositoryDeletedType+".packfile_cid", "[0]")
-	if err == nil {
-		e.PackfileCid = strings.Trim(packfileCid, "\"")
+	packfileCids, err := extractStringArray("packfile_cid")
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing packfile_cid")
 	}
 
-	packfileName, err := jsonparser.GetString(eventBuf, "events", EventRepositoryDeletedType+".packfile_name", "[0]")
-	if err == nil {
-		e.PackfileName = strings.Trim(packfileName, "\"")
+	packfileNames, err := extractStringArray("packfile_name")
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing packfile_name")
 	}
 
-	releaseAssetsStr, err := jsonparser.GetString(eventBuf, "events", EventRepositoryDeletedType+".release_assets", "[0]")
-	if err != nil && err != jsonparser.KeyPathNotFoundError {
-		return errors.Wrap(err, "error parsing release assets")
+	releaseAssetsArray, err := extractStringArray("release_assets")
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing release_assets")
 	}
 
-	if err == nil {
+	lfsObjectsArray, err := extractStringArray("lfs_objects")
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing lfs_objects")
+	}
+
+	// Basic validation
+	if len(repoIDs) == 0 {
+		return events, nil // No events to process
+	}
+
+	if !(len(repoIDs) == len(providers) && len(repoIDs) == len(packfileCids) && len(repoIDs) == len(packfileNames) && len(repoIDs) == len(releaseAssetsArray) && len(repoIDs) == len(lfsObjectsArray)) {
+		return nil, errors.New("mismatched attribute array lengths for RepositoryDeletedEvent")
+	}
+
+	for i := 0; i < len(repoIDs); i++ {
+		repoId, err := strconv.ParseUint(strings.Trim(repoIDs[i], `"`), 10, 64)
+		if err != nil {
+			return nil, errors.Wrap(err, "error parsing repository id")
+		}
+
+		var releaseAssets []ReleaseAsset
+		releaseAssetsStr := strings.Trim(releaseAssetsArray[i], `"`)
 		_, err = jsonparser.ArrayEach([]byte(releaseAssetsStr), func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
 			asset := ReleaseAsset{}
 			name, _ := jsonparser.GetString(value, "name")
@@ -78,33 +112,37 @@ func (e *RepositoryDeletedEvent) UnMarshal(eventBuf []byte) error {
 			asset.Sha = sha
 			tag, _ := jsonparser.GetString(value, "tag")
 			asset.Tag = tag
-			e.ReleaseAssets = append(e.ReleaseAssets, asset)
+			releaseAssets = append(releaseAssets, asset)
 		})
 		if err != nil {
-			return errors.Wrap(err, "error parsing release assets")
+			return nil, errors.Wrap(err, "error parsing release assets")
 		}
-	}
 
-	lfsObjectsStr, err := jsonparser.GetString(eventBuf, "events", EventRepositoryDeletedType+".lfs_objects", "[0]")
-	if err != nil && err != jsonparser.KeyPathNotFoundError {
-		return errors.Wrap(err, "error parsing lfs objects")
-	}
-
-	if err == nil {
+		var lfsObjects []LFSObject
+		lfsObjectsStr := strings.Trim(lfsObjectsArray[i], `"`)
 		_, err = jsonparser.ArrayEach([]byte(lfsObjectsStr), func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
 			lfsObject := LFSObject{}
 			oid, _ := jsonparser.GetString(value, "oid")
 			lfsObject.Oid = oid
 			cid, _ := jsonparser.GetString(value, "cid")
 			lfsObject.Cid = cid
-			e.LfsObjects = append(e.LfsObjects, lfsObject)
+			lfsObjects = append(lfsObjects, lfsObject)
 		})
 		if err != nil {
-			return errors.Wrap(err, "error parsing lfs objects")
+			return nil, errors.Wrap(err, "error parsing lfs objects")
 		}
+
+		events = append(events, RepositoryDeletedEvent{
+			RepositoryId:  repoId,
+			Provider:      strings.Trim(providers[i], `"`),
+			PackfileCid:   strings.Trim(packfileCids[i], `"`),
+			PackfileName:  strings.Trim(packfileNames[i], `"`),
+			ReleaseAssets: releaseAssets,
+			LfsObjects:    lfsObjects,
+		})
 	}
 
-	return nil
+	return events, nil
 }
 
 type RepositoryDeletedEventHandler struct {
@@ -120,13 +158,21 @@ func NewRepositoryDeletedEventHandler(g *app.GitopiaProxy, pinataClient *PinataC
 }
 
 func (h *RepositoryDeletedEventHandler) Handle(ctx context.Context, eventBuf []byte) error {
-	event := &RepositoryDeletedEvent{}
-	err := event.UnMarshal(eventBuf)
+	events, err := UnmarshalRepositoryDeletedEvent(eventBuf)
 	if err != nil {
 		return errors.WithMessage(err, "event parse error")
 	}
 
-	return h.Process(ctx, *event)
+	for _, event := range events {
+		if err := h.Process(ctx, event); err != nil {
+			// Log error and continue processing other events
+			logger.FromContext(ctx).WithFields(logrus.Fields{
+				"repository_id": event.RepositoryId,
+			}).WithError(err).Error("failed to process RepositoryDeletedEvent")
+		}
+	}
+
+	return nil
 }
 
 func (h *RepositoryDeletedEventHandler) Process(ctx context.Context, event RepositoryDeletedEvent) error {

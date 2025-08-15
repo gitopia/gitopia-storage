@@ -28,59 +28,86 @@ type PackfileUpdatedEvent struct {
 	Deleted      bool
 }
 
-func (e *PackfileUpdatedEvent) UnMarshal(eventBuf []byte) error {
-	repoIdStr, err := jsonparser.GetString(eventBuf, "events", EventPackfileUpdatedType+"."+"repository_id", "[0]")
-	if err != nil {
-		return errors.Wrap(err, "error parsing repository id")
-	}
-	repoIdStr = strings.Trim(repoIdStr, "\"")
-	repoId, err := strconv.ParseUint(repoIdStr, 10, 64)
-	if err != nil {
-		return errors.Wrap(err, "error parsing repository id")
+func UnmarshalPackfileUpdatedEvent(eventBuf []byte) ([]PackfileUpdatedEvent, error) {
+	var events []PackfileUpdatedEvent
+
+	// Helper to extract string arrays from json
+	extractStringArray := func(key string) ([]string, error) {
+		var result []string
+		value, _, _, err := jsonparser.Get(eventBuf, "events", EventPackfileUpdatedType+"."+key)
+		if err != nil {
+			if err == jsonparser.KeyPathNotFoundError {
+				return result, nil // Not found is not an error here
+			}
+			return nil, err
+		}
+		jsonparser.ArrayEach(value, func(v []byte, dt jsonparser.ValueType, offset int, err error) {
+			result = append(result, string(v))
+		})
+		return result, nil
 	}
 
-	newCid, err := jsonparser.GetString(eventBuf, "events", EventPackfileUpdatedType+"."+"new_cid", "[0]")
+	repoIDs, err := extractStringArray("repository_id")
 	if err != nil {
-		return errors.Wrap(err, "error parsing new cid")
-	}
-	newCid = strings.Trim(newCid, "\"")
-
-	oldCid, err := jsonparser.GetString(eventBuf, "events", EventPackfileUpdatedType+"."+"old_cid", "[0]")
-	if err != nil {
-		return errors.Wrap(err, "error parsing old cid")
-	}
-	oldCid = strings.Trim(oldCid, "\"")
-
-	newName, err := jsonparser.GetString(eventBuf, "events", EventPackfileUpdatedType+"."+"new_name", "[0]")
-	if err != nil {
-		return errors.Wrap(err, "error parsing new name")
-	}
-	newName = strings.Trim(newName, "\"")
-
-	oldName, err := jsonparser.GetString(eventBuf, "events", EventPackfileUpdatedType+"."+"old_name", "[0]")
-	if err != nil {
-		return errors.Wrap(err, "error parsing old name")
-	}
-	oldName = strings.Trim(oldName, "\"")
-
-	deletedStr, err := jsonparser.GetString(eventBuf, "events", EventPackfileUpdatedType+"."+"deleted", "[0]")
-	if err != nil {
-		return errors.Wrap(err, "error parsing deleted field")
-	}
-	deletedStr = strings.Trim(deletedStr, "\"")
-	deleted, err := strconv.ParseBool(deletedStr)
-	if err != nil {
-		return errors.Wrap(err, "error parsing deleted field as boolean")
+		return nil, errors.Wrap(err, "error parsing repository_id")
 	}
 
-	e.RepositoryId = repoId
-	e.NewCid = newCid
-	e.OldCid = oldCid
-	e.NewName = newName
-	e.OldName = oldName
-	e.Deleted = deleted
+	newCids, err := extractStringArray("new_cid")
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing new_cid")
+	}
 
-	return nil
+	oldCids, err := extractStringArray("old_cid")
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing old_cid")
+	}
+
+	newNames, err := extractStringArray("new_name")
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing new_name")
+	}
+
+	oldNames, err := extractStringArray("old_name")
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing old_name")
+	}
+
+	deleteds, err := extractStringArray("deleted")
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing deleted")
+	}
+
+	// Basic validation
+	if len(repoIDs) == 0 {
+		return events, nil // No events to process
+	}
+
+	if !(len(repoIDs) == len(newCids) && len(repoIDs) == len(oldCids) && len(repoIDs) == len(newNames) && len(repoIDs) == len(oldNames) && len(repoIDs) == len(deleteds)) {
+		return nil, errors.New("mismatched attribute array lengths for PackfileUpdatedEvent")
+	}
+
+	for i := 0; i < len(repoIDs); i++ {
+		repoId, err := strconv.ParseUint(strings.Trim(repoIDs[i], `"`), 10, 64)
+		if err != nil {
+			return nil, errors.Wrap(err, "error parsing repository id")
+		}
+
+		deleted, err := strconv.ParseBool(strings.Trim(deleteds[i], `"`))
+		if err != nil {
+			return nil, errors.Wrap(err, "error parsing deleted flag")
+		}
+
+		events = append(events, PackfileUpdatedEvent{
+			RepositoryId: repoId,
+			NewCid:       strings.Trim(newCids[i], `"`),
+			OldCid:       strings.Trim(oldCids[i], `"`),
+			NewName:      strings.Trim(newNames[i], `"`),
+			OldName:      strings.Trim(oldNames[i], `"`),
+			Deleted:      deleted,
+		})
+	}
+
+	return events, nil
 }
 
 type PackfileUpdatedEventHandler struct {
@@ -96,13 +123,23 @@ func NewPackfileUpdatedEventHandler(g *app.GitopiaProxy, pinataClient *PinataCli
 }
 
 func (h *PackfileUpdatedEventHandler) Handle(ctx context.Context, eventBuf []byte) error {
-	event := &PackfileUpdatedEvent{}
-	err := event.UnMarshal(eventBuf)
+	events, err := UnmarshalPackfileUpdatedEvent(eventBuf)
 	if err != nil {
 		return errors.WithMessage(err, "event parse error")
 	}
 
-	return h.Process(ctx, *event)
+	for _, event := range events {
+		if err := h.Process(ctx, event); err != nil {
+			// Log error and continue processing other events
+			logger.FromContext(ctx).WithFields(logrus.Fields{
+				"repository_id": event.RepositoryId,
+				"new_cid":       event.NewCid,
+				"old_cid":       event.OldCid,
+			}).WithError(err).Error("failed to process PackfileUpdatedEvent")
+		}
+	}
+
+	return nil
 }
 
 func (h *PackfileUpdatedEventHandler) Process(ctx context.Context, event PackfileUpdatedEvent) error {

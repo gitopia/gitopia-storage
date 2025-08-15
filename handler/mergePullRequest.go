@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/buger/jsonparser"
-	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia-storage/app"
 	"github.com/gitopia/gitopia-storage/app/consumer"
@@ -39,52 +38,85 @@ type InvokeMergePullRequestEvent struct {
 	Provider       string
 }
 
-// tm event codec
-func (e *InvokeMergePullRequestEvent) UnMarshal(eventBuf []byte) error {
-	creator, err := jsonparser.GetString(eventBuf, "events", "message.Creator", "[0]")
-	if err != nil {
-		return errors.Wrap(err, "error parsing creator")
+func UnmarshalInvokeMergePullRequestEvent(eventBuf []byte) ([]InvokeMergePullRequestEvent, error) {
+	var events []InvokeMergePullRequestEvent
+
+	// Helper to extract string arrays from json
+	extractStringArray := func(key string) ([]string, error) {
+		var result []string
+		value, _, _, err := jsonparser.Get(eventBuf, "events", "message."+key)
+		if err != nil {
+			if err == jsonparser.KeyPathNotFoundError {
+				return result, nil // Not found is not an error here
+			}
+			return nil, err
+		}
+		jsonparser.ArrayEach(value, func(v []byte, dt jsonparser.ValueType, offset int, err error) {
+			result = append(result, string(v))
+		})
+		return result, nil
 	}
 
-	repositoryIdStr, err := jsonparser.GetString(eventBuf, "events", "message.RepositoryId", "[0]")
+	creators, err := extractStringArray("Creator")
 	if err != nil {
-		errors.Wrap(err, "error parsing repository id")
-	}
-	repositoryId, err := strconv.ParseUint(repositoryIdStr, 10, 64)
-	if err != nil {
-		return errors.Wrap(err, "error parsing repository id")
+		return nil, errors.Wrap(err, "error parsing creator")
 	}
 
-	pullRequestIid, err := jsonparser.GetString(eventBuf, "events", "message.PullRequestIid", "[0]")
+	repositoryIDs, err := extractStringArray("RepositoryId")
 	if err != nil {
-		errors.Wrap(err, "error parsing pull request iid")
-	}
-	iid, err := strconv.ParseUint(pullRequestIid, 10, 64)
-	if err != nil {
-		return errors.Wrap(err, "error parsing pull request iid")
+		return nil, errors.Wrap(err, "error parsing repository id")
 	}
 
-	h, err := jsonparser.GetString(eventBuf, "events", "tx.height", "[0]")
+	pullRequestIids, err := extractStringArray("PullRequestIid")
 	if err != nil {
-		return errors.Wrap(err, "error parsing tx height")
-	}
-	height, err := strconv.ParseUint(h, 10, 64)
-	if err != nil {
-		return errors.Wrap(err, "error parsing height")
+		return nil, errors.Wrap(err, "error parsing pull request iid")
 	}
 
-	provider, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+types.EventAttributeProviderKey, "[0]")
+	txHeights, err := extractStringArray("tx.height")
 	if err != nil {
-		return errors.Wrap(err, "error parsing provider")
+		return nil, errors.Wrap(err, "error parsing tx height")
 	}
 
-	e.Creator = creator
-	e.RepositoryId = repositoryId
-	e.PullRequestIid = iid
-	e.TxHeight = height
-	e.Provider = provider
+	providers, err := extractStringArray(types.EventAttributeProviderKey)
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing provider")
+	}
 
-	return nil
+	// Basic validation
+	if len(creators) == 0 {
+		return events, nil // No events to process
+	}
+
+	if !(len(creators) == len(repositoryIDs) && len(creators) == len(pullRequestIids) && len(creators) == len(txHeights) && len(creators) == len(providers)) {
+		return nil, errors.New("mismatched attribute array lengths for InvokeMergePullRequestEvent")
+	}
+
+	for i := 0; i < len(creators); i++ {
+		repositoryId, err := strconv.ParseUint(repositoryIDs[i], 10, 64)
+		if err != nil {
+			return nil, errors.Wrap(err, "error parsing repository id")
+		}
+
+		iid, err := strconv.ParseUint(pullRequestIids[i], 10, 64)
+		if err != nil {
+			return nil, errors.Wrap(err, "error parsing pull request iid")
+		}
+
+		height, err := strconv.ParseUint(txHeights[i], 10, 64)
+		if err != nil {
+			return nil, errors.Wrap(err, "error parsing height")
+		}
+
+		events = append(events, InvokeMergePullRequestEvent{
+			Creator:        creators[i],
+			RepositoryId:   repositoryId,
+			PullRequestIid: iid,
+			TxHeight:       height,
+			Provider:       providers[i],
+		})
+	}
+
+	return events, nil
 }
 
 type InvokeMergePullRequestEventHandler struct {
@@ -104,15 +136,15 @@ func NewInvokeMergePullRequestEventHandler(g *app.GitopiaProxy, c consumer.Clien
 }
 
 func (h *InvokeMergePullRequestEventHandler) Handle(ctx context.Context, eventBuf []byte) error {
-	event := &InvokeMergePullRequestEvent{}
-	err := event.UnMarshal(eventBuf)
+	events, err := UnmarshalInvokeMergePullRequestEvent(eventBuf)
 	if err != nil {
 		return errors.WithMessage(err, "event parse error")
 	}
 
-	err = h.Process(ctx, *event)
-	if err != nil {
-		return errors.WithMessage(err, "error processing event")
+	for _, event := range events {
+		if err := h.Process(ctx, event); err != nil {
+			logger.FromContext(ctx).WithField("event", event).WithError(err).Error("failed to process InvokeMergePullRequestEvent")
+		}
 	}
 
 	return nil

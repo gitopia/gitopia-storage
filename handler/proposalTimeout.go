@@ -13,35 +13,68 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+const EventProposalTimeoutType = "gitopia.gitopia.storage.EventProposalTimeout"
+
 type ProposalTimeoutEvent struct {
 	Provider string
 	Cids     []string
 }
 
-func (e *ProposalTimeoutEvent) UnMarshal(eventBuf []byte) error {
-	provider, err := jsonparser.GetString(eventBuf, "events", "gitopia.gitopia.storage.EventProposalTimeout.provider", "[0]")
-	if err != nil {
-		return errors.Wrap(err, "error parsing provider")
-	}
-	e.Provider = strings.Trim(provider, "\"")
+func UnmarshalProposalTimeoutEvent(eventBuf []byte) ([]ProposalTimeoutEvent, error) {
+	var events []ProposalTimeoutEvent
 
-	cidsValue, err := jsonparser.GetString(eventBuf, "events", "gitopia.gitopia.storage.EventDeleteStorageObject.cids", "[0]")
-	if err != nil {
-		return errors.Wrap(err, "error parsing cids value")
-	}
-
-	// Trim the quotes from the value string
-	cidsValue = strings.Trim(cidsValue, "\"")
-
-	// Parse the JSON array string
-	_, err = jsonparser.ArrayEach([]byte(cidsValue), func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
-		e.Cids = append(e.Cids, strings.Trim(string(value), "\""))
-	})
-	if err != nil {
-		return errors.Wrap(err, "error parsing cids array")
+	// Helper to extract string arrays from json
+	extractStringArray := func(key string) ([]string, error) {
+		var result []string
+		value, _, _, err := jsonparser.Get(eventBuf, "events", EventProposalTimeoutType+"."+key)
+		if err != nil {
+			if err == jsonparser.KeyPathNotFoundError {
+				return result, nil // Not found is not an error here
+			}
+			return nil, err
+		}
+		jsonparser.ArrayEach(value, func(v []byte, dt jsonparser.ValueType, offset int, err error) {
+			result = append(result, string(v))
+		})
+		return result, nil
 	}
 
-	return nil
+	providers, err := extractStringArray("provider")
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing provider")
+	}
+
+	cidsArray, err := extractStringArray("cids")
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing cids")
+	}
+
+	// Basic validation
+	if len(providers) == 0 {
+		return events, nil // No events to process
+	}
+
+	if len(providers) != len(cidsArray) {
+		return nil, errors.New("mismatched attribute array lengths for ProposalTimeoutEvent")
+	}
+
+	for i := 0; i < len(providers); i++ {
+		var cids []string
+		cidsValue := strings.Trim(cidsArray[i], `"`)
+		_, err := jsonparser.ArrayEach([]byte(cidsValue), func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
+			cids = append(cids, strings.Trim(string(value), `"`))
+		})
+		if err != nil {
+			return nil, errors.Wrap(err, "error parsing cids array")
+		}
+
+		events = append(events, ProposalTimeoutEvent{
+			Provider: strings.Trim(providers[i], `"`),
+			Cids:     cids,
+		})
+	}
+
+	return events, nil
 }
 
 type ProposalTimeoutHandler struct {
@@ -57,15 +90,18 @@ func NewProposalTimeoutHandler(g *app.GitopiaProxy, ipfsClusterClient ipfscluste
 }
 
 func (h *ProposalTimeoutHandler) Handle(ctx context.Context, eventBuf []byte) error {
-	event := &ProposalTimeoutEvent{}
-	err := event.UnMarshal(eventBuf)
+	events, err := UnmarshalProposalTimeoutEvent(eventBuf)
 	if err != nil {
 		return errors.WithMessage(err, "event parse error")
 	}
 
-	err = h.Process(ctx, *event)
-	if err != nil {
-		return errors.WithMessage(err, "error processing event")
+	for _, event := range events {
+		if err := h.Process(ctx, event); err != nil {
+			// Log error and continue processing other events
+			logger.FromContext(ctx).WithFields(logrus.Fields{
+				"provider": event.Provider,
+			}).WithError(err).Error("failed to process ProposalTimeoutEvent")
+		}
 	}
 
 	return nil
