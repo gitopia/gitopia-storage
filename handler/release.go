@@ -2,18 +2,18 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
 
+	"github.com/buger/jsonparser"
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia-storage/app"
 	"github.com/gitopia/gitopia-storage/pkg/merkleproof"
+	"github.com/gitopia/gitopia-storage/utils"
 	gitopiatypes "github.com/gitopia/gitopia/v6/x/gitopia/types"
 	storagetypes "github.com/gitopia/gitopia/v6/x/storage/types"
-	"github.com/ipfs-cluster/ipfs-cluster/api"
 	ipfsclusterclient "github.com/ipfs-cluster/ipfs-cluster/api/rest/client"
 	"github.com/ipfs/boxo/files"
 	"github.com/pkg/errors"
@@ -86,7 +86,14 @@ func UnmarshalReleaseEvent(eventBuf []byte) ([]ReleaseEvent, error) {
 
 		var attachments []gitopiatypes.Attachment
 		attachmentsStr := attachmentsArray[i]
-		err = json.Unmarshal([]byte(attachmentsStr), &attachments)
+		_, err = jsonparser.ArrayEach([]byte(attachmentsStr), func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
+			attachment := gitopiatypes.Attachment{}
+			name, _ := jsonparser.GetString(value, "name")
+			attachment.Name = name
+			sha, _ := jsonparser.GetString(value, "sha256")
+			attachment.Sha = sha
+			attachments = append(attachments, attachment)
+		})
 		if err != nil {
 			return nil, errors.Wrap(err, "error unmarshalling attachments")
 		}
@@ -136,63 +143,6 @@ func (h *ReleaseEventHandler) Handle(ctx context.Context, eventBuf []byte, event
 	return nil
 }
 
-func (h *ReleaseEventHandler) pinAttachment(ctx context.Context, attachment gitopiatypes.Attachment) (string, error) {
-	// Get attachment file path from attachment directory
-	attachmentDir := viper.GetString("ATTACHMENT_DIR")
-	filePath := fmt.Sprintf("%s/%s", attachmentDir, attachment.Sha)
-
-	// Add and pin the file to IPFS cluster
-	paths := []string{filePath}
-	addParams := api.DefaultAddParams()
-	addParams.Recursive = false
-	addParams.Layout = "balanced"
-
-	outputChan := make(chan api.AddedOutput)
-	var cid api.Cid
-
-	go func() {
-		err := h.ipfsClusterClient.Add(ctx, paths, addParams, outputChan)
-		if err != nil {
-			logger.FromContext(ctx).WithError(err).WithField("attachment", attachment.Name).Error("failed to add file to IPFS cluster")
-			close(outputChan)
-		}
-	}()
-
-	// Get CID from output channel
-	for output := range outputChan {
-		cid = output.Cid
-	}
-
-	// Pin the file with default options
-	pinOpts := api.PinOptions{
-		ReplicationFactorMin: -1,
-		ReplicationFactorMax: -1,
-		Name:                 attachment.Name,
-	}
-
-	_, err := h.ipfsClusterClient.Pin(ctx, cid, pinOpts)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to pin file in IPFS cluster")
-	}
-
-	return cid.String(), nil
-}
-
-func (h *ReleaseEventHandler) unpinAttachment(ctx context.Context, asset storagetypes.ReleaseAsset) error {
-	// Parse CID from string
-	cid, err := api.DecodeCid(asset.Cid)
-	if err != nil {
-		return errors.Wrap(err, "failed to parse CID")
-	}
-
-	// Unpin the file from IPFS cluster
-	_, err = h.ipfsClusterClient.Unpin(ctx, cid)
-	if err != nil {
-		return errors.Wrap(err, "failed to unpin file from IPFS cluster")
-	}
-	return nil
-}
-
 func (h *ReleaseEventHandler) calculateMerkleRoot(ctx context.Context, attachment gitopiatypes.Attachment) ([]byte, error) {
 	// Get attachment file path from attachment directory
 	attachmentDir := viper.GetString("ATTACHMENT_DIR")
@@ -237,6 +187,8 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 		"event_type":    eventType,
 	}).Info("processing release event")
 
+	attachmentDir := viper.GetString("ATTACHMENT_DIR")
+
 	// Get existing release assets if this is an update or delete event
 	existingAssets := make(map[string]storagetypes.ReleaseAsset)
 	if eventType == EventUpdateReleaseType || eventType == EventDeleteReleaseType {
@@ -257,7 +209,8 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 		// Pin all new attachments and propose a batch update
 		var updates []*storagetypes.ReleaseAssetUpdate
 		for _, attachment := range event.Attachments {
-			cid, err := h.pinAttachment(ctx, attachment)
+			filePath := fmt.Sprintf("%s/%s", attachmentDir, attachment.Sha)
+			cid, err := utils.PinFile(h.ipfsClusterClient, filePath)
 			if err != nil {
 				logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
 					"attachment":    attachment.Name,
@@ -349,7 +302,8 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 				continue
 			}
 
-			newCid, err := h.pinAttachment(ctx, attachment)
+			filePath := fmt.Sprintf("%s/%s", attachmentDir, attachment.Sha)
+			newCid, err := utils.PinFile(h.ipfsClusterClient, filePath)
 			if err != nil {
 				logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
 					"attachment":    attachment.Name,

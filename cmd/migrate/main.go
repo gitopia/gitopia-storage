@@ -23,7 +23,6 @@ import (
 	"github.com/gitopia/gitopia-storage/utils"
 	gitopiatypes "github.com/gitopia/gitopia/v6/x/gitopia/types"
 	storagetypes "github.com/gitopia/gitopia/v6/x/storage/types"
-	"github.com/ipfs-cluster/ipfs-cluster/api"
 	ipfsclusterclient "github.com/ipfs-cluster/ipfs-cluster/api/rest/client"
 	"github.com/ipfs/boxo/files"
 	ipfspath "github.com/ipfs/boxo/path"
@@ -621,36 +620,7 @@ func main() {
 							return err
 						}
 
-						// Pin attachment to IPFS cluster
-						paths := []string{filePath}
-						addParams := api.DefaultAddParams()
-						addParams.Recursive = false
-						addParams.Layout = "balanced"
-
-						outputChan := make(chan api.AddedOutput)
-						var attachmentCid api.Cid
-
-						go func() {
-							err := ipfsClusterClient.Add(ctx, paths, addParams, outputChan)
-							if err != nil {
-								fmt.Printf("Error adding attachment to IPFS cluster: %v\n", err)
-								close(outputChan)
-							}
-						}()
-
-						// Get CID from output channel
-						for output := range outputChan {
-							attachmentCid = output.Cid
-						}
-
-						// Pin the file with default options
-						pinOpts := api.PinOptions{
-							ReplicationFactorMin: -1,
-							ReplicationFactorMax: -1,
-							Name:                 attachment.Name,
-						}
-
-						_, err = ipfsClusterClient.Pin(ctx, attachmentCid, pinOpts)
+						cid, err := utils.PinFile(ipfsClusterClient, filePath)
 						if err != nil {
 							progress.FailedReleases[release.Id] = err.Error()
 							progress.LastFailedRelease = release.Id
@@ -718,7 +688,7 @@ func main() {
 						// Collect release asset for batch update
 						asset := &storagetypes.ReleaseAssetUpdate{
 							Name:     attachment.Name,
-							Cid:      attachmentCid.String(),
+							Cid:      cid,
 							RootHash: rootHash,
 							Size_:    uint64(fileInfo.Size()),
 							Sha256:   attachment.Sha,
