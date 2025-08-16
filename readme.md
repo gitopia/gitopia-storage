@@ -6,8 +6,8 @@ The Gitopia Storage Provider is a self-hosted server that provides storage for G
 
 ### Hardware
 - **CPU:** 2+ Cores
-- **RAM:** 4GB+ (8GB+ recommended for production)
-- **Disk:** 4TB
+- **RAM:** 8GB+
+- **Disk:** 1TB
 
 ### Storage
 
@@ -84,7 +84,7 @@ You need to register your provider on the Gitopia blockchain. You only need to d
 > Make sure to sync your ipfs cluster with other active providers before registering your provider. You'll start receiving challenges after registration.
 
 > [!IMPORTANT]
-> In addition to the stake requirement, your Gitopia account must maintain a minimum balance of **100 LORE** to perform storage operations. The storage provider will check this balance on startup and reject operations if insufficient funds are available.
+> In addition to the stake requirement, your Gitopia account must maintain a minimum balance of **100 lore** to perform storage operations. The storage provider will check this balance on startup and reject operations if insufficient funds are available.
 
 1.  **Import your key:** The container automatically imports the key from the `GITOPIA_OPERATOR_MNEMONIC` in your `.env` file on startup.
 
