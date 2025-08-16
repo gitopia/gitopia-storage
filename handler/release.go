@@ -206,7 +206,7 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 
 	// Handle attachments based on event type
 	switch eventType {
-	case EventCreateReleaseType:
+	case EventCreateReleaseType, EventDaoCreateReleaseType:
 		// Pin all new attachments and propose a batch update
 		var updates []*storagetypes.ReleaseAssetUpdate
 		for _, attachment := range event.Attachments {
