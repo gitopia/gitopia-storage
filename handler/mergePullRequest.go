@@ -25,7 +25,9 @@ import (
 )
 
 const (
-	defaultTimeout = 5 * time.Minute
+	defaultTimeout                     = 5 * time.Minute
+	EventTypeInvokeMergePullRequest    = "InvokeMergePullRequest"
+	EventTypeInvokeDaoMergePullRequest = "InvokeDaoMergePullRequest"
 )
 
 type InvokeMergePullRequestEvent struct {
@@ -36,10 +38,17 @@ type InvokeMergePullRequestEvent struct {
 	Provider       string
 }
 
-func UnmarshalInvokeMergePullRequestEvent(eventBuf []byte) ([]InvokeMergePullRequestEvent, error) {
+func UnmarshalInvokeMergePullRequestEvent(eventBuf []byte, eventType string) ([]InvokeMergePullRequestEvent, error) {
 	var events []InvokeMergePullRequestEvent
 
-	creators, err := ExtractStringArray(eventBuf, "message", "Creator")
+	var creators []string
+	var err error
+
+	if eventType == EventTypeInvokeDaoMergePullRequest {
+		creators, err = ExtractStringArray(eventBuf, "message", "sender")
+	} else {
+		creators, err = ExtractStringArray(eventBuf, "message", "Creator")
+	}
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing creator")
 	}
@@ -117,8 +126,8 @@ func NewInvokeMergePullRequestEventHandler(g *app.GitopiaProxy, c consumer.Clien
 	}
 }
 
-func (h *InvokeMergePullRequestEventHandler) Handle(ctx context.Context, eventBuf []byte) error {
-	events, err := UnmarshalInvokeMergePullRequestEvent(eventBuf)
+func (h *InvokeMergePullRequestEventHandler) Handle(ctx context.Context, eventBuf []byte, eventType string) error {
+	events, err := UnmarshalInvokeMergePullRequestEvent(eventBuf, eventType)
 	if err != nil {
 		return errors.WithMessage(err, "event parse error")
 	}

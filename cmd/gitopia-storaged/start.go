@@ -264,11 +264,15 @@ func startEventProcessor(ctx context.Context, gitopiaClient gitopia.Client, batc
 	}
 
 	client1EventHandlers := map[string]func(context.Context, []byte) error{
-		InvokeMergePullRequestQuery:    mergeHandler.Handle,
-		InvokeDaoMergePullRequestQuery: daoMergeHandler.Handle,
-		ChallengeCreatedQuery:          challengeHandler.Handle,
-		DeleteStorageObjectQuery:       deleteStorageObjectHandler.Handle,
-		ProposalTimeoutQuery:           proposalTimeoutHandler.Handle,
+		InvokeMergePullRequestQuery: func(ctx context.Context, eventBuf []byte) error {
+			return mergeHandler.Handle(ctx, eventBuf, handler.EventTypeInvokeMergePullRequest)
+		},
+		InvokeDaoMergePullRequestQuery: func(ctx context.Context, eventBuf []byte) error {
+			return daoMergeHandler.Handle(ctx, eventBuf, handler.EventTypeInvokeDaoMergePullRequest)
+		},
+		ChallengeCreatedQuery:    challengeHandler.Handle,
+		DeleteStorageObjectQuery: deleteStorageObjectHandler.Handle,
+		ProposalTimeoutQuery:     proposalTimeoutHandler.Handle,
 	}
 
 	// Client 2: Release events (5 subscriptions)
@@ -301,7 +305,7 @@ func startEventProcessor(ctx context.Context, gitopiaClient gitopia.Client, batc
 			return releaseHandler.Handle(ctx, eventBuf, handler.EventDeleteReleaseType)
 		},
 		DaoCreateReleaseQuery: func(ctx context.Context, eventBuf []byte) error {
-			return daoReleaseHandler.Handle(ctx, eventBuf, handler.EventCreateReleaseType)
+			return daoReleaseHandler.Handle(ctx, eventBuf, handler.EventDaoCreateReleaseType)
 		},
 		DeleteRepositoryQuery: func(ctx context.Context, eventBuf []byte) error {
 			return deleteRepositoryHandler.Handle(ctx, eventBuf)

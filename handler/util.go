@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"strings"
+
 	"github.com/buger/jsonparser"
 )
 
@@ -20,6 +22,7 @@ func ExtractStringArray(eventBuf []byte, eventType string, key string) ([]string
 		if err != nil {
 			return
 		}
+		s = strings.Trim(s, "\"")
 		result = append(result, s)
 	})
 	return result, nil

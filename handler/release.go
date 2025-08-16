@@ -22,9 +22,10 @@ import (
 )
 
 const (
-	EventCreateReleaseType = "CreateRelease"
-	EventUpdateReleaseType = "UpdateRelease"
-	EventDeleteReleaseType = "DeleteRelease"
+	EventCreateReleaseType    = "CreateRelease"
+	EventUpdateReleaseType    = "UpdateRelease"
+	EventDeleteReleaseType    = "DeleteRelease"
+	EventDaoCreateReleaseType = "DaoCreateRelease"
 )
 
 type ReleaseEvent struct {
@@ -36,10 +37,17 @@ type ReleaseEvent struct {
 	Provider          string
 }
 
-func UnmarshalReleaseEvent(eventBuf []byte) ([]ReleaseEvent, error) {
+func UnmarshalReleaseEvent(eventBuf []byte, eventType string) ([]ReleaseEvent, error) {
 	var events []ReleaseEvent
 
-	creators, err := ExtractStringArray(eventBuf, "message", gitopiatypes.EventAttributeCreatorKey)
+	var creators []string
+	var err error
+
+	if eventType == EventDaoCreateReleaseType {
+		creators, err = ExtractStringArray(eventBuf, "message", "sender")
+	} else {
+		creators, err = ExtractStringArray(eventBuf, "message", gitopiatypes.EventAttributeCreatorKey)
+	}
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing creator")
 	}
@@ -117,7 +125,7 @@ func NewReleaseEventHandler(g *app.GitopiaProxy, ipfsClusterClient ipfsclustercl
 }
 
 func (h *ReleaseEventHandler) Handle(ctx context.Context, eventBuf []byte, eventType string) error {
-	events, err := UnmarshalReleaseEvent(eventBuf)
+	events, err := UnmarshalReleaseEvent(eventBuf, eventType)
 	if err != nil {
 		return errors.WithMessage(err, "event parse error")
 	}
