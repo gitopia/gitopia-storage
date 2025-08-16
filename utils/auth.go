@@ -55,10 +55,10 @@ func DecodeBasic(header http.Header) (username, password string) {
 	return creds[0], creds[1]
 }
 
-func ValidateBasicAuth(req *http.Request, username, password string) (bool, error) {
+func ValidateBasicAuth(req *http.Request, username, password string) (bool, string, error) {
 	repoId, err := ParseRepositoryIdfromURI(req.URL.Path)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
 
 	encConf := gitopia.MakeEncodingConfig()
@@ -70,32 +70,32 @@ func ValidateBasicAuth(req *http.Request, username, password string) (bool, erro
 
 	tx, err := txDecoder([]byte(password))
 	if err != nil {
-		return false, fmt.Errorf("error decoding")
+		return false, "", fmt.Errorf("error decoding")
 	}
 
 	// Verify signature
 	err = verifier.Verify(tx)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
 
 	// Verify push permission
 	msgs := tx.GetMsgs()
 	if len(msgs) != 1 || len(msgs[0].GetSigners()) != 1 {
-		return false, fmt.Errorf("invalid signature")
+		return false, "", fmt.Errorf("invalid signature")
 	}
 
 	address := msgs[0].GetSigners()[0].String()
 	havePushPermission, err := HavePushPermission(repoId, address)
 	if err != nil {
-		return false, fmt.Errorf("error checking push permission: %s", err.Error())
+		return false, "", fmt.Errorf("error checking push permission: %s", err.Error())
 	}
 
 	if !havePushPermission {
-		return false, fmt.Errorf("user does not have push permission")
+		return false, "", fmt.Errorf("user does not have push permission")
 	}
 
-	return true, nil
+	return true, address, nil
 }
 
 func ParseRepositoryIdfromURI(uri string) (uint64, error) {

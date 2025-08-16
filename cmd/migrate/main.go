@@ -22,7 +22,7 @@ import (
 	"github.com/gitopia/gitopia-storage/pkg/merkleproof"
 	"github.com/gitopia/gitopia-storage/utils"
 	gitopiatypes "github.com/gitopia/gitopia/v6/x/gitopia/types"
-	"github.com/ipfs-cluster/ipfs-cluster/api"
+	storagetypes "github.com/gitopia/gitopia/v6/x/storage/types"
 	ipfsclusterclient "github.com/ipfs-cluster/ipfs-cluster/api/rest/client"
 	"github.com/ipfs/boxo/files"
 	ipfspath "github.com/ipfs/boxo/path"
@@ -80,10 +80,138 @@ func loadProgress() (*MigrationProgress, error) {
 func saveProgress(progress *MigrationProgress) error {
 	data, err := json.Marshal(progress)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to marshal progress")
 	}
 
 	return os.WriteFile(ProgressFile, data, 0644)
+}
+
+// processLFSObjects handles LFS objects for a specific repository
+func processLFSObjects(ctx context.Context, repositoryId uint64, repoDir string, ipfsClusterClient ipfsclusterclient.Client, ipfsHttpApi *rpc.HttpApi, gitopiaProxy *app.GitopiaProxy) error {
+	// Get LFS objects directory
+	lfsObjectsDir := filepath.Join(repoDir, "lfs", "objects")
+
+	// Check if LFS objects directory exists
+	if _, err := os.Stat(lfsObjectsDir); os.IsNotExist(err) {
+		fmt.Printf("No LFS objects directory found for repository %d\n", repositoryId)
+		return nil
+	}
+
+	// Walk through LFS objects directory
+	var lfsObjects []string
+	err := filepath.Walk(lfsObjectsDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip directories and non-regular files
+		if info.IsDir() || !info.Mode().IsRegular() {
+			return nil
+		}
+
+		// Get relative path from lfs/objects directory
+		relPath, err := filepath.Rel(lfsObjectsDir, path)
+		if err != nil {
+			return err
+		}
+
+		// LFS objects are stored in subdirectories like 0b/78/0b7810a9fef2b44e9381e7f4e8ffd699a71e359931ab236bcc356ab8fd2a4575
+		// The filename itself is the complete OID
+		pathParts := strings.Split(relPath, string(filepath.Separator))
+		if len(pathParts) >= 3 {
+			// Extract the filename (last part) which is the complete OID
+			oid := pathParts[len(pathParts)-1]
+			// Validate OID format (64 hex characters)
+			if len(oid) == 64 {
+				lfsObjects = append(lfsObjects, oid)
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return errors.Wrap(err, "failed to walk LFS objects directory")
+	}
+
+	if len(lfsObjects) == 0 {
+		fmt.Printf("No LFS objects found for repository %d\n", repositoryId)
+		return nil
+	}
+
+	fmt.Printf("Found %d LFS objects for repository %d\n", len(lfsObjects), repositoryId)
+
+	// Process each LFS object
+	for i, oid := range lfsObjects {
+		fmt.Printf("Processing LFS object %d/%d: %s\n", i+1, len(lfsObjects), oid)
+
+		// Get the actual file path
+		oidPath := filepath.Join(lfsObjectsDir, oid[:2], oid[2:])
+
+		// Pin LFS object to IPFS cluster
+		cid, err := utils.PinFile(ipfsClusterClient, oidPath)
+		if err != nil {
+			return errors.Wrapf(err, "error pinning LFS object %s", oid)
+		}
+
+		// Get LFS object from IPFS and calculate merkle root
+		p, err := ipfspath.NewPath("/ipfs/" + cid)
+		if err != nil {
+			return errors.Wrapf(err, "error creating IPFS path for LFS object %s", oid)
+		}
+
+		f, err := ipfsHttpApi.Unixfs().Get(ctx, p)
+		if err != nil {
+			return errors.Wrapf(err, "error getting LFS object from IPFS: %s", oid)
+		}
+
+		file, ok := f.(files.File)
+		if !ok {
+			return errors.Errorf("invalid LFS object format: %s", oid)
+		}
+
+		rootHash, err := merkleproof.ComputeMerkleRoot(file)
+		if err != nil {
+			return errors.Wrapf(err, "error computing merkle root for LFS object %s", oid)
+		}
+
+		// Get LFS object size
+		lfsObjectInfo, err := os.Stat(oidPath)
+		if err != nil {
+			return errors.Wrapf(err, "error getting LFS object size: %s", oid)
+		}
+
+		// Update LFS object on chain
+		err = gitopiaProxy.UpdateLFSObject(
+			ctx,
+			repositoryId,
+			oid,
+			cid,
+			rootHash,
+			lfsObjectInfo.Size(),
+		)
+		if err != nil {
+			return errors.Wrapf(err, "error updating LFS object %s for repo %d", oid, repositoryId)
+		}
+
+		// Poll to check if the LFS object was updated
+		fmt.Printf("Verifying LFS object update for oid %s...\n", oid)
+		err = gitopiaProxy.PollForUpdate(ctx, func() (bool, error) {
+			lfsObject, err := gitopiaProxy.LFSObjectByRepositoryIdAndOid(ctx, repositoryId, oid)
+			if err != nil {
+				return false, err
+			}
+
+			return lfsObject.Cid == cid, nil
+		})
+		if err != nil {
+			return errors.Wrapf(err, "failed to verify LFS object update for oid %s", oid)
+		}
+
+		fmt.Printf("Successfully processed LFS object %s (CID: %s)\n", oid, cid)
+	}
+
+	return nil
 }
 
 func main() {
@@ -125,7 +253,13 @@ func main() {
 			if err != nil {
 				return err
 			}
-			gitopiaProxy := app.NewGitopiaProxy(gitopiaClient)
+			defer gitopiaClient.Close()
+
+			batchTxManager := app.NewBatchTxManager(gitopiaClient, app.BLOCK_TIME)
+			batchTxManager.Start()
+			defer batchTxManager.Stop()
+
+			gitopiaProxy := app.NewGitopiaProxy(gitopiaClient, batchTxManager)
 
 			// Initialize IPFS cluster client
 			ipfsCfg := &ipfsclusterclient.Config{
@@ -298,7 +432,7 @@ func main() {
 						return err
 					}
 
-					rootHash, err := merkleproof.ComputePackfileMerkleRoot(file, 256*1024)
+					rootHash, err := merkleproof.ComputeMerkleRoot(file)
 					if err != nil {
 						progress.FailedRepos[repository.Id] = err.Error()
 						progress.LastFailedRepo = repository.Id
@@ -327,6 +461,7 @@ func main() {
 						cid,
 						rootHash,
 						packfileInfo.Size(),
+						"",
 					)
 					if err != nil {
 						progress.FailedRepos[repository.Id] = err.Error()
@@ -335,6 +470,40 @@ func main() {
 							return errors.Wrap(err, "failed to save progress")
 						}
 						return errors.Wrapf(err, "error updating repository packfile for repo %d", repository.Id)
+					}
+
+					// Poll to check if the packfile was updated
+					fmt.Printf("Verifying packfile update for repository %d...\n", repository.Id)
+					err = gitopiaProxy.PollForUpdate(ctx, func() (bool, error) {
+						packfile, err := gitopiaProxy.RepositoryPackfile(ctx, repository.Id)
+						if err != nil {
+							return false, err
+						}
+						return packfile.Cid == cid, nil
+					})
+					if err != nil {
+						err = errors.Wrapf(err, "failed to verify packfile update for repo %d", repository.Id)
+						progress.FailedRepos[repository.Id] = err.Error()
+						progress.LastFailedRepo = repository.Id
+						if err := saveProgress(progress); err != nil {
+							return errors.Wrap(err, "failed to save progress")
+						}
+						return err
+					}
+					fmt.Printf("Packfile update for repository %d verified.\n", repository.Id)
+
+					// Handle LFS objects for osmosis-labs/osmosis repository
+					if repository.Owner.Id == "gitopia1vp8p5xag26epvzs0ujx6m5x2enjy5p8qe3yrjysuenhn22wfu3ls4j2fyw" && repository.Name == "osmosis" {
+						fmt.Printf("Processing LFS objects for repository %d (osmosis-labs/osmosis)\n", repository.Id)
+						if err := processLFSObjects(ctx, repository.Id, repoDir, ipfsClusterClient, ipfsHttpApi, gitopiaProxy); err != nil {
+							progress.FailedRepos[repository.Id] = err.Error()
+							progress.LastFailedRepo = repository.Id
+							if err := saveProgress(progress); err != nil {
+								return errors.Wrap(err, "failed to save progress")
+							}
+							return errors.Wrapf(err, "error processing LFS objects for repo %d", repository.Id)
+						}
+						fmt.Printf("Successfully processed LFS objects for repository %d\n", repository.Id)
 					}
 
 					// Remove from failed repos if it was previously failed
@@ -404,6 +573,7 @@ func main() {
 						return errors.Wrap(err, "error getting repository")
 					}
 
+					assets := make([]*storagetypes.ReleaseAssetUpdate, 0)
 					for _, attachment := range release.Attachments {
 						attachmentDir := viper.GetString("ATTACHMENT_DIR")
 
@@ -450,36 +620,7 @@ func main() {
 							return err
 						}
 
-						// Pin attachment to IPFS cluster
-						paths := []string{filePath}
-						addParams := api.DefaultAddParams()
-						addParams.Recursive = false
-						addParams.Layout = "balanced"
-
-						outputChan := make(chan api.AddedOutput)
-						var attachmentCid api.Cid
-
-						go func() {
-							err := ipfsClusterClient.Add(ctx, paths, addParams, outputChan)
-							if err != nil {
-								fmt.Printf("Error adding attachment to IPFS cluster: %v\n", err)
-								close(outputChan)
-							}
-						}()
-
-						// Get CID from output channel
-						for output := range outputChan {
-							attachmentCid = output.Cid
-						}
-
-						// Pin the file with default options
-						pinOpts := api.PinOptions{
-							ReplicationFactorMin: -1,
-							ReplicationFactorMax: -1,
-							Name:                 attachment.Name,
-						}
-
-						_, err = ipfsClusterClient.Pin(ctx, attachmentCid, pinOpts)
+						cid, err := utils.PinFile(ipfsClusterClient, filePath)
 						if err != nil {
 							progress.FailedReleases[release.Id] = err.Error()
 							progress.LastFailedRelease = release.Id
@@ -523,7 +664,7 @@ func main() {
 						}
 
 						// Calculate merkle root
-						rootHash, err := merkleproof.ComputePackfileMerkleRoot(ipfsFile, 256*1024)
+						rootHash, err := merkleproof.ComputeMerkleRoot(ipfsFile)
 						if err != nil {
 							progress.FailedReleases[release.Id] = err.Error()
 							progress.LastFailedRelease = release.Id
@@ -544,28 +685,67 @@ func main() {
 							return errors.Wrap(err, "error getting file size")
 						}
 
-						// Update release asset on chain
-						err = gitopiaProxy.UpdateReleaseAsset(
-							ctx,
-							release.RepositoryId,
-							release.TagName,
-							attachment.Name,
-							attachmentCid.String(),
-							rootHash,
-							fileInfo.Size(),
-							attachment.Sha,
-						)
-						if err != nil {
-							progress.FailedReleases[release.Id] = err.Error()
-							progress.LastFailedRelease = release.Id
-							if err := saveProgress(progress); err != nil {
-								return errors.Wrap(err, "failed to save progress")
-							}
-							return errors.Wrap(err, "error updating release asset")
+						// Collect release asset for batch update
+						asset := &storagetypes.ReleaseAssetUpdate{
+							Name:     attachment.Name,
+							Cid:      cid,
+							RootHash: rootHash,
+							Size_:    uint64(fileInfo.Size()),
+							Sha256:   attachment.Sha,
 						}
+						assets = append(assets, asset)
 
 						fmt.Printf("Successfully migrated attachment %s for release %s\n", attachment.Name, release.TagName)
 					}
+
+					err = gitopiaProxy.UpdateReleaseAssets(ctx, release.RepositoryId, release.TagName, assets)
+					if err != nil {
+						progress.FailedReleases[release.Id] = err.Error()
+						progress.LastFailedRelease = release.Id
+						if err := saveProgress(progress); err != nil {
+							return errors.Wrap(err, "failed to save progress")
+						}
+						return errors.Wrap(err, "error updating release assets")
+					}
+
+					// Poll to check if the release assets were updated
+					fmt.Printf("Verifying release assets update for release %s...\n", release.TagName)
+					err = gitopiaProxy.PollForUpdate(ctx, func() (bool, error) {
+						updatedAssets, err := gitopiaProxy.RepositoryReleaseAssets(ctx, release.RepositoryId, release.TagName)
+						if err != nil {
+							return false, err
+						}
+
+						if len(updatedAssets) != len(assets) {
+							return false, nil
+						}
+
+						// Create a map of expected assets for easy lookup
+						expectedAssets := make(map[string]*storagetypes.ReleaseAssetUpdate)
+						for _, asset := range assets {
+							expectedAssets[asset.Name] = asset
+						}
+
+						for _, updatedAsset := range updatedAssets {
+							expected := expectedAssets[updatedAsset.Name]
+							if updatedAsset.Cid != expected.Cid {
+								// CID mismatch
+								return false, nil
+							}
+						}
+
+						return true, nil
+					})
+					if err != nil {
+						err = errors.Wrapf(err, "failed to verify release assets update for release %s", release.TagName)
+						progress.FailedReleases[release.Id] = err.Error()
+						progress.LastFailedRelease = release.Id
+						if err := saveProgress(progress); err != nil {
+							return errors.Wrap(err, "failed to save progress")
+						}
+						return err
+					}
+					fmt.Printf("Release assets update for release %s verified.\n", release.TagName)
 
 					// Remove from failed releases if it was previously failed
 					delete(progress.FailedReleases, release.Id)

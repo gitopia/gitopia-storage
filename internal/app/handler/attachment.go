@@ -244,7 +244,9 @@ func UploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			oldSize = int64(res.ReleaseAsset.Size_)
+			if res != nil {
+				oldSize = int64(res.ReleaseAsset.Size_)
+			}
 
 			releaseRes, err := queryClient.Gitopia.RepositoryRelease(context.Background(), &types.QueryGetRepositoryReleaseRequest{
 				Id:             repoRes.Repository.Owner.Id,
@@ -263,33 +265,35 @@ func UploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Calculate current pending uploads for this user
-		pendingSize := calculatePendingUploadsSize(address, repoId, data.TagName)
+		if !storageParamsRes.Params.StoragePricePerMb.IsZero() {
+			// Calculate current pending uploads for this user
+			pendingSize := calculatePendingUploadsSize(address, repoId, data.TagName)
 
-		// Calculate storage delta including pending uploads
-		storageDelta := handler.Size - oldSize
-		projectedUsage := uint64(userQuotaRes.UserQuota.StorageUsed) + uint64(pendingSize)
+			// Calculate storage delta including pending uploads
+			storageDelta := handler.Size - oldSize
+			projectedUsage := uint64(userQuotaRes.UserQuota.StorageUsed) + uint64(pendingSize)
 
-		costInfo, err := utils.CalculateStorageCost(projectedUsage, uint64(storageDelta), storageParamsRes.Params)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		// If there is a storage charge, check if user has sufficient balance
-		if !costInfo.StorageCharge.IsZero() {
-			balanceRes, err := queryClient.Bank.Balance(context.Background(), &banktypes.QueryBalanceRequest{
-				Address: repoRes.Repository.Owner.Id,
-				Denom:   costInfo.StorageCharge.Denom,
-			})
+			costInfo, err := utils.CalculateStorageCost(projectedUsage, uint64(storageDelta), storageParamsRes.Params)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
 
-			if balanceRes.Balance.Amount.LT(costInfo.StorageCharge.Amount) {
-				http.Error(w, "insufficient balance for storage charge", http.StatusUnauthorized)
-				return
+			// If there is a storage charge, check if user has sufficient balance
+			if !costInfo.StorageCharge.IsZero() {
+				balanceRes, err := queryClient.Bank.Balance(context.Background(), &banktypes.QueryBalanceRequest{
+					Address: repoRes.Repository.Owner.Id,
+					Denom:   costInfo.StorageCharge.Denom,
+				})
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+
+				if balanceRes.Balance.Amount.LT(costInfo.StorageCharge.Amount) {
+					http.Error(w, "insufficient balance for storage charge", http.StatusUnauthorized)
+					return
+				}
 			}
 		}
 

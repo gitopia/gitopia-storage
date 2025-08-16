@@ -1,15 +1,23 @@
 package lfs
 
 import (
+	"context"
 	"encoding/json"
-	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/gitopia/gitopia-storage/app"
 	lfsutil "github.com/gitopia/gitopia-storage/lfs"
+	"github.com/gitopia/gitopia-storage/pkg/merkleproof"
 	"github.com/gitopia/gitopia-storage/utils"
+	ipfsclusterclient "github.com/ipfs-cluster/ipfs-cluster/api/rest/client"
+	"github.com/ipfs/boxo/files"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 )
 
 const transferBasic = "basic"
@@ -22,7 +30,9 @@ type BasicHandler struct {
 	// The default storage backend for uploading new objects.
 	DefaultStorage lfsutil.Storage
 	// The list of available storage backends to access objects.
-	Storagers map[lfsutil.Storage]lfsutil.Storager
+	Storagers         map[lfsutil.Storage]lfsutil.Storager
+	GitopiaProxy      *app.GitopiaProxy
+	IPFSClusterClient ipfsclusterclient.Client
 }
 
 // DefaultStorager returns the default storage backend.
@@ -57,14 +67,14 @@ func (h *BasicHandler) ServeDownloadHandler(w http.ResponseWriter, r *http.Reque
 	s := h.DefaultStorager()
 	if s == nil {
 		internalServerError(w)
-		log.Error("Failed to locate the object [repo_id: %d, oid: %s]: storage %q not found", repoId, oid, s)
+		log.Errorf("Failed to locate the object [repo_id: %d, oid: %s]: storage %q not found", repoId, oid, s)
 		return
 	}
 
 	size, err := s.Size(oid)
 	if err != nil {
 		internalServerError(w)
-		log.Error("Failed to locate the object [repo_id: %d, oid: %s]: storage %q not found", repoId, oid, s)
+		log.Errorf("Failed to locate the object [repo_id: %d, oid: %s]: storage %q not found", repoId, oid, s)
 		return
 	}
 
@@ -74,13 +84,21 @@ func (h *BasicHandler) ServeDownloadHandler(w http.ResponseWriter, r *http.Reque
 
 	err = s.Download(oid, w)
 	if err != nil {
-		log.Error("Failed to download object [oid: %s]: %v", oid, err)
+		log.Errorf("Failed to download object [oid: %s]: %v", oid, err)
 		return
 	}
 }
 
 // PUT /{owner}/{repo}.git/info/lfs/object/basic/{oid}
 func (h *BasicHandler) ServeUploadHandler(w http.ResponseWriter, r *http.Request) {
+	repoId, err := utils.ParseRepositoryIdfromURI(r.URL.Path)
+	if err != nil {
+		responseJSON(w, http.StatusBadRequest, responseError{
+			Message: err.Error(),
+		})
+		return
+	}
+
 	components := strings.Split(r.URL.Path, "/")
 	if len(components) != 7 {
 		responseJSON(w, http.StatusBadRequest, responseError{
@@ -90,20 +108,56 @@ func (h *BasicHandler) ServeUploadHandler(w http.ResponseWriter, r *http.Request
 	}
 	oid := lfsutil.OID(components[6])
 
-	s := h.DefaultStorager()
-
-	// NOTE: LFS client will retry upload the same object if there was a partial failure,
-	// therefore we would like to skip ones that already exist.
-	_, err := s.Size(oid)
-	if err == nil {
-		// Object exists, drain the request body and we're good.
-		_, _ = io.Copy(io.Discard, r.Body)
-		r.Body.Close()
-		w.WriteHeader(http.StatusOK)
+	repo, err := h.GitopiaProxy.Repository(context.Background(), repoId)
+	if err != nil {
+		internalServerError(w)
+		log.WithError(err).Error("failed to get repository")
 		return
 	}
 
-	_, err = s.Upload(oid, r.Body)
+	userQuota, err := h.GitopiaProxy.UserQuota(context.Background(), repo.Owner.Id)
+	if err != nil {
+		internalServerError(w)
+		log.WithError(err).Error("failed to get user quota")
+		return
+	}
+
+	storageParams, err := h.GitopiaProxy.StorageParams(context.Background())
+	if err != nil {
+		internalServerError(w)
+		log.WithError(err).Error("failed to get storage params")
+		return
+	}
+
+	if !storageParams.StoragePricePerMb.IsZero() {
+		costInfo, err := utils.CalculateStorageCost(uint64(userQuota.StorageUsed), uint64(r.ContentLength), storageParams)
+		if err != nil {
+			internalServerError(w)
+			log.WithError(err).Error("failed to calculate storage cost")
+			return
+		}
+
+		if !costInfo.StorageCharge.IsZero() {
+			balance, err := h.GitopiaProxy.CosmosBankBalance(context.Background(), repo.Owner.Id, costInfo.StorageCharge.Denom)
+			if err != nil {
+				internalServerError(w)
+				log.WithError(err).Error("failed to get user balance")
+				return
+			}
+
+			if balance.Amount.LT(costInfo.StorageCharge.Amount) {
+				responseJSON(w, http.StatusPaymentRequired, responseError{Message: "insufficient balance for storage charge"})
+				return
+			}
+		}
+	}
+
+	s := h.DefaultStorager()
+
+	utils.LockLFSObject(string(oid))
+	defer utils.UnlockLFSObject(string(oid))
+
+	size, err := s.Upload(oid, r.Body)
 	if err != nil {
 		if err == lfsutil.ErrInvalidOID {
 			responseJSON(w, http.StatusBadRequest, responseError{
@@ -111,14 +165,62 @@ func (h *BasicHandler) ServeUploadHandler(w http.ResponseWriter, r *http.Request
 			})
 		} else {
 			internalServerError(w)
-			log.Error("Failed to upload object [storage: %s, oid: %s]: %v", s.Storage(), oid, err)
+			log.Errorf("Failed to upload object [storage: %s, oid: %s]: %v", s.Storage(), oid, err)
 		}
+		return
+	}
+
+	filePath := localStoragePath(string(oid))
+
+	cid, err := utils.PinFile(h.IPFSClusterClient, filePath)
+	if err != nil {
+		internalServerError(w)
+		log.WithError(err).Error("failed to pin file to ipfs")
+		return
+	}
+
+	rootHash, err := calculateMerkleRoot(filePath)
+	if err != nil {
+		internalServerError(w)
+		log.WithError(err).Error("failed to calculate merkle root")
+		return
+	}
+
+	// Check lfs object already exists
+	_, err = h.GitopiaProxy.LFSObjectByRepositoryIdAndOid(context.Background(), repoId, string(oid))
+	if err == nil {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	user := r.Context().Value("address").(string)
+
+	// First update the LFS object
+	err = h.GitopiaProxy.ProposeLFSObjectUpdate(context.Background(), user, repoId, string(oid), cid, rootHash, size, false)
+	if err != nil {
+		internalServerError(w)
+		log.WithError(err).Error("failed to propose lfs object update")
+		return
+	}
+
+	// Wait for LFS object update to be confirmed with a timeout of 10 seconds
+	err = h.GitopiaProxy.PollForUpdate(context.Background(), func() (bool, error) {
+		return h.GitopiaProxy.CheckProposeLFSObjectUpdate(repoId, string(oid), user)
+	})
+
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			log.WithError(err).Error("timeout waiting for LFS object update to be confirmed")
+		} else {
+			log.WithError(err).Error("failed to verify LFS object update")
+		}
+		internalServerError(w)
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
 
-	log.Trace("[LFS] Object created %q", oid)
+	log.Tracef("[LFS] Object created %q", oid)
 }
 
 // POST /{owner}/{repo}.git/info/lfs/object/basic/verify
@@ -181,7 +283,7 @@ func Authenticate(h http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		allow, err := utils.ValidateBasicAuth(r, username, password)
+		allow, address, err := utils.ValidateBasicAuth(r, username, password)
 		if !allow || err != nil {
 			if err != nil {
 				log.WithFields(log.Fields{
@@ -193,6 +295,10 @@ func Authenticate(h http.HandlerFunc) http.HandlerFunc {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
+
+		// Add the address to the request context
+		ctx := context.WithValue(r.Context(), "address", address)
+		r = r.WithContext(ctx)
 
 		h(w, r)
 	}
@@ -223,4 +329,36 @@ func internalServerError(w http.ResponseWriter) {
 	responseJSON(w, http.StatusInternalServerError, responseError{
 		Message: "Internal server error",
 	})
+}
+
+func localStoragePath(oid string) string {
+	return filepath.Join(viper.GetString("LFS_OBJECTS_DIR"), oid)
+}
+
+func calculateMerkleRoot(filePath string) ([]byte, error) {
+	// Open the file for merkle root calculation
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to open file: %s", filePath)
+	}
+	defer file.Close()
+
+	stat, err := file.Stat()
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to get file stat: %s", filePath)
+	}
+
+	// Create a files.File from the os.File
+	ipfsFile, err := files.NewReaderPathFile(filePath, file, stat)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to create files.File from file: %s", filePath)
+	}
+
+	// Calculate merkle root
+	rootHash, err := merkleproof.ComputeMerkleRoot(ipfsFile)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to compute merkle root for file: %s", filePath)
+	}
+
+	return rootHash, nil
 }

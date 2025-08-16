@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/buger/jsonparser"
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia-storage/app"
 	"github.com/gitopia/gitopia-storage/pkg/merkleproof"
@@ -28,50 +27,68 @@ type ChallengeEvent struct {
 	Provider    string
 }
 
-func (e *ChallengeEvent) UnMarshal(eventBuf []byte) error {
-	challengeIdStr, err := jsonparser.GetString(eventBuf, "events", EventChallengeCreatedType+".challenge_id", "[0]")
+func UnmarshalChallengeEvent(eventBuf []byte) ([]ChallengeEvent, error) {
+	var events []ChallengeEvent
+
+	challengeIDs, err := ExtractStringArray(eventBuf, EventChallengeCreatedType, "challenge_id")
 	if err != nil {
-		return errors.Wrap(err, "error parsing challenge id")
-	}
-	challengeIdStr = strings.Trim(challengeIdStr, "\"")
-	challengeId, err := strconv.ParseUint(challengeIdStr, 10, 64)
-	if err != nil {
-		return errors.Wrap(err, "error parsing challenge id")
+		return nil, errors.Wrap(err, "error parsing challenge_id")
 	}
 
-	provider, err := jsonparser.GetString(eventBuf, "events", EventChallengeCreatedType+".provider", "[0]")
+	providers, err := ExtractStringArray(eventBuf, EventChallengeCreatedType, "provider")
 	if err != nil {
-		return errors.Wrap(err, "error parsing provider address")
+		return nil, errors.Wrap(err, "error parsing provider")
 	}
-	provider = strings.Trim(provider, "\"")
 
-	e.ChallengeId = challengeId
-	e.Provider = provider
+	// Basic validation
+	if len(challengeIDs) == 0 {
+		return events, nil // No events to process
+	}
 
-	return nil
+	if len(challengeIDs) != len(providers) {
+		return nil, errors.New("mismatched attribute array lengths for ChallengeEvent")
+	}
+
+	for i := 0; i < len(challengeIDs); i++ {
+		challengeId, err := strconv.ParseUint(challengeIDs[i], 10, 64)
+		if err != nil {
+			return nil, errors.Wrap(err, "error parsing challenge id")
+		}
+
+		events = append(events, ChallengeEvent{
+			ChallengeId: challengeId,
+			Provider:    providers[i],
+		})
+	}
+
+	return events, nil
 }
 
 type ChallengeEventHandler struct {
-	gc app.GitopiaProxy
+	gc *app.GitopiaProxy
 }
 
-func NewChallengeEventHandler(g app.GitopiaProxy) ChallengeEventHandler {
-	return ChallengeEventHandler{g}
+func NewChallengeEventHandler(g *app.GitopiaProxy) *ChallengeEventHandler {
+	return &ChallengeEventHandler{g}
 }
 
 func (h *ChallengeEventHandler) Handle(ctx context.Context, eventBuf []byte) error {
-	event := &ChallengeEvent{}
-	err := event.UnMarshal(eventBuf)
+	events, err := UnmarshalChallengeEvent(eventBuf)
 	if err != nil {
 		return errors.WithMessage(err, "event parse error")
 	}
 
-	// Only process challenges meant for this provider
-	if !h.gc.CheckProvider(event.Provider) {
-		return nil
+	for _, event := range events {
+		if err := h.Process(ctx, event); err != nil {
+			// Log error and continue processing other events
+			logger.FromContext(ctx).WithFields(logrus.Fields{
+				"challenge_id": event.ChallengeId,
+				"provider":     event.Provider,
+			}).WithError(err).Error("failed to process ChallengeEvent")
+		}
 	}
 
-	return h.Process(ctx, *event)
+	return nil
 }
 
 func (h *ChallengeEventHandler) Process(ctx context.Context, event ChallengeEvent) error {
@@ -92,7 +109,6 @@ func (h *ChallengeEventHandler) Process(ctx context.Context, event ChallengeEven
 		"challenge_type": challenge.ChallengeType,
 		"content_id":     challenge.ContentId,
 		"chunk_index":    challenge.ChunkIndex,
-		"root_hash":      challenge.RootHash,
 	}).Info("challenge details retrieved")
 
 	// Get packfile from IPFS using challenge CID
@@ -102,18 +118,27 @@ func (h *ChallengeEventHandler) Process(ctx context.Context, event ChallengeEven
 	}
 
 	var cid string
-	if challenge.ChallengeType == storagetypes.ChallengeType_CHALLENGE_TYPE_PACKFILE {
+	switch challenge.ChallengeType {
+	case storagetypes.ChallengeType_CHALLENGE_TYPE_PACKFILE:
 		packfile, err := h.gc.Packfile(ctx, challenge.ContentId)
 		if err != nil {
 			return errors.WithMessage(err, "failed to get packfile from Gitopia")
 		}
 		cid = packfile.Cid
-	} else {
+	case storagetypes.ChallengeType_CHALLENGE_TYPE_RELEASE_ASSET:
 		release, err := h.gc.ReleaseAsset(ctx, challenge.ContentId)
 		if err != nil {
 			return errors.WithMessage(err, "failed to get release asset from Gitopia")
 		}
 		cid = release.Cid
+	case storagetypes.ChallengeType_CHALLENGE_TYPE_LFS_OBJECT:
+		lfsObject, err := h.gc.LFSObject(ctx, challenge.ContentId)
+		if err != nil {
+			return errors.WithMessage(err, "failed to get lfs object from Gitopia")
+		}
+		cid = lfsObject.Cid
+	default:
+		return errors.New("invalid challenge type")
 	}
 
 	p, err := path.NewPath("/ipfs/" + cid)
@@ -135,7 +160,7 @@ func (h *ChallengeEventHandler) Process(ctx context.Context, event ChallengeEven
 		return errors.New("invalid content format")
 	}
 
-	proof, root, chunkHash, err := merkleproof.GenerateChunkProof(file, challenge.ChunkIndex, 256*1024)
+	proof, root, chunkHash, err := merkleproof.GenerateProof(file, challenge.ChunkIndex)
 	if err != nil {
 		return errors.WithMessage(err, "failed to generate proofs")
 	}
@@ -147,7 +172,6 @@ func (h *ChallengeEventHandler) Process(ctx context.Context, event ChallengeEven
 
 	// Submit challenge response
 	err = h.gc.SubmitChallenge(ctx,
-		event.Provider,
 		event.ChallengeId,
 		chunkHash,
 		&storagetypes.Proof{

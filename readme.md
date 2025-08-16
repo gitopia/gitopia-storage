@@ -6,8 +6,8 @@ The Gitopia Storage Provider is a self-hosted server that provides storage for G
 
 ### Hardware
 - **CPU:** 2+ Cores
-- **RAM:** 4GB+ (8GB+ recommended for production)
-- **Disk:** 4TB
+- **RAM:** 8GB+
+- **Disk:** 1TB
 
 ### Storage
 
@@ -79,6 +79,12 @@ This method uses Docker Compose to set up the entire stack, including the Gitopi
 
 ### 4. One-Time Setup (Registration)
 You need to register your provider on the Gitopia blockchain. You only need to do this once.
+
+> [!WARNING] 
+> Make sure to sync your ipfs cluster with other active providers before registering your provider. You'll start receiving challenges after registration.
+
+> [!IMPORTANT]
+> In addition to the stake requirement, your Gitopia account must maintain a minimum balance of **100 lore** to perform storage operations. The storage provider will check this balance on startup and reject operations if insufficient funds are available.
 
 1.  **Import your key:** The container automatically imports the key from the `GITOPIA_OPERATOR_MNEMONIC` in your `.env` file on startup.
 
@@ -199,9 +205,9 @@ Be sure to update this list whenever the set of active storage providers changes
 1.  Copy the production config file to a system location:
     ```sh
     sudo mkdir -p /etc/gitopia-storage
-    sudo cp config_prod.toml /etc/gitopia-storage/config.toml
+    sudo cp config_prod.toml /etc/gitopia-storage/config_prod.toml
     ```
-2.  Edit `/etc/gitopia-storage/config.toml` and set the correct paths and values, especially for your data directories.
+2.  Edit `/etc/gitopia-storage/config_prod.toml` and set the correct paths and values, especially for your data directories.
 
 ### 5. Run the Service
 1.  Create necessary directories:
@@ -280,7 +286,8 @@ Requires=ipfs-cluster.service
 User=gitopia
 Group=gitopia
 Type=simple
-ExecStart=/usr/local/bin/gitopia-storaged start --from gitopia-storage --config /etc/gitopia-storage/config.toml
+Environment=ENV=PRODUCTION
+ExecStart=/usr/local/bin/gitopia-storaged start --from gitopia-storage --keyring-backend test
 Restart=on-failure
 RestartSec=10
 LimitNOFILE=65535
@@ -315,7 +322,6 @@ WORKING_DIR = "/home/ubuntu/gitopia-storage/"
 # Gitopia Network Configuration
 GITOPIA_ADDR = "gitopia-grpc.polkachu.com:11390"
 TM_ADDR = "https://gitopia-rpc.polkachu.com:443"
-GIT_SERVER_EXTERNAL_ADDR = "public-address"
 CHAIN_ID = "gitopia"
 GAS_PRICES = "0.001ulore"
 
@@ -332,6 +338,8 @@ CACHE_REPO_MAX_AGE = "24h"           # Maximum age for repository cache entries
 CACHE_REPO_MAX_SIZE = 10737418240    # Maximum size for repository cache (10GB in bytes)
 CACHE_ASSET_MAX_AGE = "168h"         # Maximum age for asset cache entries (7 days)
 CACHE_ASSET_MAX_SIZE = 5368709120    # Maximum size for asset cache (5GB in bytes)
+CACHE_LFS_MAX_AGE = "720h"           # Maximum age for LFS object cache entries (30 days)
+CACHE_LFS_MAX_SIZE = 53687091200     # Maximum size for LFS object cache (50GB in bytes)
 CACHE_CLEAR_INTERVAL = "1h"          # Interval for cache cleanup
 ```
 

@@ -2,7 +2,6 @@ WEB_SERVER_PORT = 5000
 GITOPIA_ADDR = "grpc.devnet.gitopia.com:9090"
 GIT_REPOS_DIR = "/var/repos"
 LFS_OBJECTS_DIR = "/var/lfs-objects"
-GIT_SERVER_EXTERNAL_ADDR = "https://server.devnet.gitopia.com"
 ATTACHMENT_DIR = "/var/attachments"
 TM_ADDR = "https://rpc.devnet.gitopia.com:443"
 WORKING_DIR = "/home/ubuntu/gitopia-storage/"
@@ -19,7 +18,9 @@ PINATA_JWT = ""
 
 # Cache Configuration
 CACHE_REPO_MAX_AGE = "24h"
-CACHE_REPO_MAX_SIZE = 10737418240  # 10GB in bytes
-CACHE_ASSET_MAX_AGE = "168h"       # 7 days
-CACHE_ASSET_MAX_SIZE = 5368709120  # 5GB in bytes
+CACHE_REPO_MAX_SIZE = 10737418240    # 10GB in bytes
+CACHE_ASSET_MAX_AGE = "168h"         # Maximum age for asset cache entries (7 days)
+CACHE_ASSET_MAX_SIZE = 5368709120    # Maximum size for asset cache (5GB in bytes)
+CACHE_LFS_MAX_AGE = "720h"           # Maximum age for LFS object cache entries (30 days)
+CACHE_LFS_MAX_SIZE = 53687091200     # Maximum size for LFS object cache (50GB in bytes)
 CACHE_CLEAR_INTERVAL = "1h"

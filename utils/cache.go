@@ -34,6 +34,7 @@ type RefCountedMutex struct {
 var (
 	repoMutexes  sync.Map // map[uint64]*RefCountedMutex
 	assetMutexes sync.Map // map[string]*RefCountedMutex
+	lfsMutexes   sync.Map // map[string]*RefCountedMutex
 )
 
 // getRepoMutex returns a reference-counted mutex for the given repository ID
@@ -47,6 +48,14 @@ func getRepoMutex(repoID uint64) *RefCountedMutex {
 // getAssetMutex returns a reference-counted mutex for the given asset SHA
 func getAssetMutex(sha string) *RefCountedMutex {
 	mutex, _ := assetMutexes.LoadOrStore(sha, &RefCountedMutex{
+		cleanupCh: make(chan struct{}),
+	})
+	return mutex.(*RefCountedMutex)
+}
+
+// getLFSObjectMutex returns a reference-counted mutex for the given lfs object OID
+func getLFSObjectMutex(oid string) *RefCountedMutex {
+	mutex, _ := lfsMutexes.LoadOrStore(oid, &RefCountedMutex{
 		cleanupCh: make(chan struct{}),
 	})
 	return mutex.(*RefCountedMutex)
@@ -73,6 +82,32 @@ func UnlockAsset(sha string) {
 			case <-time.After(5 * time.Minute):
 				// If no activity for 5 minutes, remove from map
 				assetMutexes.Delete(sha)
+			}
+		}()
+	}
+}
+
+// LockLFSObject acquires the lfs object-specific lock and increments reference count
+func LockLFSObject(oid string) {
+	mutex := getLFSObjectMutex(oid)
+	atomic.AddInt32(&mutex.refCount, 1)
+	mutex.mu.Lock()
+	mutex.lastUsed = time.Now()
+}
+
+// UnlockLFSObject releases the lfs object-specific lock and decrements reference count
+func UnlockLFSObject(oid string) {
+	mutex := getLFSObjectMutex(oid)
+	mutex.mu.Unlock()
+	if atomic.AddInt32(&mutex.refCount, -1) == 0 {
+		// If no more references, schedule cleanup
+		go func() {
+			select {
+			case <-mutex.cleanupCh:
+				// Wait for cleanup signal
+			case <-time.After(5 * time.Minute):
+				// If no activity for 5 minutes, remove from map
+				lfsMutexes.Delete(oid)
 			}
 		}()
 	}
@@ -116,6 +151,15 @@ func IsRepositoryInUse(repoID uint64) bool {
 // IsAssetInUse checks if an asset is currently locked/in use
 func IsAssetInUse(sha string) bool {
 	if mutex, exists := assetMutexes.Load(sha); exists {
+		rm := mutex.(*RefCountedMutex)
+		return atomic.LoadInt32(&rm.refCount) > 0
+	}
+	return false
+}
+
+// IsLFSObjectInUse checks if an lfs object is currently locked/in use
+func IsLFSObjectInUse(oid string) bool {
+	if mutex, exists := lfsMutexes.Load(oid); exists {
 		rm := mutex.(*RefCountedMutex)
 		return atomic.LoadInt32(&rm.refCount) > 0
 	}
@@ -413,18 +457,90 @@ func CacheReleaseAsset(repositoryId uint64, tag, name string, cacheDir string) e
 		Name:         name,
 	})
 	if err != nil {
-		return errors.Wrap(err, "error getting release asset")
+		return errors.Wrap(err, "failed to get release asset from chain")
 	}
 
-	isCached, err := IsReleaseAssetCached(res.ReleaseAsset.Sha256, cacheDir)
+	isAssetCached, err := IsReleaseAssetCached(res.ReleaseAsset.Sha256, cacheDir)
 	if err != nil {
-		return errors.Wrap(err, "error checking if release asset is cached")
+		return errors.Wrap(err, "error checking if asset is cached")
 	}
-	if !isCached {
-		err = DownloadReleaseAsset(res.ReleaseAsset.Cid, res.ReleaseAsset.Sha256, cacheDir)
-		if err != nil {
+
+	if !isAssetCached {
+		if err := DownloadReleaseAsset(res.ReleaseAsset.Cid, res.ReleaseAsset.Sha256, cacheDir); err != nil {
 			return errors.Wrap(err, "error downloading release asset")
 		}
 	}
+
+	return nil
+}
+
+func IsLFSObjectCached(oid string) (bool, error) {
+	lfsDir := viper.GetString("LFS_OBJECTS_DIR")
+	filePath := filepath.Join(lfsDir, oid)
+
+	if _, err := os.Stat(filePath); err == nil {
+		return true, nil
+	}
+	return false, nil
+}
+
+func DownloadLFSObject(cid, oid string) error {
+	ipfsUrl := fmt.Sprintf("http://%s:%s/api/v0/cat?arg=/ipfs/%s&progress=false", viper.GetString("IPFS_HOST"), viper.GetString("IPFS_PORT"), cid)
+	resp, err := http.Post(ipfsUrl, "application/json", nil)
+	if err != nil {
+		return fmt.Errorf("failed to fetch lfs object from IPFS: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to fetch lfs object from IPFS: %v", resp.Status)
+	}
+
+	lfsDir := viper.GetString("LFS_OBJECTS_DIR")
+	filePath := filepath.Join(lfsDir, oid)
+
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		return fmt.Errorf("failed to create lfs object directory: %v", err)
+	}
+
+	lfsFile, err := os.Create(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to create lfs object file: %v", err)
+	}
+	defer lfsFile.Close()
+
+	if _, err := io.Copy(lfsFile, resp.Body); err != nil {
+		return fmt.Errorf("failed to write lfs object file: %v", err)
+	}
+
+	return nil
+}
+
+func CacheLFSObjects(repositoryId uint64) error {
+	queryClient, err := gitopia.GetQueryClient(viper.GetString("GITOPIA_ADDR"))
+	if err != nil {
+		return errors.Wrap(err, "error connecting to gitopia")
+	}
+
+	res, err := queryClient.Storage.LFSObjectsByRepositoryId(context.Background(), &storagetypes.QueryLFSObjectsByRepositoryIdRequest{
+		RepositoryId: repositoryId,
+	})
+	if err != nil {
+		return errors.Wrap(err, "failed to get lfs objects from chain")
+	}
+
+	for _, lfsObject := range res.LfsObjects {
+		isLFSObjectCached, err := IsLFSObjectCached(lfsObject.Oid)
+		if err != nil {
+			return errors.Wrap(err, "error checking if lfs object is cached")
+		}
+
+		if !isLFSObjectCached {
+			if err := DownloadLFSObject(lfsObject.Cid, lfsObject.Oid); err != nil {
+				return errors.Wrap(err, "error downloading lfs object")
+			}
+		}
+	}
+
 	return nil
 }

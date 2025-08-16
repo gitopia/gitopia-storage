@@ -1,6 +1,7 @@
 package lfs
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -8,7 +9,6 @@ import (
 	lfsutil "github.com/gitopia/gitopia-storage/lfs"
 	"github.com/gitopia/gitopia-storage/utils"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 )
 
 // batchRequest defines the request payload for the batch endpoint.
@@ -61,7 +61,7 @@ func responseJSON(w http.ResponseWriter, status int, v any) {
 
 	err := json.NewEncoder(w).Encode(v)
 	if err != nil {
-		log.Error("Failed to encode JSON: %v", err)
+		log.Errorf("Failed to encode JSON: %v", err)
 		return
 	}
 }
@@ -85,10 +85,44 @@ func (h *BasicHandler) ServeBatchHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Authenticate only for upload operations
+	if request.Operation == basicOperationUpload {
+		username, password := utils.DecodeBasic(r.Header)
+		if password == "" {
+			responseJSON(w, http.StatusUnauthorized, responseError{
+				Message: "Credentials needed",
+			})
+			return
+		}
+
+		allow, address, err := utils.ValidateBasicAuth(r, username, password)
+		if !allow || err != nil {
+			if err != nil {
+				log.WithFields(log.Fields{
+					"username": username,
+					"error":    err.Error(),
+				}).Error("Failed to authenticate user")
+			}
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+
+		// Add the address to the request context
+		ctx := context.WithValue(r.Context(), "address", address)
+		r = r.WithContext(ctx)
+	}
+
 	// NOTE: We only support basic transfer as of now.
 	transfer := transferBasic
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	host := r.Host
+	gitServerExternalAddr := fmt.Sprintf("%s://%s", scheme, host)
+
 	// Example: https://server.gitopia.com/1.git/info/lfs/object/basic
-	baseHref := fmt.Sprintf("%s/%d.git/info/lfs/objects/basic", viper.GetString("GIT_SERVER_EXTERNAL_ADDR"), repoId)
+	baseHref := fmt.Sprintf("%s/%d.git/info/lfs/objects/basic", gitServerExternalAddr, repoId)
 
 	objects := make([]batchObject, 0, len(request.Objects))
 	switch request.Operation {

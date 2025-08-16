@@ -8,11 +8,10 @@ import (
 	merkletree "github.com/wealdtech/go-merkletree/v2"
 )
 
-func TestGenerateAndVerifyChunkProof(t *testing.T) {
+func TestGenerateAndVerifyProof(t *testing.T) {
 	tests := []struct {
 		name        string
 		chunks      [][]byte
-		chunkSize   int
 		verifyIndex uint64
 		wantErr     bool
 	}{
@@ -21,14 +20,12 @@ func TestGenerateAndVerifyChunkProof(t *testing.T) {
 			chunks: [][]byte{
 				[]byte("chunk1"),
 			},
-			chunkSize:   1024,
 			verifyIndex: 0,
 			wantErr:     false,
 		},
 		{
 			name:        "empty chunks",
 			chunks:      [][]byte{},
-			chunkSize:   1024,
 			verifyIndex: 0,
 			wantErr:     true,
 		},
@@ -37,7 +34,6 @@ func TestGenerateAndVerifyChunkProof(t *testing.T) {
 			chunks: [][]byte{
 				[]byte("chunk1"),
 			},
-			chunkSize:   1024,
 			verifyIndex: 0,
 			wantErr:     false,
 		},
@@ -49,7 +45,6 @@ func TestGenerateAndVerifyChunkProof(t *testing.T) {
 				bytes.Repeat([]byte("c"), 1024),
 				bytes.Repeat([]byte("d"), 1024),
 			},
-			chunkSize:   1024,
 			verifyIndex: 2,
 			wantErr:     false,
 		},
@@ -65,7 +60,7 @@ func TestGenerateAndVerifyChunkProof(t *testing.T) {
 			file := files.NewBytesFile(fileContent.Bytes())
 
 			// Generate proof for the specified chunk
-			proof, root, chunkHash, err := GenerateChunkProof(file, tt.verifyIndex, tt.chunkSize)
+			proof, root, chunkHash, err := GenerateProof(file, tt.verifyIndex)
 
 			if tt.wantErr {
 				if err == nil {
@@ -95,9 +90,9 @@ func TestGenerateAndVerifyChunkProof(t *testing.T) {
 			}
 
 			// Verify the proof
-			verified, err := VerifyPackfileProof(chunkHash, proof, root)
+			verified, err := VerifyProof(chunkHash, proof, root)
 			if err != nil {
-				t.Errorf("VerifyPackfileProof() error = %v", err)
+				t.Errorf("VerifyProof() error = %v", err)
 				return
 			}
 			if !verified {
@@ -107,7 +102,7 @@ func TestGenerateAndVerifyChunkProof(t *testing.T) {
 	}
 }
 
-func TestVerifyPackfileProof_Invalid(t *testing.T) {
+func TestVerifyProof_Invalid(t *testing.T) {
 	tests := []struct {
 		name      string
 		chunkHash []byte
@@ -133,9 +128,9 @@ func TestVerifyPackfileProof_Invalid(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := VerifyPackfileProof(tt.chunkHash, tt.proof, tt.root)
+			_, err := VerifyProof(tt.chunkHash, tt.proof, tt.root)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("VerifyPackfileProof() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("VerifyProof() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}

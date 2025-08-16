@@ -10,8 +10,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/buger/jsonparser"
-	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia-storage/app"
 	"github.com/gitopia/gitopia-storage/app/consumer"
@@ -27,87 +25,100 @@ import (
 )
 
 const (
-	maxErrorLength  = 255
-	defaultTimeout  = 5 * time.Minute
-	merkleChunkSize = 256 * 1024
+	defaultTimeout                     = 5 * time.Minute
+	EventTypeInvokeMergePullRequest    = "InvokeMergePullRequest"
+	EventTypeInvokeDaoMergePullRequest = "InvokeDaoMergePullRequest"
 )
 
 type InvokeMergePullRequestEvent struct {
 	Creator        string
 	RepositoryId   uint64
 	PullRequestIid uint64
-	TaskId         uint64
 	TxHeight       uint64
 	Provider       string
 }
 
-// tm event codec
-func (e *InvokeMergePullRequestEvent) UnMarshal(eventBuf []byte) error {
-	creator, err := jsonparser.GetString(eventBuf, "events", "message.Creator", "[0]")
+func UnmarshalInvokeMergePullRequestEvent(eventBuf []byte, eventType string) ([]InvokeMergePullRequestEvent, error) {
+	var events []InvokeMergePullRequestEvent
+
+	var creators []string
+	var err error
+
+	if eventType == EventTypeInvokeDaoMergePullRequest {
+		creators, err = ExtractStringArray(eventBuf, "message", "sender")
+	} else {
+		creators, err = ExtractStringArray(eventBuf, "message", "Creator")
+	}
 	if err != nil {
-		return errors.Wrap(err, "error parsing creator")
+		return nil, errors.Wrap(err, "error parsing creator")
 	}
 
-	repositoryIdStr, err := jsonparser.GetString(eventBuf, "events", "message.RepositoryId", "[0]")
+	repositoryIDs, err := ExtractStringArray(eventBuf, "message", "RepositoryId")
 	if err != nil {
-		errors.Wrap(err, "error parsing repository id")
-	}
-	repositoryId, err := strconv.ParseUint(repositoryIdStr, 10, 64)
-	if err != nil {
-		return errors.Wrap(err, "error parsing repository id")
+		return nil, errors.Wrap(err, "error parsing repository id")
 	}
 
-	pullRequestIid, err := jsonparser.GetString(eventBuf, "events", "message.PullRequestIid", "[0]")
+	pullRequestIids, err := ExtractStringArray(eventBuf, "message", "PullRequestIid")
 	if err != nil {
-		errors.Wrap(err, "error parsing pull request iid")
-	}
-	iid, err := strconv.ParseUint(pullRequestIid, 10, 64)
-	if err != nil {
-		return errors.Wrap(err, "error parsing pull request iid")
+		return nil, errors.Wrap(err, "error parsing pull request iid")
 	}
 
-	taskIdStr, err := jsonparser.GetString(eventBuf, "events", "message.TaskId", "[0]")
+	txHeights, err := ExtractStringArray(eventBuf, "message", "tx.height")
 	if err != nil {
-		return errors.Wrap(err, "error parsing task id")
-	}
-	taskId, err := strconv.ParseUint(taskIdStr, 10, 64)
-	if err != nil {
-		return errors.Wrap(err, "error parsing task id")
+		return nil, errors.Wrap(err, "error parsing tx height")
 	}
 
-	h, err := jsonparser.GetString(eventBuf, "events", "tx.height", "[0]")
+	providers, err := ExtractStringArray(eventBuf, "message", types.EventAttributeProviderKey)
 	if err != nil {
-		return errors.Wrap(err, "error parsing tx height")
-	}
-	height, err := strconv.ParseUint(h, 10, 64)
-	if err != nil {
-		return errors.Wrap(err, "error parsing height")
+		return nil, errors.Wrap(err, "error parsing provider")
 	}
 
-	provider, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+types.EventAttributeProviderKey, "[0]")
-	if err != nil {
-		return errors.Wrap(err, "error parsing provider")
+	// Basic validation
+	if len(creators) == 0 {
+		return events, nil // No events to process
 	}
 
-	e.Creator = creator
-	e.RepositoryId = repositoryId
-	e.PullRequestIid = iid
-	e.TaskId = taskId
-	e.TxHeight = height
-	e.Provider = provider
+	if !(len(creators) == len(repositoryIDs) && len(creators) == len(pullRequestIids) && len(creators) == len(txHeights) && len(creators) == len(providers)) {
+		return nil, errors.New("mismatched attribute array lengths for InvokeMergePullRequestEvent")
+	}
 
-	return nil
+	for i := 0; i < len(creators); i++ {
+		repositoryId, err := strconv.ParseUint(repositoryIDs[i], 10, 64)
+		if err != nil {
+			return nil, errors.Wrap(err, "error parsing repository id")
+		}
+
+		iid, err := strconv.ParseUint(pullRequestIids[i], 10, 64)
+		if err != nil {
+			return nil, errors.Wrap(err, "error parsing pull request iid")
+		}
+
+		height, err := strconv.ParseUint(txHeights[i], 10, 64)
+		if err != nil {
+			return nil, errors.Wrap(err, "error parsing height")
+		}
+
+		events = append(events, InvokeMergePullRequestEvent{
+			Creator:        creators[i],
+			RepositoryId:   repositoryId,
+			PullRequestIid: iid,
+			TxHeight:       height,
+			Provider:       providers[i],
+		})
+	}
+
+	return events, nil
 }
 
 type InvokeMergePullRequestEventHandler struct {
-	gc app.GitopiaProxy
+	gc *app.GitopiaProxy
 
 	cc consumer.Client
 
 	ipfsClusterClient ipfsclusterclient.Client
 }
 
-func NewInvokeMergePullRequestEventHandler(g app.GitopiaProxy, c consumer.Client, ipfsClusterClient ipfsclusterclient.Client) InvokeMergePullRequestEventHandler {
+func NewInvokeMergePullRequestEventHandler(g *app.GitopiaProxy, c consumer.Client, ipfsClusterClient ipfsclusterclient.Client) InvokeMergePullRequestEventHandler {
 	return InvokeMergePullRequestEventHandler{
 		gc:                g,
 		cc:                c,
@@ -115,16 +126,16 @@ func NewInvokeMergePullRequestEventHandler(g app.GitopiaProxy, c consumer.Client
 	}
 }
 
-func (h *InvokeMergePullRequestEventHandler) Handle(ctx context.Context, eventBuf []byte) error {
-	event := &InvokeMergePullRequestEvent{}
-	err := event.UnMarshal(eventBuf)
+func (h *InvokeMergePullRequestEventHandler) Handle(ctx context.Context, eventBuf []byte, eventType string) error {
+	events, err := UnmarshalInvokeMergePullRequestEvent(eventBuf, eventType)
 	if err != nil {
 		return errors.WithMessage(err, "event parse error")
 	}
 
-	err = h.Process(ctx, *event)
-	if err != nil {
-		return errors.WithMessage(err, "error processing event")
+	for _, event := range events {
+		if err := h.Process(ctx, event); err != nil {
+			logger.FromContext(ctx).WithField("event", event).WithError(err).Error("failed to process InvokeMergePullRequestEvent")
+		}
 	}
 
 	return nil
@@ -140,23 +151,13 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 		"creator":          event.Creator,
 		"repository_id":    event.RepositoryId,
 		"pull_request_iid": event.PullRequestIid,
-		"task_id":          event.TaskId,
 		"tx_height":        event.TxHeight,
 	})
-
-	// Check task state
-	res, err := h.gc.Task(ctx, event.TaskId)
-	if err != nil {
-		return h.handleError(ctx, err, event.TaskId, "task query error")
-	}
-	if res.State != types.StatePending {
-		return nil
-	}
 
 	// Get pull request details
 	resp, err := h.gc.PullRequest(ctx, event.RepositoryId, event.PullRequestIid)
 	if err != nil {
-		return h.handleError(ctx, err, event.TaskId, "pull request query error")
+		return errors.WithMessage(err, "pull request query error")
 	}
 
 	// Prepare repositories
@@ -169,13 +170,13 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 		defer utils.UnlockRepository(resp.Head.RepositoryId)
 	}
 	if err := h.prepareRepositories(ctx, resp, cacheDir); err != nil {
-		return h.handleError(ctx, err, event.TaskId, "repository preparation error")
+		return errors.WithMessage(err, "repository preparation error")
 	}
 
 	// Get repository name
 	headRepositoryName, err := h.gc.RepositoryName(ctx, resp.Head.RepositoryId)
 	if err != nil {
-		return h.handleError(ctx, err, event.TaskId, "repository name query error")
+		return errors.WithMessage(err, "repository name query error")
 	}
 
 	message := fmt.Sprintf("Merge pull request #%v from %s/%s", resp.Iid, headRepositoryName, resp.Head.Branch)
@@ -183,7 +184,7 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 	// Create quarantine repository
 	quarantineRepoPath, err := utils.CreateQuarantineRepo(resp.Base.RepositoryId, resp.Head.RepositoryId, resp.Base.Branch, resp.Head.Branch)
 	if err != nil {
-		return h.handleError(ctx, err, event.TaskId, "create quarantine repo error")
+		return errors.WithMessage(err, "create quarantine repo error")
 	}
 	defer os.RemoveAll(quarantineRepoPath)
 
@@ -199,35 +200,29 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 	// Perform merge
 	mergeStyle := utils.MergeStyleMerge
 	if err := h.performMerge(ctx, mergeStyle, resp, quarantineRepoPath, env, message); err != nil {
-		return h.handleError(ctx, err, event.TaskId, "merge operation error")
+		return errors.WithMessage(err, "merge operation error")
 	}
 
 	// Get merge commit SHA
 	mergeCommitSha, err := utils.GetFullCommitSha(quarantineRepoPath, "base")
 	if err != nil {
-		return h.handleError(ctx, err, event.TaskId, "merge commit sha error")
+		return errors.WithMessage(err, "merge commit sha error")
 	}
 
 	// Push changes
 	if err := h.pushChanges(ctx, resp, quarantineRepoPath, env, mergeStyle); err != nil {
-		return h.handleError(ctx, err, event.TaskId, "push changes error")
+		return errors.WithMessage(err, "push changes error")
 	}
 
 	// Handle IPFS operations
-	if err := h.handlePostMergeOperations(ctx, resp, cacheDir); err != nil {
-		return h.handleError(ctx, err, event.TaskId, "post-merge operations error")
-	}
-
-	// Update pull request state and repository branch reference
-	if err := h.gc.MergePullRequest(ctx, event.RepositoryId, event.PullRequestIid, mergeCommitSha, event.TaskId); err != nil {
-		return h.handleError(ctx, err, event.TaskId, "set pull request state error")
+	if err := h.handlePostMergeOperations(ctx, resp, cacheDir, mergeCommitSha, event.Creator); err != nil {
+		return errors.WithMessage(err, "post-merge operations error")
 	}
 
 	h.logOperation(ctx, "merge_completed", map[string]interface{}{
 		"creator":          event.Creator,
 		"repository_id":    event.RepositoryId,
 		"pull_request_iid": event.PullRequestIid,
-		"task_id":          event.TaskId,
 		"tx_height":        event.TxHeight,
 	})
 	return nil
@@ -291,7 +286,7 @@ func (h *InvokeMergePullRequestEventHandler) pushChanges(ctx context.Context, re
 }
 
 // handlePostMergeOperations handles operations after successful merge
-func (h *InvokeMergePullRequestEventHandler) handlePostMergeOperations(ctx context.Context, resp types.PullRequest, cacheDir string) error {
+func (h *InvokeMergePullRequestEventHandler) handlePostMergeOperations(ctx context.Context, resp types.PullRequest, cacheDir string, mergeCommitSha string, user string) error {
 	baseRepoPath := filepath.Join(cacheDir, fmt.Sprintf("%d.git", resp.Base.RepositoryId))
 
 	// Run git gc
@@ -342,31 +337,33 @@ func (h *InvokeMergePullRequestEventHandler) handlePostMergeOperations(ctx conte
 	}
 
 	// Calculate storage cost
-	costInfo, err := utils.CalculateStorageCost(
-		uint64(userQuota.StorageUsed),
-		uint64(storageDelta),
-		storageParams,
-	)
-	if err != nil {
-		return errors.WithMessage(err, "failed to calculate storage cost")
-	}
-
-	// If there is a storage charge, check if user has sufficient balance
-	if !costInfo.StorageCharge.IsZero() {
-		balance, err := h.gc.CosmosBankBalance(ctx, repo.Owner.Id, costInfo.StorageCharge.Denom)
+	if !storageParams.StoragePricePerMb.IsZero() {
+		costInfo, err := utils.CalculateStorageCost(
+			uint64(userQuota.StorageUsed),
+			uint64(storageDelta),
+			storageParams,
+		)
 		if err != nil {
-			return errors.WithMessage(err, "failed to get user balance")
+			return errors.WithMessage(err, "failed to calculate storage cost")
 		}
 
-		if balance.Amount.LT(costInfo.StorageCharge.Amount) {
-			// rollback local repository cache
-			err = os.RemoveAll(baseRepoPath)
+		// If there is a storage charge, check if user has sufficient balance
+		if !costInfo.StorageCharge.IsZero() {
+			balance, err := h.gc.CosmosBankBalance(ctx, repo.Owner.Id, costInfo.StorageCharge.Denom)
 			if err != nil {
-				return errors.WithMessage(err, "failed to rollback local repository cache")
+				return errors.WithMessage(err, "failed to get user balance")
 			}
 
-			// TODO: log insufficient balance for storage charge
-			return nil
+			if balance.Amount.LT(costInfo.StorageCharge.Amount) {
+				// rollback local repository cache
+				err = os.RemoveAll(baseRepoPath)
+				if err != nil {
+					return errors.WithMessage(err, "failed to rollback local repository cache")
+				}
+
+				// TODO: log insufficient balance for storage charge
+				return nil
+			}
 		}
 	}
 
@@ -397,56 +394,25 @@ func (h *InvokeMergePullRequestEventHandler) handlePostMergeOperations(ctx conte
 		return errors.New("invalid packfile format")
 	}
 
-	rootHash, err := merkleproof.ComputePackfileMerkleRoot(file, merkleChunkSize)
+	rootHash, err := merkleproof.ComputeMerkleRoot(file)
 	if err != nil {
 		return errors.WithMessage(err, "compute packfile merkle root error")
 	}
 
-	err = h.gc.UpdateRepositoryPackfile(ctx, resp.Base.RepositoryId, filepath.Base(packfileName), cid, rootHash, packfileInfo.Size())
+	err = h.gc.ProposePackfileUpdate(ctx, user, resp.Base.RepositoryId, filepath.Base(packfileName), cid, rootHash, packfileInfo.Size(), packfile.Cid, mergeCommitSha, false)
 	if err != nil {
 		return errors.WithMessage(err, "update repository packfile error")
 	}
 
-	// Unpin old packfile from IPFS cluster
-	if packfile.Cid != "" {
-		// Get packfile reference count
-		refCount, err := h.gc.StorageCidReferenceCount(ctx, packfile.Cid)
-		if err != nil {
-			return errors.WithMessage(err, "failed to get packfile reference count")
-		}
-
-		if refCount == 0 {
-			err = utils.UnpinFile(h.ipfsClusterClient, packfile.Cid)
-			if err != nil {
-				return errors.WithMessage(err, "failed to unpin packfile from IPFS cluster")
-			}
-
-			h.logOperation(ctx, "unpin packfile", map[string]interface{}{
-				"repository_id": resp.Base.RepositoryId,
-				"packfile_name": filepath.Base(packfileName),
-				"cid":           packfile.Cid,
-			})
-		}
+	// Wait for packfile update to be confirmed with a timeout of 10 seconds
+	err = h.gc.PollForUpdate(ctx, func() (bool, error) {
+		return h.gc.CheckProposePackfileUpdate(resp.Base.RepositoryId, user)
+	})
+	if err != nil {
+		return errors.WithMessage(err, "failed to verify packfile update")
 	}
 
 	return nil
-}
-
-// handleError is a helper function for common error handling pattern
-func (h *InvokeMergePullRequestEventHandler) handleError(ctx context.Context, err error, taskId uint64, message string) error {
-	if err == nil {
-		return nil
-	}
-	// Truncate error message if needed
-	errMsg := err.Error()
-	if len(errMsg) > maxErrorLength {
-		errMsg = errMsg[:maxErrorLength]
-	}
-	updateErr := h.gc.UpdateTask(ctx, taskId, types.StateFailure, errMsg)
-	if updateErr != nil {
-		return errors.WithMessage(updateErr, "update task error")
-	}
-	return errors.WithMessage(err, message)
 }
 
 // runGitCommandWithTimeout executes a git command with a timeout

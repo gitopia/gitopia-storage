@@ -4,15 +4,18 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	_ "net/http/pprof" // Add pprof handlers to default HTTP mux
 	"os"
 	"time"
 
+	"github.com/buger/jsonparser"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/tx"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/gitopia/gitopia-go"
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia-storage/app"
@@ -25,6 +28,7 @@ import (
 	ipfsclusterclient "github.com/ipfs-cluster/ipfs-cluster/api/rest/client"
 	"github.com/rs/cors"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -32,12 +36,16 @@ const (
 	InvokeDaoMergePullRequestQuery = "tm.event='Tx' AND message.action='InvokeDaoMergePullRequest'"
 	ChallengeCreatedQuery          = "tm.event='NewBlock' AND gitopia.gitopia.storage.EventChallengeCreated.challenge_id EXISTS"
 	PackfileUpdatedQuery           = "tm.event='Tx' AND gitopia.gitopia.storage.EventPackfileUpdated.repository_id EXISTS"
-	ReleaseAssetUpdatedQuery       = "tm.event='Tx' AND gitopia.gitopia.storage.EventReleaseAssetUpdated.repository_id EXISTS"
-	ReleaseAssetDeletedQuery       = "tm.event='Tx' AND gitopia.gitopia.storage.EventReleaseAssetDeleted.repository_id EXISTS"
+	ReleaseAssetsUpdatedQuery      = "tm.event='Tx' AND gitopia.gitopia.storage.EventReleaseAssetsUpdated.repository_id EXISTS"
+	LfsObjectUpdatedQuery          = "tm.event='Tx' AND gitopia.gitopia.storage.EventLFSObjectUpdated.repository_id EXISTS"
+	DeleteStorageObjectQuery       = "tm.event='Tx' AND gitopia.gitopia.storage.EventDeleteStorageObject.repository_id EXISTS"
+	RepositoryDeletedQuery         = "tm.event='Tx' AND gitopia.gitopia.storage.EventRepositoryDeleted.repository_id EXISTS"
+	ProposalTimeoutQuery           = "tm.event='Tx' AND gitopia.gitopia.storage.EventProposalTimeout.provider EXISTS"
 	CreateReleaseQuery             = "tm.event='Tx' AND message.action='CreateRelease'"
 	UpdateReleaseQuery             = "tm.event='Tx' AND message.action='UpdateRelease'"
 	DeleteReleaseQuery             = "tm.event='Tx' AND message.action='DeleteRelease'"
 	DaoCreateReleaseQuery          = "tm.event='Tx' AND message.action='DaoCreateRelease'"
+	DeleteRepositoryQuery          = "tm.event='Tx' AND message.action='DeleteRepository'"
 )
 
 func NewStartCmd() *cobra.Command {
@@ -54,24 +62,78 @@ func NewStartCmd() *cobra.Command {
 	return cmdStart
 }
 
-func validateConfig() error {
-	requiredConfigs := []string{
-		"IPFS_CLUSTER_PEER_HOST",
-		"IPFS_CLUSTER_PEER_PORT",
-		"WEB_SERVER_PORT",
-		"GIT_REPOS_DIR",
+func start(cmd *cobra.Command, args []string) error {
+	g, ctx := errgroup.WithContext(cmd.Context())
+
+	clientCtx := client.GetClientContextFromCmd(cmd)
+	txf, err := tx.NewFactoryCLI(clientCtx, cmd.Flags())
+	if err != nil {
+		return errors.Wrap(err, "error initializing tx factory")
+	}
+	txf = txf.WithGasAdjustment(app.GAS_ADJUSTMENT)
+
+	gitopiaClient, err := gitopia.NewClient(ctx, clientCtx, txf)
+	if err != nil {
+		return errors.WithMessage(err, "gitopia client error")
+	}
+	defer gitopiaClient.Close()
+
+	// Check client account balance before starting services
+	if err := checkClientBalance(ctx, gitopiaClient); err != nil {
+		return errors.WithMessage(err, "client balance check failed")
 	}
 
-	for _, config := range requiredConfigs {
-		if !viper.IsSet(config) {
-			return fmt.Errorf("required configuration %s is not set", config)
-		}
+	batchTxManager := app.NewBatchTxManager(gitopiaClient, app.BLOCK_TIME)
+	batchTxManager.Start()
+	defer batchTxManager.Stop()
+
+	// Start pprof server for performance monitoring.
+	g.Go(func() error {
+		return startPprofServer(ctx, 6060)
+	})
+
+	// Start memory monitor to log memory usage periodically.
+	g.Go(func() error {
+		startMemoryMonitor(ctx)
+		return nil
+	})
+
+	// Start the main web server.
+	g.Go(func() error {
+		return startWebServer(ctx, cmd, batchTxManager)
+	})
+
+	// Start the event processor to handle blockchain events.
+	g.Go(func() error {
+		return startEventProcessor(ctx, gitopiaClient, batchTxManager)
+	})
+
+	logrus.Info("application started")
+	return g.Wait()
+}
+
+func startWebServer(ctx context.Context, cmd *cobra.Command, batchTxManager *app.BatchTxManager) error {
+	server, err := setupWebServer(cmd, batchTxManager)
+	if err != nil {
+		return errors.Wrap(err, "failed to setup web server")
 	}
 
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		server.Shutdown(shutdownCtx)
+	}()
+
+	logrus.Infof("starting web server on %s", server.Addr)
+	if err := server.ListenAndServe(); err != http.ErrServerClosed {
+		return errors.Wrap(err, "web server error")
+	}
+	logrus.Info("web server stopped")
 	return nil
 }
 
-func setupWebServer(cmd *cobra.Command) (*http.Server, error) {
+func setupWebServer(cmd *cobra.Command, batchTxManager *app.BatchTxManager) (*http.Server, error) {
 	server, err := internalapp.New(cmd, utils.Config{
 		Dir:        viper.GetString("GIT_REPOS_DIR"),
 		AutoCreate: true,
@@ -81,25 +143,36 @@ func setupWebServer(cmd *cobra.Command) (*http.Server, error) {
 			PreReceive:  "gitopia-pre-receive",
 			PostReceive: "gitopia-post-receive",
 		},
-	})
+	}, batchTxManager)
 	if err != nil {
 		return nil, err
 	}
 
-	// Ensure cache directory exists
 	if err := os.MkdirAll(viper.GetString("GIT_REPOS_DIR"), os.ModePerm); err != nil {
 		return nil, err
 	}
 
-	// Configure git server
+	server.Ctx, server.Cancel = context.WithCancel(cmd.Context())
+
 	if err = server.Setup(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to setup server: %w", err)
 	}
 
 	mux := http.NewServeMux()
 	serverWrapper := internalapp.ServerWrapper{Server: server}
 
-	mux.Handle("/", &serverWrapper)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			serverWrapper.ServeHTTP(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
 	mux.Handle("/objects/", http.HandlerFunc(serverWrapper.Server.ObjectsHandler))
 	mux.Handle("/commits", http.HandlerFunc(internalhandler.CommitsHandler))
 	mux.Handle("/commits/", http.HandlerFunc(internalhandler.CommitsHandler))
@@ -120,234 +193,254 @@ func setupWebServer(cmd *cobra.Command) (*http.Server, error) {
 	}, nil
 }
 
-func start(cmd *cobra.Command, args []string) error {
-	ctx, cancel := context.WithCancel(cmd.Context())
-	defer cancel()
+func startEventProcessor(ctx context.Context, gitopiaClient gitopia.Client, batchTxManager *app.BatchTxManager) error {
+	gp := app.NewGitopiaProxy(gitopiaClient, batchTxManager)
 
-	if err := validateConfig(); err != nil {
-		return errors.Wrap(err, "configuration validation failed")
+	ipfsCfg := &ipfsclusterclient.Config{
+		Host:    viper.GetString("IPFS_CLUSTER_PEER_HOST"),
+		Port:    viper.GetString("IPFS_CLUSTER_PEER_PORT"),
+		Timeout: time.Minute * 5,
+	}
+	cl, err := ipfsclusterclient.NewDefaultClient(ipfsCfg)
+	if err != nil {
+		return errors.Wrap(err, "failed to create IPFS cluster client")
 	}
 
-	// Start event processor in a goroutine
-	eventErrChan := make(chan error, 1)
-	go func() {
-		defer close(eventErrChan)
+	logger.FromContext(ctx).WithFields(logrus.Fields{
+		"provider": gp.ClientAddress(),
+		"env":      viper.GetString("ENV"),
+	}).Info("starting event processor")
 
-		clientCtx := client.GetClientContextFromCmd(cmd)
-		txf, err := tx.NewFactoryCLI(clientCtx, cmd.Flags())
-		if err != nil {
-			eventErrChan <- errors.Wrap(err, "error initializing tx factory")
-			return
-		}
-		txf = txf.WithGasAdjustment(app.GAS_ADJUSTMENT)
+	mcc, err := consumer.NewClient("invokeMergePullRequestEvent")
+	if err != nil {
+		return errors.WithMessage(err, "error creating consumer client")
+	}
 
-		gc, err := gitopia.NewClient(ctx, clientCtx, txf)
-		if err != nil {
-			eventErrChan <- errors.WithMessage(err, "gitopia client error")
-			return
-		}
-		defer gc.Close()
+	dmcc, err := consumer.NewClient("invokeDaoMergePullRequestEvent")
+	if err != nil {
+		return errors.WithMessage(err, "error creating consumer client")
+	}
 
-		gp := app.NewGitopiaProxy(gc)
+	var pinataClient *handler.PinataClient
+	if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
+		pinataClient = handler.NewPinataClient(viper.GetString("PINATA_JWT"))
+	}
 
-		// Initialize IPFS cluster client
-		ipfsCfg := &ipfsclusterclient.Config{
-			Host:    viper.GetString("IPFS_CLUSTER_PEER_HOST"),
-			Port:    viper.GetString("IPFS_CLUSTER_PEER_PORT"),
-			Timeout: time.Minute * 5, // Reasonable timeout for pinning
-		}
-		cl, err := ipfsclusterclient.NewDefaultClient(ipfsCfg)
-		if err != nil {
-			eventErrChan <- errors.Wrap(err, "failed to create IPFS cluster client")
-			return
-		}
+	// core events
+	mergeHandler := handler.NewInvokeMergePullRequestEventHandler(gp, mcc, cl)
+	daoMergeHandler := handler.NewInvokeMergePullRequestEventHandler(gp, dmcc, cl)
+	challengeHandler := handler.NewChallengeEventHandler(gp)
+	deleteStorageObjectHandler := handler.NewDeleteStorageObjectEventHandler(gp, cl)
+	proposalTimeoutHandler := handler.NewProposalTimeoutHandler(gp, cl)
+	releaseHandler := handler.NewReleaseEventHandler(gp, cl)
+	daoReleaseHandler := handler.NewReleaseEventHandler(gp, cl)
+	deleteRepositoryHandler := handler.NewDeleteRepositoryEventHandler(gp)
 
-		logger.FromContext(ctx).WithFields(logrus.Fields{
-			"provider": gp.ClientAddress(),
-			"env":      viper.GetString("ENV"),
-			"port":     viper.GetString("WEB_SERVER_PORT"),
-		}).Info("starting storage provider")
+	// events for external pinning
+	packfileUpdatedHandler := handler.NewPackfileUpdatedEventHandler(gp, pinataClient)
+	releaseAssetsUpdatedHandler := handler.NewReleaseAssetsUpdatedEventHandler(gp, pinataClient)
+	lfsObjectUpdatedHandler := handler.NewLfsObjectUpdatedEventHandler(gp, pinataClient)
+	repositoryDeletedHandler := handler.NewRepositoryDeletedEventHandler(gp, pinataClient)
 
-		mtmc, err := gitopia.NewWSEvents(ctx, InvokeMergePullRequestQuery)
-		if err != nil {
-			eventErrChan <- errors.WithMessage(err, "tm error")
-			return
-		}
+	// Create multiple WebSocket clients to distribute subscriptions and avoid hitting the 5 subscription limit
 
-		dmtmc, err := gitopia.NewWSEvents(ctx, InvokeDaoMergePullRequestQuery)
-		if err != nil {
-			eventErrChan <- errors.WithMessage(err, "tm error")
-			return
-		}
+	// Client 1: Merge, Challenge and DeleteStorageObject events (4 subscriptions)
+	client1, err := gitopia.NewWSEvents(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to create WebSocket client 1")
+	}
+	defer client1.Close()
 
-		ctmc, err := gitopia.NewWSEvents(ctx, ChallengeCreatedQuery)
-		if err != nil {
-			eventErrChan <- errors.WithMessage(err, "tm error")
-			return
-		}
+	client1Queries := []string{
+		InvokeMergePullRequestQuery,
+		InvokeDaoMergePullRequestQuery,
+		ChallengeCreatedQuery,
+		DeleteStorageObjectQuery,
+		ProposalTimeoutQuery,
+	}
 
-		putmc, err := gitopia.NewWSEvents(ctx, PackfileUpdatedQuery)
-		if err != nil {
-			eventErrChan <- errors.WithMessage(err, "tm error")
-			return
-		}
+	if err := client1.SubscribeQueries(ctx, client1Queries...); err != nil {
+		return errors.Wrap(err, "failed to subscribe to client 1 events")
+	}
 
-		rautmc, err := gitopia.NewWSEvents(ctx, ReleaseAssetUpdatedQuery)
-		if err != nil {
-			eventErrChan <- errors.WithMessage(err, "tm error")
-			return
-		}
+	client1EventHandlers := map[string]func(context.Context, []byte) error{
+		InvokeMergePullRequestQuery: func(ctx context.Context, eventBuf []byte) error {
+			return mergeHandler.Handle(ctx, eventBuf, handler.EventTypeInvokeMergePullRequest)
+		},
+		InvokeDaoMergePullRequestQuery: func(ctx context.Context, eventBuf []byte) error {
+			return daoMergeHandler.Handle(ctx, eventBuf, handler.EventTypeInvokeDaoMergePullRequest)
+		},
+		ChallengeCreatedQuery:    challengeHandler.Handle,
+		DeleteStorageObjectQuery: deleteStorageObjectHandler.Handle,
+		ProposalTimeoutQuery:     proposalTimeoutHandler.Handle,
+	}
 
-		radtmc, err := gitopia.NewWSEvents(ctx, ReleaseAssetDeletedQuery)
-		if err != nil {
-			eventErrChan <- errors.WithMessage(err, "tm error")
-			return
-		}
+	// Client 2: Release events (5 subscriptions)
+	client2, err := gitopia.NewWSEvents(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to create WebSocket client 2")
+	}
+	defer client2.Close()
 
-		mcc, err := consumer.NewClient("invokeMergePullRequestEvent")
-		if err != nil {
-			eventErrChan <- errors.WithMessage(err, "error creating consumer client")
-			return
-		}
+	client2Queries := []string{
+		CreateReleaseQuery,
+		UpdateReleaseQuery,
+		DeleteReleaseQuery,
+		DaoCreateReleaseQuery,
+		DeleteRepositoryQuery,
+	}
 
-		dmcc, err := consumer.NewClient("invokeDaoMergePullRequestEvent")
-		if err != nil {
-			eventErrChan <- errors.WithMessage(err, "error creating consumer client")
-			return
-		}
+	if err := client2.SubscribeQueries(ctx, client2Queries...); err != nil {
+		return errors.Wrap(err, "failed to subscribe to client 2 events")
+	}
 
-		mergeHandler := handler.NewInvokeMergePullRequestEventHandler(gp, mcc, cl)
-		daoMergeHandler := handler.NewInvokeDaoMergePullRequestEventHandler(gp, dmcc, cl)
-		challengeHandler := handler.NewChallengeEventHandler(gp)
-		packfileUpdatedHandler := handler.NewPackfileUpdatedEventHandler(gp)
-		releaseAssetUpdatedHandler := handler.NewReleaseAssetUpdatedEventHandler(gp)
-		releaseAssetDeletedHandler := handler.NewReleaseAssetDeletedEventHandler(gp)
-		releaseHandler := handler.NewReleaseEventHandler(gp, cl)
-		daoReleaseHandler := handler.NewDaoCreateReleaseEventHandler(gp, cl)
-
-		mergeDone, mergeSubscribeErr := mtmc.Subscribe(ctx, mergeHandler.Handle)
-		daoMergeDone, daoMergeSubscribeErr := dmtmc.Subscribe(ctx, daoMergeHandler.Handle)
-		challengeDone, challengeSubscribeErr := ctmc.Subscribe(ctx, challengeHandler.Handle)
-
-		// Subscribe to release events
-		createReleaseTMC, err := gitopia.NewWSEvents(ctx, CreateReleaseQuery)
-		if err != nil {
-			eventErrChan <- errors.WithMessage(err, "create release tm error")
-			return
-		}
-		createReleaseDone, createReleaseSubscribeErr := createReleaseTMC.Subscribe(ctx, func(ctx context.Context, eventBuf []byte) error {
+	client2EventHandlers := map[string]func(context.Context, []byte) error{
+		CreateReleaseQuery: func(ctx context.Context, eventBuf []byte) error {
 			return releaseHandler.Handle(ctx, eventBuf, handler.EventCreateReleaseType)
-		})
-
-		daoCreateReleaseTMC, err := gitopia.NewWSEvents(ctx, DaoCreateReleaseQuery)
-		if err != nil {
-			eventErrChan <- errors.WithMessage(err, "create dao release tm error")
-			return
-		}
-		daoCreateReleaseDone, daoCreateReleaseSubscribeErr := daoCreateReleaseTMC.Subscribe(ctx, daoReleaseHandler.Handle)
-
-		updateReleaseTMC, err := gitopia.NewWSEvents(ctx, UpdateReleaseQuery)
-		if err != nil {
-			eventErrChan <- errors.WithMessage(err, "update release tm error")
-			return
-		}
-		updateReleaseDone, updateReleaseSubscribeErr := updateReleaseTMC.Subscribe(ctx, func(ctx context.Context, eventBuf []byte) error {
+		},
+		UpdateReleaseQuery: func(ctx context.Context, eventBuf []byte) error {
 			return releaseHandler.Handle(ctx, eventBuf, handler.EventUpdateReleaseType)
-		})
-
-		deleteReleaseTMC, err := gitopia.NewWSEvents(ctx, DeleteReleaseQuery)
-		if err != nil {
-			eventErrChan <- errors.WithMessage(err, "delete release tm error")
-			return
-		}
-		deleteReleaseDone, deleteReleaseSubscribeErr := deleteReleaseTMC.Subscribe(ctx, func(ctx context.Context, eventBuf []byte) error {
+		},
+		DeleteReleaseQuery: func(ctx context.Context, eventBuf []byte) error {
 			return releaseHandler.Handle(ctx, eventBuf, handler.EventDeleteReleaseType)
-		})
-
-		// Only subscribe to packfile and release asset events if external pinning is enabled
-		var packfileUpdatedDone, releaseAssetUpdatedDone, releaseAssetDeletedDone <-chan struct{}
-		var packfileUpdatedSubscribeErr, releaseAssetUpdatedSubscribeErr, releaseAssetDeletedSubscribeErr <-chan error
-		if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
-			packfileUpdatedDone, packfileUpdatedSubscribeErr = putmc.Subscribe(ctx, packfileUpdatedHandler.Handle)
-			releaseAssetUpdatedDone, releaseAssetUpdatedSubscribeErr = rautmc.Subscribe(ctx, releaseAssetUpdatedHandler.Handle)
-			releaseAssetDeletedDone, releaseAssetDeletedSubscribeErr = radtmc.Subscribe(ctx, releaseAssetDeletedHandler.Handle)
-		}
-
-		select {
-		case err = <-mergeSubscribeErr:
-			eventErrChan <- errors.WithMessage(err, "merge tm subscribe error")
-		case <-mergeDone:
-			logger.FromContext(ctx).Info("merge done")
-		case err = <-daoMergeSubscribeErr:
-			eventErrChan <- errors.WithMessage(err, "dao merge tm subscribe error")
-		case <-daoMergeDone:
-			logger.FromContext(ctx).Info("dao merge done")
-		case err = <-challengeSubscribeErr:
-			eventErrChan <- errors.WithMessage(err, "challenge tm subscribe error")
-		case <-challengeDone:
-			logger.FromContext(ctx).Info("challenge done")
-		case err = <-packfileUpdatedSubscribeErr:
-			if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
-				eventErrChan <- errors.WithMessage(err, "packfile updated tm subscribe error")
-			}
-		case <-packfileUpdatedDone:
-			if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
-				logger.FromContext(ctx).Info("packfile updated done")
-			}
-		case err = <-releaseAssetUpdatedSubscribeErr:
-			if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
-				eventErrChan <- errors.WithMessage(err, "release asset updated tm subscribe error")
-			}
-		case <-releaseAssetUpdatedDone:
-			if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
-				logger.FromContext(ctx).Info("release asset updated done")
-			}
-		case err = <-releaseAssetDeletedSubscribeErr:
-			if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
-				eventErrChan <- errors.WithMessage(err, "release asset deleted tm subscribe error")
-			}
-		case <-releaseAssetDeletedDone:
-			if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
-				logger.FromContext(ctx).Info("release asset deleted done")
-			}
-		case err = <-createReleaseSubscribeErr:
-			eventErrChan <- errors.WithMessage(err, "create release tm subscribe error")
-		case <-createReleaseDone:
-			logger.FromContext(ctx).Info("create release done")
-		case err = <-daoCreateReleaseSubscribeErr:
-			eventErrChan <- errors.WithMessage(err, "create dao release tm subscribe error")
-		case <-daoCreateReleaseDone:
-			logger.FromContext(ctx).Info("create dao release done")
-		case err = <-updateReleaseSubscribeErr:
-			eventErrChan <- errors.WithMessage(err, "update release tm subscribe error")
-		case <-updateReleaseDone:
-			logger.FromContext(ctx).Info("update release done")
-		case err = <-deleteReleaseSubscribeErr:
-			eventErrChan <- errors.WithMessage(err, "delete release tm subscribe error")
-		case <-deleteReleaseDone:
-			logger.FromContext(ctx).Info("delete release done")
-		case <-ctx.Done():
-			eventErrChan <- ctx.Err()
-		}
-	}()
-
-	// Start web server in a goroutine
-	webErrChan := make(chan error, 1)
-	go func() {
-		server, err := setupWebServer(cmd)
-		if err != nil {
-			webErrChan <- err
-			return
-		}
-
-		webErrChan <- server.ListenAndServe()
-	}()
-
-	// Wait for either service to error out
-	select {
-	case err := <-eventErrChan:
-		return errors.Wrap(err, "event processor error")
-	case err := <-webErrChan:
-		return errors.Wrap(err, "web server error")
+		},
+		DaoCreateReleaseQuery: func(ctx context.Context, eventBuf []byte) error {
+			return daoReleaseHandler.Handle(ctx, eventBuf, handler.EventDaoCreateReleaseType)
+		},
+		DeleteRepositoryQuery: func(ctx context.Context, eventBuf []byte) error {
+			return deleteRepositoryHandler.Handle(ctx, eventBuf)
+		},
 	}
+
+	g, gCtx := errgroup.WithContext(ctx)
+
+	// Start client 1 event processor
+	g.Go(func() error {
+		done, errChan := client1.ProcessEvents(gCtx, func(ctx context.Context, eventBuf []byte) error {
+			return routeEventToHandler(ctx, eventBuf, client1EventHandlers)
+		})
+		select {
+		case err := <-errChan:
+			return errors.Wrap(err, "client 1 event processing error")
+		case <-done:
+			logger.FromContext(ctx).Info("client 1 event processing completed")
+			return nil
+		}
+	})
+
+	// Start client 2 event processor
+	g.Go(func() error {
+		done, errChan := client2.ProcessEvents(gCtx, func(ctx context.Context, eventBuf []byte) error {
+			return routeEventToHandler(ctx, eventBuf, client2EventHandlers)
+		})
+		select {
+		case err := <-errChan:
+			return errors.Wrap(err, "client 2 event processing error")
+		case <-done:
+			logger.FromContext(ctx).Info("client 2 event processing completed")
+			return nil
+		}
+	})
+
+	// Handle external pinning events if enabled
+	if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
+		logger.FromContext(ctx).Info("external pinning enabled, starting external pinning event processor")
+
+		// Client 3: Packfile, Release Asset, LFS Object and RepositoryDeleted events (4 subscriptions)
+		client3, err := gitopia.NewWSEvents(ctx)
+		if err != nil {
+			return errors.Wrap(err, "failed to create WebSocket client 3")
+		}
+		defer client3.Close()
+
+		client3Queries := []string{
+			PackfileUpdatedQuery,
+			ReleaseAssetsUpdatedQuery,
+			LfsObjectUpdatedQuery,
+			RepositoryDeletedQuery,
+		}
+
+		if err := client3.SubscribeQueries(ctx, client3Queries...); err != nil {
+			return errors.Wrap(err, "failed to subscribe to client 3 events")
+		}
+
+		client3EventHandlers := map[string]func(context.Context, []byte) error{
+			PackfileUpdatedQuery:      packfileUpdatedHandler.Handle,
+			ReleaseAssetsUpdatedQuery: releaseAssetsUpdatedHandler.Handle,
+			LfsObjectUpdatedQuery:     lfsObjectUpdatedHandler.Handle,
+			RepositoryDeletedQuery:    repositoryDeletedHandler.Handle,
+		}
+
+		// Start client 3 event processor
+		g.Go(func() error {
+			done, errChan := client3.ProcessEvents(gCtx, func(ctx context.Context, eventBuf []byte) error {
+				return routeEventToHandler(ctx, eventBuf, client3EventHandlers)
+			})
+			select {
+			case err := <-errChan:
+				return errors.Wrap(err, "client 3 event processing error")
+			case <-done:
+				logger.FromContext(ctx).Info("client 3 event processing completed")
+				return nil
+			}
+		})
+	}
+
+	return g.Wait()
+}
+
+// routeEventToHandler routes events to the appropriate handler based on the query field in the event.
+func routeEventToHandler(ctx context.Context, eventBuf []byte, handlers map[string]func(context.Context, []byte) error) error {
+	// Extract the query from the event buffer
+	query, err := jsonparser.GetString(eventBuf, "query")
+	if err != nil {
+		// This can happen if the event is not a subscription event, so we just log and ignore
+		logger.FromContext(ctx).WithField("event", string(eventBuf)).WithError(err).Debug("failed to parse query from event, ignoring")
+		return nil
+	}
+
+	// Find the handler for this query
+	if handler, ok := handlers[query]; ok {
+		logger.FromContext(ctx).WithFields(logrus.Fields{"query": query}).Debug("routing event to handler")
+		return handler(ctx, eventBuf)
+	}
+
+	// If no handler matches, log and continue
+	logger.FromContext(ctx).WithField("query", query).Debug("no handler found for event query")
+	return nil
+}
+
+func checkClientBalance(ctx context.Context, gitopiaClient gitopia.Client) error {
+	// Create a GitopiaProxy to access balance checking functionality
+	proxy := app.NewGitopiaProxy(gitopiaClient, nil)
+
+	// Get client address
+	clientAddress := proxy.ClientAddress()
+	if clientAddress == "" {
+		return errors.New("client address is empty")
+	}
+
+	// Check client balance
+	balance, err := proxy.CosmosBankBalance(ctx, clientAddress, "ulore")
+	if err != nil {
+		return errors.Wrap(err, "failed to get client balance")
+	}
+
+	minRequiredAmount := sdk.NewInt(100_000_000) // 100 lore
+
+	logrus.WithFields(logrus.Fields{
+		"client_address": clientAddress,
+		"balance":        balance.String(),
+		"denom":          "ulore",
+		"min_required":   minRequiredAmount.String(),
+	}).Info("client balance check")
+
+	// Check if balance is sufficient
+	if balance.Amount.LT(minRequiredAmount) {
+		return errors.Errorf("insufficient balance: have %s, need at least %s for storage operations",
+			balance.String(), minRequiredAmount.String())
+	}
+
+	logrus.Info("client balance check passed")
+	return nil
 }

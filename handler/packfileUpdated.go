@@ -6,9 +6,7 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
-	"strings"
 
-	"github.com/buger/jsonparser"
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia-storage/app"
 	"github.com/gitopia/gitopia-storage/utils"
@@ -25,62 +23,81 @@ type PackfileUpdatedEvent struct {
 	OldCid       string
 	NewName      string
 	OldName      string
+	Deleted      bool
 }
 
-func (e *PackfileUpdatedEvent) UnMarshal(eventBuf []byte) error {
-	repoIdStr, err := jsonparser.GetString(eventBuf, "events", EventPackfileUpdatedType+"."+"repository_id", "[0]")
+func UnmarshalPackfileUpdatedEvent(eventBuf []byte) ([]PackfileUpdatedEvent, error) {
+	var events []PackfileUpdatedEvent
+
+	repoIDs, err := ExtractStringArray(eventBuf, EventPackfileUpdatedType, "repository_id")
 	if err != nil {
-		return errors.Wrap(err, "error parsing repository id")
-	}
-	repoIdStr = strings.Trim(repoIdStr, "\"")
-	repoId, err := strconv.ParseUint(repoIdStr, 10, 64)
-	if err != nil {
-		return errors.Wrap(err, "error parsing repository id")
+		return nil, errors.Wrap(err, "error parsing repository_id")
 	}
 
-	newCid, err := jsonparser.GetString(eventBuf, "events", EventPackfileUpdatedType+"."+"new_cid", "[0]")
+	newCids, err := ExtractStringArray(eventBuf, EventPackfileUpdatedType, "new_cid")
 	if err != nil {
-		return errors.Wrap(err, "error parsing new cid")
+		return nil, errors.Wrap(err, "error parsing new_cid")
 	}
-	newCid = strings.Trim(newCid, "\"")
 
-	oldCid, err := jsonparser.GetString(eventBuf, "events", EventPackfileUpdatedType+"."+"old_cid", "[0]")
+	oldCids, err := ExtractStringArray(eventBuf, EventPackfileUpdatedType, "old_cid")
 	if err != nil {
-		return errors.Wrap(err, "error parsing old cid")
+		return nil, errors.Wrap(err, "error parsing old_cid")
 	}
-	oldCid = strings.Trim(oldCid, "\"")
 
-	newName, err := jsonparser.GetString(eventBuf, "events", EventPackfileUpdatedType+"."+"new_name", "[0]")
+	newNames, err := ExtractStringArray(eventBuf, EventPackfileUpdatedType, "new_name")
 	if err != nil {
-		return errors.Wrap(err, "error parsing new name")
+		return nil, errors.Wrap(err, "error parsing new_name")
 	}
-	newName = strings.Trim(newName, "\"")
 
-	oldName, err := jsonparser.GetString(eventBuf, "events", EventPackfileUpdatedType+"."+"old_name", "[0]")
+	oldNames, err := ExtractStringArray(eventBuf, EventPackfileUpdatedType, "old_name")
 	if err != nil {
-		return errors.Wrap(err, "error parsing old name")
+		return nil, errors.Wrap(err, "error parsing old_name")
 	}
-	oldName = strings.Trim(oldName, "\"")
 
-	e.RepositoryId = repoId
-	e.NewCid = newCid
-	e.OldCid = oldCid
-	e.NewName = newName
-	e.OldName = oldName
+	deleteds, err := ExtractStringArray(eventBuf, EventPackfileUpdatedType, "deleted")
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing deleted")
+	}
 
-	return nil
+	// Basic validation
+	if len(repoIDs) == 0 {
+		return events, nil // No events to process
+	}
+
+	if !(len(repoIDs) == len(newCids) && len(repoIDs) == len(oldCids) && len(repoIDs) == len(newNames) && len(repoIDs) == len(oldNames) && len(repoIDs) == len(deleteds)) {
+		return nil, errors.New("mismatched attribute array lengths for PackfileUpdatedEvent")
+	}
+
+	for i := 0; i < len(repoIDs); i++ {
+		repoId, err := strconv.ParseUint(repoIDs[i], 10, 64)
+		if err != nil {
+			return nil, errors.Wrap(err, "error parsing repository id")
+		}
+
+		deleted, err := strconv.ParseBool(deleteds[i])
+		if err != nil {
+			return nil, errors.Wrap(err, "error parsing deleted flag")
+		}
+
+		events = append(events, PackfileUpdatedEvent{
+			RepositoryId: repoId,
+			NewCid:       newCids[i],
+			OldCid:       oldCids[i],
+			NewName:      newNames[i],
+			OldName:      oldNames[i],
+			Deleted:      deleted,
+		})
+	}
+
+	return events, nil
 }
 
 type PackfileUpdatedEventHandler struct {
-	gc           app.GitopiaProxy
+	gc           *app.GitopiaProxy
 	pinataClient *PinataClient
 }
 
-func NewPackfileUpdatedEventHandler(g app.GitopiaProxy) PackfileUpdatedEventHandler {
-	var pinataClient *PinataClient
-	if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
-		pinataClient = NewPinataClient(viper.GetString("PINATA_JWT"))
-	}
+func NewPackfileUpdatedEventHandler(g *app.GitopiaProxy, pinataClient *PinataClient) PackfileUpdatedEventHandler {
 	return PackfileUpdatedEventHandler{
 		gc:           g,
 		pinataClient: pinataClient,
@@ -88,18 +105,23 @@ func NewPackfileUpdatedEventHandler(g app.GitopiaProxy) PackfileUpdatedEventHand
 }
 
 func (h *PackfileUpdatedEventHandler) Handle(ctx context.Context, eventBuf []byte) error {
-	// Skip processing if external pinning is not enabled
-	if !viper.GetBool("ENABLE_EXTERNAL_PINNING") {
-		return nil
-	}
-
-	event := &PackfileUpdatedEvent{}
-	err := event.UnMarshal(eventBuf)
+	events, err := UnmarshalPackfileUpdatedEvent(eventBuf)
 	if err != nil {
 		return errors.WithMessage(err, "event parse error")
 	}
 
-	return h.Process(ctx, *event)
+	for _, event := range events {
+		if err := h.Process(ctx, event); err != nil {
+			// Log error and continue processing other events
+			logger.FromContext(ctx).WithFields(logrus.Fields{
+				"repository_id": event.RepositoryId,
+				"new_cid":       event.NewCid,
+				"old_cid":       event.OldCid,
+			}).WithError(err).Error("failed to process PackfileUpdatedEvent")
+		}
+	}
+
+	return nil
 }
 
 func (h *PackfileUpdatedEventHandler) Process(ctx context.Context, event PackfileUpdatedEvent) error {
@@ -107,10 +129,10 @@ func (h *PackfileUpdatedEventHandler) Process(ctx context.Context, event Packfil
 		"repository_id": event.RepositoryId,
 		"new_cid":       event.NewCid,
 		"old_cid":       event.OldCid,
+		"deleted":       event.Deleted,
 	}).Info("processing packfile updated event")
 
-	// Pin to Pinata if enabled
-	if h.pinataClient != nil && event.NewCid != "" {
+	if event.NewCid != "" && !event.Deleted {
 		cacheDir := viper.GetString("GIT_REPOS_DIR")
 
 		// cache repo
@@ -136,17 +158,52 @@ func (h *PackfileUpdatedEventHandler) Process(ctx context.Context, event Packfil
 		}
 	}
 
-	// Unpin old packfile from Pinata if enabled
-	if h.pinataClient != nil && event.OldCid != "" && event.OldCid != event.NewCid {
-		err := h.pinataClient.UnpinFile(ctx, event.OldName)
+	// Unpin old packfile from Pinata
+	if event.OldCid != "" && event.OldCid != event.NewCid {
+		refCount, err := h.gc.StorageCidReferenceCount(ctx, event.OldCid)
 		if err != nil {
-			logger.FromContext(ctx).WithError(err).Error("failed to unpin file from Pinata")
+			logger.FromContext(ctx).WithError(err).Error("failed to get packfile reference count")
+			return err
 		}
-		logger.FromContext(ctx).WithFields(logrus.Fields{
-			"repository_id": event.RepositoryId,
-			"old_name":      event.OldName,
-			"old_cid":       event.OldCid,
-		}).Info("unpinned file from Pinata")
+
+		if refCount == 0 {
+			err := h.pinataClient.UnpinFile(ctx, event.OldName)
+			if err != nil {
+				logger.FromContext(ctx).WithError(err).Error("failed to unpin file from Pinata")
+			}
+			logger.FromContext(ctx).WithFields(logrus.Fields{
+				"repository_id": event.RepositoryId,
+				"old_name":      event.OldName,
+				"old_cid":       event.OldCid,
+			}).Info("unpinned file from Pinata")
+		}
 	}
+
+	// Handle deletion case - unpin the packfile from Pinata if deleted and no references exist
+	if event.Deleted {
+		refCount, err := h.gc.StorageCidReferenceCount(ctx, event.NewCid)
+		if err != nil {
+			logger.FromContext(ctx).WithError(err).Error("failed to get packfile reference count")
+			return err
+		}
+
+		if refCount == 0 {
+			err := h.pinataClient.UnpinFile(ctx, event.NewName)
+			if err != nil {
+				logger.FromContext(ctx).WithFields(logrus.Fields{
+					"repository_id": event.RepositoryId,
+					"name":          event.NewName,
+					"cid":           event.NewCid,
+				}).WithError(err).Error("failed to unpin packfile from Pinata")
+			} else {
+				logger.FromContext(ctx).WithFields(logrus.Fields{
+					"repository_id": event.RepositoryId,
+					"name":          event.NewName,
+					"cid":           event.NewCid,
+				}).Info("successfully unpinned packfile from Pinata")
+			}
+		}
+	}
+
 	return nil
 }

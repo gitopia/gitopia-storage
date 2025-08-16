@@ -8,14 +8,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/buger/jsonparser"
-	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia-storage/app"
 	"github.com/gitopia/gitopia-storage/pkg/merkleproof"
+	"github.com/gitopia/gitopia-storage/utils"
 	gitopiatypes "github.com/gitopia/gitopia/v6/x/gitopia/types"
 	storagetypes "github.com/gitopia/gitopia/v6/x/storage/types"
-	"github.com/ipfs-cluster/ipfs-cluster/api"
 	ipfsclusterclient "github.com/ipfs-cluster/ipfs-cluster/api/rest/client"
 	"github.com/ipfs/boxo/files"
 	"github.com/pkg/errors"
@@ -24,67 +22,102 @@ import (
 )
 
 const (
-	EventCreateReleaseType = "CreateRelease"
-	EventUpdateReleaseType = "UpdateRelease"
-	EventDeleteReleaseType = "DeleteRelease"
+	EventCreateReleaseType    = "CreateRelease"
+	EventUpdateReleaseType    = "UpdateRelease"
+	EventDeleteReleaseType    = "DeleteRelease"
+	EventDaoCreateReleaseType = "DaoCreateRelease"
 )
 
 type ReleaseEvent struct {
-	RepositoryId uint64
-	Tag          string
-	Attachments  []gitopiatypes.Attachment
-	Provider     string
+	Creator           string
+	RepositoryId      uint64
+	RepositoryOwnerId string
+	Tag               string
+	Attachments       []gitopiatypes.Attachment
+	Provider          string
 }
 
-func (e *ReleaseEvent) UnMarshal(eventBuf []byte) error {
-	repoIdStr, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+gitopiatypes.EventAttributeRepoIdKey, "[0]")
-	if err != nil {
-		return errors.Wrap(err, "error parsing repository id")
+func UnmarshalReleaseEvent(eventBuf []byte, eventType string) ([]ReleaseEvent, error) {
+	var events []ReleaseEvent
+
+	var creators []string
+	var err error
+
+	if eventType == EventDaoCreateReleaseType {
+		creators, err = ExtractStringArray(eventBuf, "message", "sender")
+	} else {
+		creators, err = ExtractStringArray(eventBuf, "message", gitopiatypes.EventAttributeCreatorKey)
 	}
-	repoIdStr = strings.Trim(repoIdStr, "\"")
-	repoId, err := strconv.ParseUint(repoIdStr, 10, 64)
 	if err != nil {
-		return errors.Wrap(err, "error parsing repository id")
+		return nil, errors.Wrap(err, "error parsing creator")
 	}
 
-	tag, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+gitopiatypes.EventAttributeReleaseTagNameKey, "[0]")
+	repoIDs, err := ExtractStringArray(eventBuf, "message", gitopiatypes.EventAttributeRepoIdKey)
 	if err != nil {
-		return errors.Wrap(err, "error parsing tag")
-	}
-	tag = strings.Trim(tag, "\"")
-
-	attachmentsStr, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+gitopiatypes.EventAttributeReleaseAttachmentsKey, "[0]")
-	if err != nil {
-		return errors.Wrap(err, "error parsing attachments")
-	}
-	attachmentsStr = strings.Trim(attachmentsStr, "\"")
-
-	// unmarshal attachments
-	var attachments []gitopiatypes.Attachment
-	err = json.Unmarshal([]byte(attachmentsStr), &attachments)
-	if err != nil {
-		return errors.Wrap(err, "error unmarshalling attachments")
+		return nil, errors.Wrap(err, "error parsing repository id")
 	}
 
-	provider, err := jsonparser.GetString(eventBuf, "events", sdk.EventTypeMessage+"."+gitopiatypes.EventAttributeProviderKey, "[0]")
+	repoOwnerIDs, err := ExtractStringArray(eventBuf, "message", gitopiatypes.EventAttributeRepoOwnerIdKey)
 	if err != nil {
-		return errors.Wrap(err, "error parsing provider")
+		return nil, errors.Wrap(err, "error parsing repository owner id")
 	}
-	provider = strings.Trim(provider, "\"")
 
-	e.RepositoryId = repoId
-	e.Tag = tag
-	e.Attachments = attachments
-	e.Provider = provider
-	return nil
+	tags, err := ExtractStringArray(eventBuf, "message", gitopiatypes.EventAttributeReleaseTagNameKey)
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing tag")
+	}
+
+	attachmentsArray, err := ExtractStringArray(eventBuf, "message", gitopiatypes.EventAttributeReleaseAttachmentsKey)
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing attachments")
+	}
+
+	providers, err := ExtractStringArray(eventBuf, "message", gitopiatypes.EventAttributeProviderKey)
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing provider")
+	}
+
+	// Basic validation
+	if len(creators) == 0 {
+		return events, nil // No events to process
+	}
+
+	if !(len(creators) == len(repoIDs) && len(creators) == len(repoOwnerIDs) && len(creators) == len(tags) && len(creators) == len(attachmentsArray) && len(creators) == len(providers)) {
+		return nil, errors.New("mismatched attribute array lengths for ReleaseEvent")
+	}
+
+	for i := 0; i < len(creators); i++ {
+		repoId, err := strconv.ParseUint(repoIDs[i], 10, 64)
+		if err != nil {
+			return nil, errors.Wrap(err, "error parsing repository id")
+		}
+
+		var attachments []gitopiatypes.Attachment
+		attachmentsStr := attachmentsArray[i]
+		err = json.Unmarshal([]byte(attachmentsStr), &attachments)
+		if err != nil {
+			return nil, errors.Wrap(err, "error unmarshalling attachments")
+		}
+
+		events = append(events, ReleaseEvent{
+			Creator:           creators[i],
+			RepositoryId:      repoId,
+			RepositoryOwnerId: repoOwnerIDs[i],
+			Tag:               tags[i],
+			Attachments:       attachments,
+			Provider:          providers[i],
+		})
+	}
+
+	return events, nil
 }
 
 type ReleaseEventHandler struct {
-	gc                app.GitopiaProxy
+	gc                *app.GitopiaProxy
 	ipfsClusterClient ipfsclusterclient.Client
 }
 
-func NewReleaseEventHandler(g app.GitopiaProxy, ipfsClusterClient ipfsclusterclient.Client) ReleaseEventHandler {
+func NewReleaseEventHandler(g *app.GitopiaProxy, ipfsClusterClient ipfsclusterclient.Client) ReleaseEventHandler {
 	return ReleaseEventHandler{
 		gc:                g,
 		ipfsClusterClient: ipfsClusterClient,
@@ -92,74 +125,22 @@ func NewReleaseEventHandler(g app.GitopiaProxy, ipfsClusterClient ipfsclustercli
 }
 
 func (h *ReleaseEventHandler) Handle(ctx context.Context, eventBuf []byte, eventType string) error {
-	event := &ReleaseEvent{}
-	err := event.UnMarshal(eventBuf)
+	events, err := UnmarshalReleaseEvent(eventBuf, eventType)
 	if err != nil {
 		return errors.WithMessage(err, "event parse error")
 	}
 
-	err = h.Process(ctx, *event, eventType)
-	if err != nil {
-		return errors.WithMessage(err, "error processing event")
-	}
-
-	return nil
-}
-
-func (h *ReleaseEventHandler) pinAttachment(ctx context.Context, attachment gitopiatypes.Attachment) (string, error) {
-	// Get attachment file path from attachment directory
-	attachmentDir := viper.GetString("ATTACHMENT_DIR")
-	filePath := fmt.Sprintf("%s/%s", attachmentDir, attachment.Sha)
-
-	// Add and pin the file to IPFS cluster
-	paths := []string{filePath}
-	addParams := api.DefaultAddParams()
-	addParams.Recursive = false
-	addParams.Layout = "balanced"
-
-	outputChan := make(chan api.AddedOutput)
-	var cid api.Cid
-
-	go func() {
-		err := h.ipfsClusterClient.Add(ctx, paths, addParams, outputChan)
-		if err != nil {
-			logger.FromContext(ctx).WithError(err).WithField("attachment", attachment.Name).Error("failed to add file to IPFS cluster")
-			close(outputChan)
+	for _, event := range events {
+		if err := h.Process(ctx, event, eventType); err != nil {
+			// Log error and continue processing other events
+			logger.FromContext(ctx).WithFields(logrus.Fields{
+				"repository_id": event.RepositoryId,
+				"tag":           event.Tag,
+				"event_type":    eventType,
+			}).WithError(err).Error("failed to process ReleaseEvent")
 		}
-	}()
-
-	// Get CID from output channel
-	for output := range outputChan {
-		cid = output.Cid
 	}
 
-	// Pin the file with default options
-	pinOpts := api.PinOptions{
-		ReplicationFactorMin: -1,
-		ReplicationFactorMax: -1,
-		Name:                 attachment.Name,
-	}
-
-	_, err := h.ipfsClusterClient.Pin(ctx, cid, pinOpts)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to pin file in IPFS cluster")
-	}
-
-	return cid.String(), nil
-}
-
-func (h *ReleaseEventHandler) unpinAttachment(ctx context.Context, asset storagetypes.ReleaseAsset) error {
-	// Parse CID from string
-	cid, err := api.DecodeCid(asset.Cid)
-	if err != nil {
-		return errors.Wrap(err, "failed to parse CID")
-	}
-
-	// Unpin the file from IPFS cluster
-	_, err = h.ipfsClusterClient.Unpin(ctx, cid)
-	if err != nil {
-		return errors.Wrap(err, "failed to unpin file from IPFS cluster")
-	}
 	return nil
 }
 
@@ -187,7 +168,7 @@ func (h *ReleaseEventHandler) calculateMerkleRoot(ctx context.Context, attachmen
 	}
 
 	// Calculate merkle root
-	rootHash, err := merkleproof.ComputePackfileMerkleRoot(ipfsFile, 256*1024)
+	rootHash, err := merkleproof.ComputeMerkleRoot(ipfsFile)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to compute merkle root for attachment: %s", attachment.Name)
 	}
@@ -207,6 +188,8 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 		"event_type":    eventType,
 	}).Info("processing release event")
 
+	attachmentDir := viper.GetString("ATTACHMENT_DIR")
+
 	// Get existing release assets if this is an update or delete event
 	existingAssets := make(map[string]storagetypes.ReleaseAsset)
 	if eventType == EventUpdateReleaseType || eventType == EventDeleteReleaseType {
@@ -223,10 +206,12 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 
 	// Handle attachments based on event type
 	switch eventType {
-	case EventCreateReleaseType:
-		// Pin all new attachments
+	case EventCreateReleaseType, EventDaoCreateReleaseType:
+		// Pin all new attachments and propose a batch update
+		var updates []*storagetypes.ReleaseAssetUpdate
 		for _, attachment := range event.Attachments {
-			cid, err := h.pinAttachment(ctx, attachment)
+			filePath := fmt.Sprintf("%s/%s", attachmentDir, attachment.Sha)
+			cid, err := utils.PinFile(h.ipfsClusterClient, filePath)
 			if err != nil {
 				logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
 					"attachment":    attachment.Name,
@@ -252,13 +237,80 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 				continue
 			}
 
-			err = h.gc.UpdateReleaseAsset(ctx, event.RepositoryId, event.Tag, attachment.Name, cid, rootHash, int64(attachment.Size_), attachment.Sha)
+			updates = append(updates, &storagetypes.ReleaseAssetUpdate{
+				Name:      attachment.Name,
+				Cid:       cid,
+				RootHash:  rootHash,
+				Size_:     uint64(attachment.Size_),
+				Sha256:    attachment.Sha,
+				OldSha256: "",
+				OldCid:    "",
+			})
+		}
+
+		if len(updates) > 0 {
+			if err := h.gc.ProposeReleaseAssetsUpdate(ctx, event.Creator, event.RepositoryId, event.Tag, updates); err != nil {
+				logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
+					"repository_id": event.RepositoryId,
+					"tag":           event.Tag,
+				}).Error("failed to propose release assets update")
+				break
+			}
+
+			// Wait for proposal to show up
+			if err := h.gc.PollForUpdate(ctx, func() (bool, error) {
+				return h.gc.CheckProposeReleaseAssetsUpdate(event.RepositoryId, event.Tag, event.Creator)
+			}); err != nil {
+				if errors.Is(err, context.DeadlineExceeded) {
+					logger.FromContext(ctx).WithError(err).Error("timeout waiting for release assets update proposal")
+				} else {
+					logger.FromContext(ctx).WithError(err).Error("failed to verify release assets update proposal")
+				}
+				break
+			}
+
+			logger.FromContext(ctx).WithFields(logrus.Fields{
+				"repository_id": event.RepositoryId,
+				"tag":           event.Tag,
+			}).Info("proposed release assets update")
+		}
+
+	case EventUpdateReleaseType:
+		// Pin new/modified attachments and propose a batch update (including deletions)
+		var updates []*storagetypes.ReleaseAssetUpdate
+		// First, detect deletions
+		for name, existingAsset := range existingAssets {
+			found := false
+			for _, newAttachment := range event.Attachments {
+				if name == newAttachment.Name {
+					found = true
+					break
+				}
+			}
+			if !found {
+				updates = append(updates, &storagetypes.ReleaseAssetUpdate{
+					Name:      existingAsset.Name,
+					OldCid:    existingAsset.Cid,
+					OldSha256: existingAsset.Sha256,
+					Delete:    true,
+				})
+			}
+		}
+		// Then process additions/changes
+		for _, attachment := range event.Attachments {
+			existingAsset, exists := existingAssets[attachment.Name]
+			if exists && existingAsset.Sha256 == attachment.Sha {
+				continue
+			}
+
+			filePath := fmt.Sprintf("%s/%s", attachmentDir, attachment.Sha)
+			newCid, err := utils.PinFile(h.ipfsClusterClient, filePath)
 			if err != nil {
 				logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
 					"attachment":    attachment.Name,
 					"repository_id": event.RepositoryId,
 					"tag":           event.Tag,
-				}).Error("failed to update release asset")
+				}).Error("failed to pin release attachment")
 				continue
 			}
 
@@ -266,239 +318,108 @@ func (h *ReleaseEventHandler) Process(ctx context.Context, event ReleaseEvent, e
 				"attachment":    attachment.Name,
 				"repository_id": event.RepositoryId,
 				"tag":           event.Tag,
-			}).Info("updated release asset")
+			}).Info("pinned release attachment")
 
-		}
-
-	case EventUpdateReleaseType:
-		// Compare existing and new attachments
-		// Unpin removed attachments
-		for _, existingAsset := range existingAssets {
-			found := false
-			for _, newAttachment := range event.Attachments {
-				if existingAsset.Name == newAttachment.Name {
-					found = true
-					break
-				}
-			}
-			if !found {
-				// Delete attachment
-				err := h.gc.DeleteReleaseAsset(ctx, event.RepositoryId, event.Tag, existingAsset.Name)
-				if err != nil {
-					logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
-						"asset":         existingAsset.Name,
-						"repository_id": event.RepositoryId,
-						"tag":           event.Tag,
-					}).Error("failed to delete release attachment")
-					continue
-				}
-
-				logger.FromContext(ctx).WithFields(logrus.Fields{
-					"asset":         existingAsset.Name,
-					"repository_id": event.RepositoryId,
-					"tag":           event.Tag,
-				}).Info("deleted release attachment")
-
-				// Get attachment reference count
-				refCount, err := h.gc.StorageCidReferenceCount(ctx, existingAsset.Cid)
-				if err != nil {
-					logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
-						"asset":         existingAsset.Name,
-						"repository_id": event.RepositoryId,
-						"tag":           event.Tag,
-					}).Error("failed to get attachment reference count")
-					continue
-				}
-				if refCount == 0 {
-					if err := h.unpinAttachment(ctx, existingAsset); err != nil {
-						logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
-							"asset":         existingAsset.Name,
-							"repository_id": event.RepositoryId,
-							"tag":           event.Tag,
-						}).Error("failed to unpin release attachment")
-						continue
-					}
-
-					logger.FromContext(ctx).WithFields(logrus.Fields{
-						"asset":         existingAsset.Name,
-						"repository_id": event.RepositoryId,
-						"tag":           event.Tag,
-					}).Info("unpinned release attachment")
-				}
-			}
-		}
-
-		// Pin new attachments and update if CID changed
-		for _, attachment := range event.Attachments {
-			existingAsset, exists := existingAssets[attachment.Name]
-			if exists {
-				// Pin the new attachment
-				newCid, err := h.pinAttachment(ctx, attachment)
-				if err != nil {
-					logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
-						"attachment":    attachment.Name,
-						"repository_id": event.RepositoryId,
-						"tag":           event.Tag,
-					}).Error("failed to pin release attachment")
-					continue
-				}
-
-				logger.FromContext(ctx).WithFields(logrus.Fields{
-					"attachment":    attachment.Name,
-					"repository_id": event.RepositoryId,
-					"tag":           event.Tag,
-				}).Info("pinned release attachment")
-
-				// If CID is different, unpin old one and update
-				if newCid != existingAsset.Cid {
-					rootHash, err := h.calculateMerkleRoot(ctx, attachment)
-					if err != nil {
-						logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
-							"attachment":    attachment.Name,
-							"repository_id": event.RepositoryId,
-							"tag":           event.Tag,
-						}).Error("failed to calculate merkle root")
-						continue
-					}
-
-					// Update the release asset with new CID and merkle root
-					err = h.gc.UpdateReleaseAsset(ctx, event.RepositoryId, event.Tag, attachment.Name, newCid, rootHash, int64(attachment.Size_), attachment.Sha)
-					if err != nil {
-						logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
-							"attachment":    attachment.Name,
-							"repository_id": event.RepositoryId,
-							"tag":           event.Tag,
-						}).Error("failed to update release asset")
-						continue
-					}
-
-					logger.FromContext(ctx).WithFields(logrus.Fields{
-						"attachment":    attachment.Name,
-						"repository_id": event.RepositoryId,
-						"tag":           event.Tag,
-					}).Info("updated release asset")
-
-					// Check reference count
-					refCount, err := h.gc.StorageCidReferenceCount(ctx, existingAsset.Cid)
-					if err != nil {
-						logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
-							"asset":         existingAsset.Name,
-							"repository_id": event.RepositoryId,
-							"tag":           event.Tag,
-						}).Error("failed to get release attachment reference count")
-						continue
-					}
-					if refCount == 0 {
-						if err := h.unpinAttachment(ctx, existingAsset); err != nil {
-							logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
-								"asset":         existingAsset.Name,
-								"repository_id": event.RepositoryId,
-								"tag":           event.Tag,
-							}).Error("failed to unpin old release attachment")
-							continue
-						}
-
-						logger.FromContext(ctx).WithFields(logrus.Fields{
-							"attachment":    attachment.Name,
-							"repository_id": event.RepositoryId,
-							"tag":           event.Tag,
-						}).Info("unpinned old release attachment")
-					}
-				}
-			} else {
-				// This is a completely new attachment
-				newCid, err := h.pinAttachment(ctx, attachment)
-				if err != nil {
-					logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
-						"attachment":    attachment.Name,
-						"repository_id": event.RepositoryId,
-						"tag":           event.Tag,
-					}).Error("failed to pin release attachment")
-					continue
-				}
-
-				logger.FromContext(ctx).WithFields(logrus.Fields{
-					"attachment":    attachment.Name,
-					"repository_id": event.RepositoryId,
-					"tag":           event.Tag,
-				}).Info("pinned release attachment")
-
-				rootHash, err := h.calculateMerkleRoot(ctx, attachment)
-				if err != nil {
-					logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
-						"attachment":    attachment.Name,
-						"repository_id": event.RepositoryId,
-						"tag":           event.Tag,
-					}).Error("failed to calculate merkle root")
-					continue
-				}
-
-				// Update the release asset with new CID and merkle root
-				err = h.gc.UpdateReleaseAsset(ctx, event.RepositoryId, event.Tag, attachment.Name, newCid, rootHash, int64(attachment.Size_), attachment.Sha)
-				if err != nil {
-					logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
-						"attachment":    attachment.Name,
-						"repository_id": event.RepositoryId,
-						"tag":           event.Tag,
-					}).Error("failed to update release asset")
-					continue
-				}
-
-				logger.FromContext(ctx).WithFields(logrus.Fields{
-					"attachment":    attachment.Name,
-					"repository_id": event.RepositoryId,
-					"tag":           event.Tag,
-				}).Info("updated release asset")
-			}
-		}
-
-	case EventDeleteReleaseType:
-		// Unpin all attachments
-		for _, existingAsset := range existingAssets {
-			// Delete the release asset
-			err := h.gc.DeleteReleaseAsset(ctx, event.RepositoryId, event.Tag, existingAsset.Name)
+			rootHash, err := h.calculateMerkleRoot(ctx, attachment)
 			if err != nil {
 				logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
-					"asset":         existingAsset.Name,
+					"attachment":    attachment.Name,
 					"repository_id": event.RepositoryId,
 					"tag":           event.Tag,
-				}).Error("failed to delete release asset")
+				}).Error("failed to calculate merkle root")
 				continue
+			}
+
+			if exists {
+				// Only include if CID changed
+				if newCid != existingAsset.Cid {
+					updates = append(updates, &storagetypes.ReleaseAssetUpdate{
+						Name:      attachment.Name,
+						Cid:       newCid,
+						RootHash:  rootHash,
+						Size_:     uint64(attachment.Size_),
+						Sha256:    attachment.Sha,
+						OldSha256: existingAsset.Sha256,
+						OldCid:    existingAsset.Cid,
+					})
+				}
+			} else {
+				// New attachment
+				updates = append(updates, &storagetypes.ReleaseAssetUpdate{
+					Name:      attachment.Name,
+					Cid:       newCid,
+					RootHash:  rootHash,
+					Size_:     uint64(attachment.Size_),
+					Sha256:    attachment.Sha,
+					OldSha256: "",
+					OldCid:    "",
+				})
+			}
+		}
+
+		if len(updates) > 0 {
+			if err := h.gc.ProposeReleaseAssetsUpdate(ctx, event.Creator, event.RepositoryId, event.Tag, updates); err != nil {
+				logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
+					"repository_id": event.RepositoryId,
+					"tag":           event.Tag,
+				}).Error("failed to propose release assets update")
+				break
+			}
+
+			// Wait for proposal to show up
+			if err := h.gc.PollForUpdate(ctx, func() (bool, error) {
+				return h.gc.CheckProposeReleaseAssetsUpdate(event.RepositoryId, event.Tag, event.Creator)
+			}); err != nil {
+				if errors.Is(err, context.DeadlineExceeded) {
+					logger.FromContext(ctx).WithError(err).Error("timeout waiting for release assets update proposal")
+				} else {
+					logger.FromContext(ctx).WithError(err).Error("failed to verify release assets update proposal")
+				}
+				break
 			}
 
 			logger.FromContext(ctx).WithFields(logrus.Fields{
-				"asset":         existingAsset.Name,
 				"repository_id": event.RepositoryId,
 				"tag":           event.Tag,
-			}).Info("deleted release asset")
+			}).Info("proposed release assets update")
+		}
 
-			// Check reference count
-			refCount, err := h.gc.StorageCidReferenceCount(ctx, existingAsset.Cid)
-			if err != nil {
+	case EventDeleteReleaseType:
+		// Build a delete-only proposal for all existing assets
+		var updates []*storagetypes.ReleaseAssetUpdate
+		for _, existingAsset := range existingAssets {
+			updates = append(updates, &storagetypes.ReleaseAssetUpdate{
+				Name:      existingAsset.Name,
+				OldCid:    existingAsset.Cid,
+				OldSha256: existingAsset.Sha256,
+				Delete:    true,
+			})
+		}
+		if len(updates) > 0 {
+			if err := h.gc.ProposeReleaseAssetsUpdate(ctx, event.Creator, event.RepositoryId, event.Tag, updates); err != nil {
 				logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
-					"asset":         existingAsset.Name,
 					"repository_id": event.RepositoryId,
 					"tag":           event.Tag,
-				}).Error("failed to get release attachment reference count")
-				continue
+				}).Error("failed to propose release assets delete update")
+				break
 			}
-			if refCount == 0 {
-				// Unpin from IPFS cluster
-				if err := h.unpinAttachment(ctx, existingAsset); err != nil {
-					logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
-						"asset":         existingAsset.Name,
-						"repository_id": event.RepositoryId,
-						"tag":           event.Tag,
-					}).Error("failed to unpin release attachment")
-					continue
-				}
 
-				logger.FromContext(ctx).WithFields(logrus.Fields{
-					"asset":         existingAsset.Name,
-					"repository_id": event.RepositoryId,
-					"tag":           event.Tag,
-				}).Info("unpinned release attachment")
+			// Wait for proposal to show up
+			if err := h.gc.PollForUpdate(ctx, func() (bool, error) {
+				return h.gc.CheckProposeReleaseAssetsUpdate(event.RepositoryId, event.Tag, event.Creator)
+			}); err != nil {
+				if errors.Is(err, context.DeadlineExceeded) {
+					logger.FromContext(ctx).WithError(err).Error("timeout waiting for release assets delete proposal")
+				} else {
+					logger.FromContext(ctx).WithError(err).Error("failed to verify release assets delete proposal")
+				}
+				break
 			}
+
+			logger.FromContext(ctx).WithFields(logrus.Fields{
+				"repository_id": event.RepositoryId,
+				"tag":           event.Tag,
+			}).Info("proposed release assets delete update")
 		}
 	}
 

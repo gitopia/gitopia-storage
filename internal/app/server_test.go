@@ -44,7 +44,7 @@ func TestGETInfoRefs(t *testing.T) {
 				PreReceive:  "gitopia-pre-receive",
 				PostReceive: "gitopia-post-receive",
 			},
-		})
+		}, nil)
 		require.NoError(t, err)
 
 		req := &app.Request{
