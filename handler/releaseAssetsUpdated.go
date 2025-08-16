@@ -2,12 +2,11 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path"
 	"strconv"
-	"strings"
 
-	"github.com/buger/jsonparser"
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia-storage/app"
 	"github.com/gitopia/gitopia-storage/utils"
@@ -74,46 +73,7 @@ func UnmarshalReleaseAssetsUpdatedEvent(eventBuf []byte) ([]ReleaseAssetsUpdated
 
 		var assets []ReleaseAssetUpdate
 		assetsStr := assetsArray[i]
-		_, err = jsonparser.ArrayEach([]byte(assetsStr), func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
-			if err != nil {
-				return
-			}
-
-			asset := ReleaseAssetUpdate{}
-
-			name, err := jsonparser.GetString(value, "name")
-			if err == nil {
-				asset.Name = strings.Trim(name, "\"")
-			}
-
-			newCid, err := jsonparser.GetString(value, "cid")
-			if err == nil {
-				asset.Cid = strings.Trim(newCid, "\"")
-			}
-
-			oldCid, err := jsonparser.GetString(value, "old_cid")
-			if err == nil {
-				asset.OldCid = strings.Trim(oldCid, "\"")
-			}
-
-			sha256, err := jsonparser.GetString(value, "sha256")
-			if err == nil {
-				asset.Sha256 = strings.Trim(sha256, "\"")
-			}
-
-			oldSha256, err := jsonparser.GetString(value, "old_sha256")
-			if err == nil {
-				asset.OldSha256 = strings.Trim(oldSha256, "\"")
-			}
-
-			// Parse delete field
-			deleteFlag, err := jsonparser.GetBoolean(value, "delete")
-			if err == nil {
-				asset.Delete = deleteFlag
-			}
-
-			assets = append(assets, asset)
-		})
+		err = json.Unmarshal([]byte(assetsStr), &assets)
 		if err != nil {
 			return nil, errors.Wrap(err, "error parsing assets")
 		}

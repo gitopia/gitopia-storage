@@ -2,12 +2,12 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
 
-	"github.com/buger/jsonparser"
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia-storage/app"
 	"github.com/gitopia/gitopia-storage/pkg/merkleproof"
@@ -86,14 +86,7 @@ func UnmarshalReleaseEvent(eventBuf []byte) ([]ReleaseEvent, error) {
 
 		var attachments []gitopiatypes.Attachment
 		attachmentsStr := attachmentsArray[i]
-		_, err = jsonparser.ArrayEach([]byte(attachmentsStr), func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
-			attachment := gitopiatypes.Attachment{}
-			name, _ := jsonparser.GetString(value, "name")
-			attachment.Name = name
-			sha, _ := jsonparser.GetString(value, "sha256")
-			attachment.Sha = sha
-			attachments = append(attachments, attachment)
-		})
+		err = json.Unmarshal([]byte(attachmentsStr), &attachments)
 		if err != nil {
 			return nil, errors.Wrap(err, "error unmarshalling attachments")
 		}

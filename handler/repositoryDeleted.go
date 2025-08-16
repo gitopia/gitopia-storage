@@ -2,10 +2,10 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 
-	"github.com/buger/jsonparser"
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia-storage/app"
 	"github.com/pkg/errors"
@@ -85,32 +85,14 @@ func UnmarshalRepositoryDeletedEvent(eventBuf []byte) ([]RepositoryDeletedEvent,
 
 		var releaseAssets []ReleaseAsset
 		releaseAssetsStr := releaseAssetsArray[i]
-		_, err = jsonparser.ArrayEach([]byte(releaseAssetsStr), func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
-			asset := ReleaseAsset{}
-			name, _ := jsonparser.GetString(value, "name")
-			asset.Name = name
-			cid, _ := jsonparser.GetString(value, "cid")
-			asset.Cid = cid
-			sha, _ := jsonparser.GetString(value, "sha256")
-			asset.Sha = sha
-			tag, _ := jsonparser.GetString(value, "tag")
-			asset.Tag = tag
-			releaseAssets = append(releaseAssets, asset)
-		})
+		err = json.Unmarshal([]byte(releaseAssetsStr), &releaseAssets)
 		if err != nil {
 			return nil, errors.Wrap(err, "error parsing release assets")
 		}
 
 		var lfsObjects []LFSObject
 		lfsObjectsStr := lfsObjectsArray[i]
-		_, err = jsonparser.ArrayEach([]byte(lfsObjectsStr), func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
-			lfsObject := LFSObject{}
-			oid, _ := jsonparser.GetString(value, "oid")
-			lfsObject.Oid = oid
-			cid, _ := jsonparser.GetString(value, "cid")
-			lfsObject.Cid = cid
-			lfsObjects = append(lfsObjects, lfsObject)
-		})
+		err = json.Unmarshal([]byte(lfsObjectsStr), &lfsObjects)
 		if err != nil {
 			return nil, errors.Wrap(err, "error parsing lfs objects")
 		}
