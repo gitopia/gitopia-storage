@@ -82,11 +82,11 @@ func UnmarshalReleaseEvent(eventBuf []byte, eventType string) ([]ReleaseEvent, e
 		return events, nil // No events to process
 	}
 
-	if !(len(creators) == len(repoIDs) && len(creators) == len(repoOwnerIDs) && len(creators) == len(tags) && len(creators) == len(attachmentsArray) && len(creators) == len(providers)) {
+	if !(len(repoIDs) == len(repoOwnerIDs) && len(repoIDs) == len(tags) && len(repoIDs) == len(attachmentsArray) && len(repoIDs) == len(providers)) {
 		return nil, errors.New("mismatched attribute array lengths for ReleaseEvent")
 	}
 
-	for i := 0; i < len(creators); i++ {
+	for i := 0; i < len(repoIDs); i++ {
 		repoId, err := strconv.ParseUint(repoIDs[i], 10, 64)
 		if err != nil {
 			return nil, errors.Wrap(err, "error parsing repository id")
