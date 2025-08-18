@@ -39,6 +39,59 @@ The Gitopia Storage Provider leverages a layered storage architecture, with the 
 
 ---
 
+## Security Considerations
+
+When deploying the Gitopia Storage Provider in a production environment, it's crucial to follow security best practices to protect your data and infrastructure. This section outlines key security considerations based on IPFS Cluster's guidelines.
+
+### Cluster Secret
+
+The `CLUSTER_SECRET` is a 32-byte hex-encoded pre-shared key that acts as a network protector for libp2p communications between cluster peers. It provides additional encryption and is essential for network isolation.
+
+- **Always set a strong, unique secret:** Never run with an empty secret. It prevents your cluster peers from accidentally discovering and connecting to the public IPFS network.
+- **Keep it private:** This secret should be treated like a password. Share it only with trusted cluster peers.
+
+### Trusted Peers (CRDT Mode)
+
+In CRDT mode, the `CLUSTER_TRUSTED_PEERS` configuration controls which peers are authorized to modify the cluster's pinset and perform administrative actions. This is a critical security measure.
+
+- **Never use `*` in production:** The default Docker Compose configuration uses `CLUSTER_CRDT_TRUSTEDPEERS=*`, which trusts any peer. This is highly insecure for production deployments.
+- **Explicitly list trusted peers:** Configure `CLUSTER_TRUSTED_PEERS` with the specific multiaddresses of trusted nodes. You can retrieve these addresses using:
+  ```sh
+  ./gitopia-storaged get-ipfs-cluster-peer-addresses
+  ```
+  Then update your `.env` file or `service.json` accordingly.
+
+### Port Security
+
+IPFS Cluster uses several ports for different purposes. Properly securing these ports is vital to prevent unauthorized access.
+
+- **Cluster Swarm (`tcp:9096`):**
+  - Controlled by `cluster.listen_multiaddress` (defaults to `/ip4/0.0.0.0/tcp/9096`).
+  - Protected by the shared `CLUSTER_SECRET`.
+  - **It is generally safe to expose this port**, but ensure your cluster secret is strong.
+
+- **HTTP API (`tcp:9094`) and IPFS Pinning Service API (`tcp:9097`):**
+  - These endpoints provide full administrative control over the cluster peer.
+  - By default, they listen on `127.0.0.1` for security.
+  - **Only expose these ports if absolutely necessary**, and always configure SSL and Basic Authentication.
+
+- **IPFS API (`tcp:5001`) and IPFS Gateway (`tcp:8080`):**
+  - These are the standard IPFS Kubo ports.
+  - The API should **never** be exposed to the public internet. It should only listen on `127.0.0.1`.
+  - The Gateway (`8080`) can be exposed if you intend to serve content publicly, but consider using a reverse proxy with rate limiting and security headers.
+
+- **IPFS Proxy (`tcp:9095`):**
+  - Controlled by `ipfshttp.proxy_listen_multiaddress` (defaults to `/ip4/127.0.0.1/tcp/9095`).
+  - This endpoint mimics the IPFS API and should **never** be exposed without authentication.
+  - It runs on localhost by default, which is secure.
+
+- **Gitopia Storage Provider (`tcp:5000`):**
+  - This is the main application port.
+
+For Docker deployments, review the port mappings in `docker-compose.yml` and ensure only necessary ports are exposed to the host.
+
+---
+
 ## Installation Guide
 
 We offer two methods for installation. The Docker method is recommended for ease of deployment and management.

@@ -34,7 +34,6 @@ type InvokeMergePullRequestEvent struct {
 	Creator        string
 	RepositoryId   uint64
 	PullRequestIid uint64
-	TxHeight       uint64
 	Provider       string
 }
 
@@ -63,11 +62,6 @@ func UnmarshalInvokeMergePullRequestEvent(eventBuf []byte, eventType string) ([]
 		return nil, errors.Wrap(err, "error parsing pull request iid")
 	}
 
-	txHeights, err := ExtractStringArray(eventBuf, "message", "tx.height")
-	if err != nil {
-		return nil, errors.Wrap(err, "error parsing tx height")
-	}
-
 	providers, err := ExtractStringArray(eventBuf, "message", types.EventAttributeProviderKey)
 	if err != nil {
 		return nil, errors.Wrap(err, "error parsing provider")
@@ -78,11 +72,11 @@ func UnmarshalInvokeMergePullRequestEvent(eventBuf []byte, eventType string) ([]
 		return events, nil // No events to process
 	}
 
-	if !(len(creators) == len(repositoryIDs) && len(creators) == len(pullRequestIids) && len(creators) == len(txHeights) && len(creators) == len(providers)) {
+	if !(len(repositoryIDs) == len(pullRequestIids) && len(repositoryIDs) == len(providers)) {
 		return nil, errors.New("mismatched attribute array lengths for InvokeMergePullRequestEvent")
 	}
 
-	for i := 0; i < len(creators); i++ {
+	for i := 0; i < len(repositoryIDs); i++ {
 		repositoryId, err := strconv.ParseUint(repositoryIDs[i], 10, 64)
 		if err != nil {
 			return nil, errors.Wrap(err, "error parsing repository id")
@@ -93,16 +87,10 @@ func UnmarshalInvokeMergePullRequestEvent(eventBuf []byte, eventType string) ([]
 			return nil, errors.Wrap(err, "error parsing pull request iid")
 		}
 
-		height, err := strconv.ParseUint(txHeights[i], 10, 64)
-		if err != nil {
-			return nil, errors.Wrap(err, "error parsing height")
-		}
-
 		events = append(events, InvokeMergePullRequestEvent{
 			Creator:        creators[i],
 			RepositoryId:   repositoryId,
 			PullRequestIid: iid,
-			TxHeight:       height,
 			Provider:       providers[i],
 		})
 	}
@@ -151,7 +139,6 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 		"creator":          event.Creator,
 		"repository_id":    event.RepositoryId,
 		"pull_request_iid": event.PullRequestIid,
-		"tx_height":        event.TxHeight,
 	})
 
 	// Get pull request details
@@ -223,7 +210,6 @@ func (h *InvokeMergePullRequestEventHandler) Process(ctx context.Context, event 
 		"creator":          event.Creator,
 		"repository_id":    event.RepositoryId,
 		"pull_request_iid": event.PullRequestIid,
-		"tx_height":        event.TxHeight,
 	})
 	return nil
 }
