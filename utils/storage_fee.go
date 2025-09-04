@@ -14,25 +14,49 @@ type StorageCostInfo struct {
 }
 
 // calculateStorageCost calculates the storage cost based on current usage, new usage, and storage parameters
-func CalculateStorageCost(currentUsage, storageDelta uint64, storageParams storagetypes.Params) (*StorageCostInfo, error) {
+// Updated to match the logic from msg_server.go calculateStorageCharge method
+func CalculateStorageCost(currentUsage, newUsage uint64, storageParams storagetypes.Params) (*StorageCostInfo, error) {
 	freeStorageBytes := storageParams.FreeStorageMb * 1024 * 1024 // Convert MB to bytes
-	newUsage := currentUsage + storageDelta
 
-	storageCharge := sdk.NewCoin(storageParams.StoragePricePerMb.Denom, sdk.NewInt(0))
+	// If current usage is already above free limit, charge for the entire diff
 	if currentUsage > freeStorageBytes {
-		// If current usage is already above free limit, charge for the entire diff
-		if storageDelta > 0 {
-			diffMb := float64(storageDelta) / (1024 * 1024)
-			chargeAmount := sdk.NewDec(int64(diffMb)).Mul(sdk.NewDecFromInt(storageParams.StoragePricePerMb.Amount))
-			storageCharge = sdk.NewCoin(storageParams.StoragePricePerMb.Denom, chargeAmount.TruncateInt())
+		diff := newUsage - currentUsage
+		if diff <= 0 {
+			return &StorageCostInfo{
+				StorageCharge: sdk.NewCoin(storageParams.StoragePricePerGb.Denom, sdk.ZeroInt()),
+				CurrentUsage:  currentUsage,
+				NewUsage:      newUsage,
+				FreeLimit:     freeStorageBytes,
+			}, nil
 		}
-	} else if newUsage > freeStorageBytes {
-		// Calculate charge for the portion that exceeds free limit
-		excessBytes := newUsage - freeStorageBytes
-		excessMb := float64(excessBytes) / (1024 * 1024)
-		chargeAmount := sdk.NewDec(int64(excessMb)).Mul(sdk.NewDecFromInt(storageParams.StoragePricePerMb.Amount))
-		storageCharge = sdk.NewCoin(storageParams.StoragePricePerMb.Denom, chargeAmount.TruncateInt())
+		// Calculate charge in GB and multiply by price per GB
+		diffGb := float64(diff) / (1024 * 1024 * 1024)
+		chargeAmount := sdk.NewDec(int64(diffGb)).Mul(sdk.NewDecFromInt(storageParams.StoragePricePerGb.Amount))
+		storageCharge := sdk.NewCoin(storageParams.StoragePricePerGb.Denom, chargeAmount.TruncateInt())
+		
+		return &StorageCostInfo{
+			StorageCharge: storageCharge,
+			CurrentUsage:  currentUsage,
+			NewUsage:      newUsage,
+			FreeLimit:     freeStorageBytes,
+		}, nil
 	}
+
+	// If new usage is below free limit, no charge
+	if newUsage <= freeStorageBytes {
+		return &StorageCostInfo{
+			StorageCharge: sdk.NewCoin(storageParams.StoragePricePerGb.Denom, sdk.ZeroInt()),
+			CurrentUsage:  currentUsage,
+			NewUsage:      newUsage,
+			FreeLimit:     freeStorageBytes,
+		}, nil
+	}
+
+	// Calculate charge for the portion that exceeds free limit
+	excessBytes := newUsage - freeStorageBytes
+	excessGb := float64(excessBytes) / (1024 * 1024 * 1024)
+	chargeAmount := sdk.NewDec(int64(excessGb)).Mul(sdk.NewDecFromInt(storageParams.StoragePricePerGb.Amount))
+	storageCharge := sdk.NewCoin(storageParams.StoragePricePerGb.Denom, chargeAmount.TruncateInt())
 
 	return &StorageCostInfo{
 		StorageCharge: storageCharge,
