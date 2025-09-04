@@ -195,7 +195,7 @@ func (s *Server) handleGitReceivePack(w http.ResponseWriter, r *Request, repoID 
 		return fmt.Errorf("failed to get storage params: %w", err)
 	}
 
-	if !storageParams.Params.StoragePricePerMb.IsZero() {
+	if !storageParams.Params.StoragePricePerGb.IsZero() {
 		costInfo, err := utils.CalculateStorageCost(uint64(userQuotaResp.UserQuota.StorageUsed), uint64(storageDelta), storageParams.Params)
 		if err != nil {
 			return fmt.Errorf("failed to calculate storage cost: %w", err)

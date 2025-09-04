@@ -1,5 +1,14 @@
 # Changelog
 
+## [v4.0.0] - 2025-09-04
+
+- implement gitopia storage provider requirements
+- implement caching of packfiles, lfs objects and release assets
+- implement batch transaction manager
+- improve event subscription and handling to support multiple events in the same transaction
+- upgrade gitopia version to v6.0.0
+- upgrade gitopia-go version to v0.7.0
+
 ## [v3.1.0] - 2024-12-02
 
 - upgrade gitopia version to v5.1.0

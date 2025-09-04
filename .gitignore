@@ -1,2 +1,4 @@
 build
 compose
+.DS_Store
+.env

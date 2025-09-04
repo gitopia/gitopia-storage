@@ -8,8 +8,8 @@ require (
 	cosmossdk.io/errors v1.0.1
 	github.com/buger/jsonparser v1.1.1
 	github.com/cosmos/cosmos-sdk v0.47.13
-	github.com/gitopia/gitopia-go v0.7.0-rc.3
-	github.com/gitopia/gitopia/v6 v6.0.0-rc.6
+	github.com/gitopia/gitopia-go v0.7.0
+	github.com/gitopia/gitopia/v6 v6.0.0
 	github.com/gitopia/go-git/v5 v5.4.3-0.20221011074003-f70479dc646c
 	github.com/ipfs-cluster/ipfs-cluster v1.1.2
 	github.com/ipfs/boxo v0.27.4
@@ -22,6 +22,7 @@ require (
 	github.com/spf13/viper v1.18.2
 	github.com/stretchr/testify v1.10.0
 	github.com/wealdtech/go-merkletree/v2 v2.6.1
+	golang.org/x/sync v0.10.0
 	google.golang.org/grpc v1.67.1
 )
 
@@ -321,7 +322,6 @@ require (
 	golang.org/x/mod v0.22.0 // indirect
 	golang.org/x/net v0.34.0 // indirect
 	golang.org/x/oauth2 v0.24.0 // indirect
-	golang.org/x/sync v0.10.0 // indirect
 	golang.org/x/sys v0.29.0 // indirect
 	golang.org/x/term v0.28.0 // indirect
 	golang.org/x/text v0.21.0 // indirect

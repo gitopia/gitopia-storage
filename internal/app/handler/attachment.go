@@ -265,7 +265,7 @@ func UploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		if !storageParamsRes.Params.StoragePricePerMb.IsZero() {
+		if !storageParamsRes.Params.StoragePricePerGb.IsZero() {
 			// Calculate current pending uploads for this user
 			pendingSize := calculatePendingUploadsSize(address, repoId, data.TagName)
 
