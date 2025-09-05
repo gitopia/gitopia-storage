@@ -369,6 +369,9 @@ Before creating the systemd services, ensure IPFS and IPFS Cluster are properly 
 sudo -u gitopia ipfs config Addresses.API /ip4/127.0.0.1/tcp/5001
 sudo -u gitopia ipfs config Addresses.Gateway /ip4/127.0.0.1/tcp/8080
 
+# Configure IPFS StorageMax (adjust based on your disk space)
+sudo -u gitopia ipfs config Datastore.StorageMax 500GB
+
 # Edit IPFS Cluster configuration
 sudo -u gitopia nano /home/gitopia/.ipfs-cluster/service.json
 ```
@@ -389,7 +392,7 @@ Documentation=https://docs.ipfs.tech/
 Type=notify
 User=gitopia
 Group=gitopia
-Environment=IPFS_PATH=/home/gitopia/.ipfs
+Environment=IPFS_PATH="/home/gitopia/.ipfs"
 ExecStart=/usr/local/bin/ipfs daemon --enable-gc
 ExecStop=/usr/local/bin/ipfs shutdown
 Restart=always
@@ -398,12 +401,6 @@ KillMode=mixed
 KillSignal=SIGINT
 TimeoutStopSec=30
 LimitNOFILE=10240
-
-# Security settings
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/home/gitopia/.ipfs /var/repos /var/lfs-objects /var/attachments
 
 [Install]
 WantedBy=multi-user.target
@@ -429,12 +426,6 @@ Restart=always
 RestartSec=10
 KillMode=mixed
 TimeoutStopSec=30
-
-# Security settings
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/home/gitopia/.ipfs-cluster /home/gitopia/.ipfs /var/repos /var/lfs-objects /var/attachments
 
 [Install]
 WantedBy=multi-user.target
@@ -462,12 +453,6 @@ RestartSec=10
 KillMode=mixed
 TimeoutStopSec=30
 LimitNOFILE=65535
-
-# Security settings
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/home/gitopia /var/repos /var/lfs-objects /var/attachments /etc/gitopia-storage
 
 [Install]
 WantedBy=multi-user.target
@@ -521,6 +506,45 @@ sudo systemctl show gitopia-storaged
 ---
 
 ## API and Configuration Details
+
+### IPFS Storage Configuration
+
+#### Increasing IPFS StorageMax
+
+The IPFS `StorageMax` setting controls the maximum amount of data that IPFS will store locally. For gitopia-storage deployments, you may need to increase this limit based on your storage requirements.
+
+**For Docker Setup:**
+```bash
+# Access the IPFS container
+docker exec -it ipfs sh
+
+# Check current StorageMax setting
+ipfs config Datastore.StorageMax
+
+# Set new StorageMax (example: 500GB)
+ipfs config Datastore.StorageMax 500GB
+
+# Restart the IPFS container to apply changes
+docker restart ipfs
+```
+
+**For Manual Installation:**
+```bash
+# Check current StorageMax setting
+ipfs config Datastore.StorageMax
+
+# Set new StorageMax (example: 500GB)
+ipfs config Datastore.StorageMax 500GB
+
+# Restart IPFS daemon
+sudo systemctl restart ipfs
+```
+
+**Important Notes:**
+- Ensure sufficient disk space: The StorageMax should not exceed your available disk space
+- For Docker, this affects the `ipfs_data` volume
+- Monitor usage with `ipfs repo stat`
+- IPFS will automatically run garbage collection when approaching the limit
 
 ### Configuration
 
