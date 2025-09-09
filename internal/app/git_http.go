@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	"github.com/gitopia/gitopia-storage/pkg/merkleproof"
@@ -154,24 +155,53 @@ func (s *Server) PostRPC(service string, w http.ResponseWriter, r *Request) {
 func (s *Server) handleGitReceivePack(w http.ResponseWriter, r *Request, repoID uint64) error {
 	const logContext = "handle-git-receive-pack"
 
+	// Helper function to clean up repo directory on error
+	cleanupRepoDir := func() {
+		if err := os.RemoveAll(r.RepoPath); err != nil {
+			log.WithFields(log.Fields{
+				"repository_id": repoID,
+				"repo_path":     r.RepoPath,
+				"error":         err,
+			}).Error("failed to cleanup repository directory")
+		}
+	}
+
+	// Check for existing pending packfile update proposal
+	_, err := s.QueryService.StoragePackfileUpdateProposal(context.Background(), &storagetypes.QueryPackfileUpdateProposalRequest{
+		RepositoryId: repoID,
+		User:         r.Address,
+	})
+	if err == nil {
+		cleanupRepoDir()
+		return errors.New("there is already a pending packfile update proposal for this repository")
+	}
+	if !strings.Contains(err.Error(), "packfile update proposal not found") {
+		cleanupRepoDir()
+		return fmt.Errorf("error checking for pending proposals: %w", err)
+	}
+
 	cmd := exec.Command(s.Config.GitPath, "gc")
 	cmd.Dir = r.RepoPath
 	if err := cmd.Run(); err != nil {
+		cleanupRepoDir()
 		return errors.Wrap(err, "failed to run git gc")
 	}
 
 	packfileName, err := utils.GetPackfileName(r.RepoPath)
 	if err != nil {
+		cleanupRepoDir()
 		return fmt.Errorf("failed to get packfile name: %w", err)
 	}
 
 	packfileInfo, err := os.Stat(packfileName)
 	if err != nil {
+		cleanupRepoDir()
 		return fmt.Errorf("failed to get packfile info: %w", err)
 	}
 
 	repoResp, err := s.QueryService.GitopiaRepository(context.Background(), &gitopiatypes.QueryGetRepositoryRequest{Id: repoID})
 	if err != nil {
+		cleanupRepoDir()
 		return fmt.Errorf("failed to get repository: %w", err)
 	}
 
@@ -187,17 +217,20 @@ func (s *Server) handleGitReceivePack(w http.ResponseWriter, r *Request, repoID 
 
 	userQuotaResp, err := s.QueryService.GitopiaUserQuota(context.Background(), &gitopiatypes.QueryUserQuotaRequest{Address: repoResp.Repository.Owner.Id})
 	if err != nil {
+		cleanupRepoDir()
 		return fmt.Errorf("failed to get user quota: %w", err)
 	}
 
 	storageParams, err := s.QueryService.StorageParams(context.Background(), &storagetypes.QueryParamsRequest{})
 	if err != nil {
+		cleanupRepoDir()
 		return fmt.Errorf("failed to get storage params: %w", err)
 	}
 
 	if !storageParams.Params.StoragePricePerGb.IsZero() {
 		costInfo, err := utils.CalculateStorageCost(uint64(userQuotaResp.UserQuota.StorageUsed), uint64(storageDelta), storageParams.Params)
 		if err != nil {
+			cleanupRepoDir()
 			return fmt.Errorf("failed to calculate storage cost: %w", err)
 		}
 
@@ -207,13 +240,12 @@ func (s *Server) handleGitReceivePack(w http.ResponseWriter, r *Request, repoID 
 				Denom:   costInfo.StorageCharge.Denom,
 			})
 			if err != nil {
+				cleanupRepoDir()
 				return fmt.Errorf("failed to get user balance: %w", err)
 			}
 
 			if balance.Balance.Amount.LT(costInfo.StorageCharge.Amount) {
-				if err := os.RemoveAll(r.RepoPath); err != nil {
-					return fmt.Errorf("failed to rollback local repository cache: %w", err)
-				}
+				cleanupRepoDir()
 				return errors.New("insufficient balance for storage charge")
 			}
 		}
@@ -221,6 +253,7 @@ func (s *Server) handleGitReceivePack(w http.ResponseWriter, r *Request, repoID 
 
 	cid, err := utils.PinFile(s.IPFSClusterClient, packfileName)
 	if err != nil {
+		cleanupRepoDir()
 		return fmt.Errorf("failed to pin packfile to IPFS cluster: %w", err)
 	}
 
@@ -233,36 +266,43 @@ func (s *Server) handleGitReceivePack(w http.ResponseWriter, r *Request, repoID 
 
 	ipfsHTTPAPI, err := rpc.NewURLApiWithClient(fmt.Sprintf("http://%s:%s", viper.GetString("IPFS_HOST"), viper.GetString("IPFS_PORT")), &http.Client{})
 	if err != nil {
+		cleanupRepoDir()
 		return fmt.Errorf("failed to create IPFS API: %w", err)
 	}
 
 	p, err := ipfspath.NewPath("/ipfs/" + cid)
 	if err != nil {
+		cleanupRepoDir()
 		return fmt.Errorf("failed to create path: %w", err)
 	}
 
 	f, err := ipfsHTTPAPI.Unixfs().Get(context.Background(), p)
 	if err != nil {
+		cleanupRepoDir()
 		return fmt.Errorf("failed to get packfile from IPFS: %w", err)
 	}
 
 	file, ok := f.(files.File)
 	if !ok {
+		cleanupRepoDir()
 		return errors.New("invalid packfile format")
 	}
 
 	rootHash, err := merkleproof.ComputeMerkleRoot(file)
 	if err != nil {
+		cleanupRepoDir()
 		return fmt.Errorf("failed to compute packfile merkle root: %w", err)
 	}
 
 	if err := s.GitopiaProxy.ProposePackfileUpdate(context.Background(), r.Address, repoID, filepath.Base(packfileName), cid, rootHash, packfileInfo.Size(), previousCid, "", false); err != nil {
+		cleanupRepoDir()
 		return fmt.Errorf("failed to update repository packfile: %w", err)
 	}
 
 	if err := s.GitopiaProxy.PollForUpdate(context.Background(), func() (bool, error) {
 		return s.GitopiaProxy.CheckProposePackfileUpdate(repoID, r.Address)
 	}); err != nil {
+		cleanupRepoDir()
 		if errors.Is(err, context.DeadlineExceeded) {
 			return fmt.Errorf("timeout waiting for packfile update proposal")
 		}
