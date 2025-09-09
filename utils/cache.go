@@ -72,6 +72,10 @@ func LockAsset(sha string) {
 // UnlockAsset releases the asset-specific lock and decrements reference count
 func UnlockAsset(sha string) {
 	mutex := getAssetMutex(sha)
+	// Check reference count before attempting to unlock to prevent double unlock panic
+	if atomic.LoadInt32(&mutex.refCount) <= 0 {
+		return
+	}
 	mutex.mu.Unlock()
 	if atomic.AddInt32(&mutex.refCount, -1) == 0 {
 		// If no more references, schedule cleanup
@@ -98,6 +102,10 @@ func LockLFSObject(oid string) {
 // UnlockLFSObject releases the lfs object-specific lock and decrements reference count
 func UnlockLFSObject(oid string) {
 	mutex := getLFSObjectMutex(oid)
+	// Check reference count before attempting to unlock to prevent double unlock panic
+	if atomic.LoadInt32(&mutex.refCount) <= 0 {
+		return
+	}
 	mutex.mu.Unlock()
 	if atomic.AddInt32(&mutex.refCount, -1) == 0 {
 		// If no more references, schedule cleanup
@@ -124,6 +132,10 @@ func LockRepository(repoID uint64) {
 // UnlockRepository releases the repository-specific lock and decrements reference count
 func UnlockRepository(repoID uint64) {
 	mutex := getRepoMutex(repoID)
+	// Check reference count before attempting to unlock to prevent double unlock panic
+	if atomic.LoadInt32(&mutex.refCount) <= 0 {
+		return
+	}
 	mutex.mu.Unlock()
 	if atomic.AddInt32(&mutex.refCount, -1) == 0 {
 		// If no more references, schedule cleanup
