@@ -23,61 +23,63 @@ import (
 	"github.com/spf13/viper"
 )
 
-// RefCountedMutex is a mutex wrapper that tracks both lock state and reference count
-type RefCountedMutex struct {
-	mu        sync.Mutex
-	refCount  int32
-	lastUsed  time.Time
-	cleanupCh chan struct{}
+// RefCountedRWMutex is a RWMutex wrapper that tracks both lock state and reference count
+// Supports concurrent read operations while maintaining exclusive write access
+type RefCountedRWMutex struct {
+	mu         sync.RWMutex
+	readCount  int32  // Number of active read locks
+	writeCount int32  // Number of active write locks (0 or 1)
+	lastUsed   time.Time
+	cleanupCh  chan struct{}
 }
 
 var (
-	repoMutexes  sync.Map // map[uint64]*RefCountedMutex
-	assetMutexes sync.Map // map[string]*RefCountedMutex
-	lfsMutexes   sync.Map // map[string]*RefCountedMutex
+	repoMutexes  sync.Map // map[uint64]*RefCountedRWMutex
+	assetMutexes sync.Map // map[string]*RefCountedRWMutex
+	lfsMutexes   sync.Map // map[string]*RefCountedRWMutex
 )
 
-// getRepoMutex returns a reference-counted mutex for the given repository ID
-func getRepoMutex(repoID uint64) *RefCountedMutex {
-	mutex, _ := repoMutexes.LoadOrStore(repoID, &RefCountedMutex{
+// getRepoMutex returns a reference-counted RWMutex for the given repository ID
+func getRepoMutex(repoID uint64) *RefCountedRWMutex {
+	mutex, _ := repoMutexes.LoadOrStore(repoID, &RefCountedRWMutex{
 		cleanupCh: make(chan struct{}),
 	})
-	return mutex.(*RefCountedMutex)
+	return mutex.(*RefCountedRWMutex)
 }
 
-// getAssetMutex returns a reference-counted mutex for the given asset SHA
-func getAssetMutex(sha string) *RefCountedMutex {
-	mutex, _ := assetMutexes.LoadOrStore(sha, &RefCountedMutex{
+// getAssetMutex returns a reference-counted RWMutex for the given asset SHA
+func getAssetMutex(sha string) *RefCountedRWMutex {
+	mutex, _ := assetMutexes.LoadOrStore(sha, &RefCountedRWMutex{
 		cleanupCh: make(chan struct{}),
 	})
-	return mutex.(*RefCountedMutex)
+	return mutex.(*RefCountedRWMutex)
 }
 
-// getLFSObjectMutex returns a reference-counted mutex for the given lfs object OID
-func getLFSObjectMutex(oid string) *RefCountedMutex {
-	mutex, _ := lfsMutexes.LoadOrStore(oid, &RefCountedMutex{
+// getLFSObjectMutex returns a reference-counted RWMutex for the given lfs object OID
+func getLFSObjectMutex(oid string) *RefCountedRWMutex {
+	mutex, _ := lfsMutexes.LoadOrStore(oid, &RefCountedRWMutex{
 		cleanupCh: make(chan struct{}),
 	})
-	return mutex.(*RefCountedMutex)
+	return mutex.(*RefCountedRWMutex)
 }
 
-// LockAsset acquires the asset-specific lock and increments reference count
+// LockAsset acquires the asset-specific write lock and increments reference count
 func LockAsset(sha string) {
 	mutex := getAssetMutex(sha)
-	atomic.AddInt32(&mutex.refCount, 1)
+	atomic.AddInt32(&mutex.writeCount, 1)
 	mutex.mu.Lock()
 	mutex.lastUsed = time.Now()
 }
 
-// UnlockAsset releases the asset-specific lock and decrements reference count
+// UnlockAsset releases the asset-specific write lock and decrements reference count
 func UnlockAsset(sha string) {
 	mutex := getAssetMutex(sha)
 	// Check reference count before attempting to unlock to prevent double unlock panic
-	if atomic.LoadInt32(&mutex.refCount) <= 0 {
+	if atomic.LoadInt32(&mutex.writeCount) <= 0 {
 		return
 	}
 	mutex.mu.Unlock()
-	if atomic.AddInt32(&mutex.refCount, -1) == 0 {
+	if atomic.AddInt32(&mutex.writeCount, -1) == 0 {
 		// If no more references, schedule cleanup
 		go func() {
 			select {
@@ -91,23 +93,23 @@ func UnlockAsset(sha string) {
 	}
 }
 
-// LockLFSObject acquires the lfs object-specific lock and increments reference count
+// LockLFSObject acquires the lfs object-specific write lock and increments reference count
 func LockLFSObject(oid string) {
 	mutex := getLFSObjectMutex(oid)
-	atomic.AddInt32(&mutex.refCount, 1)
+	atomic.AddInt32(&mutex.writeCount, 1)
 	mutex.mu.Lock()
 	mutex.lastUsed = time.Now()
 }
 
-// UnlockLFSObject releases the lfs object-specific lock and decrements reference count
+// UnlockLFSObject releases the lfs object-specific write lock and decrements reference count
 func UnlockLFSObject(oid string) {
 	mutex := getLFSObjectMutex(oid)
 	// Check reference count before attempting to unlock to prevent double unlock panic
-	if atomic.LoadInt32(&mutex.refCount) <= 0 {
+	if atomic.LoadInt32(&mutex.writeCount) <= 0 {
 		return
 	}
 	mutex.mu.Unlock()
-	if atomic.AddInt32(&mutex.refCount, -1) == 0 {
+	if atomic.AddInt32(&mutex.writeCount, -1) == 0 {
 		// If no more references, schedule cleanup
 		go func() {
 			select {
@@ -121,23 +123,54 @@ func UnlockLFSObject(oid string) {
 	}
 }
 
-// LockRepository acquires the repository-specific lock and increments reference count
+// LockRepository acquires the repository-specific write lock and increments reference count
 func LockRepository(repoID uint64) {
 	mutex := getRepoMutex(repoID)
-	atomic.AddInt32(&mutex.refCount, 1)
+	atomic.AddInt32(&mutex.writeCount, 1)
 	mutex.mu.Lock()
 	mutex.lastUsed = time.Now()
 }
 
-// UnlockRepository releases the repository-specific lock and decrements reference count
+// UnlockRepository releases the repository-specific write lock and decrements reference count
 func UnlockRepository(repoID uint64) {
 	mutex := getRepoMutex(repoID)
 	// Check reference count before attempting to unlock to prevent double unlock panic
-	if atomic.LoadInt32(&mutex.refCount) <= 0 {
+	if atomic.LoadInt32(&mutex.writeCount) <= 0 {
 		return
 	}
 	mutex.mu.Unlock()
-	if atomic.AddInt32(&mutex.refCount, -1) == 0 {
+	if atomic.AddInt32(&mutex.writeCount, -1) == 0 {
+		// If no more references, schedule cleanup
+		go func() {
+			select {
+			case <-mutex.cleanupCh:
+				// Wait for cleanup signal
+			case <-time.After(5 * time.Minute):
+				// If no activity for 5 minutes, remove from map
+				repoMutexes.Delete(repoID)
+			}
+		}()
+	}
+}
+
+// RLockRepository acquires the repository-specific read lock and increments read reference count
+// Multiple read locks can be held concurrently, but read locks block write locks
+func RLockRepository(repoID uint64) {
+	mutex := getRepoMutex(repoID)
+	atomic.AddInt32(&mutex.readCount, 1)
+	mutex.mu.RLock()
+	mutex.lastUsed = time.Now()
+}
+
+// RUnlockRepository releases the repository-specific read lock and decrements read reference count
+func RUnlockRepository(repoID uint64) {
+	mutex := getRepoMutex(repoID)
+	// Check reference count before attempting to unlock to prevent double unlock panic
+	if atomic.LoadInt32(&mutex.readCount) <= 0 {
+		return
+	}
+	mutex.mu.RUnlock()
+	if atomic.AddInt32(&mutex.readCount, -1) == 0 && atomic.LoadInt32(&mutex.writeCount) == 0 {
 		// If no more references, schedule cleanup
 		go func() {
 			select {
@@ -154,8 +187,8 @@ func UnlockRepository(repoID uint64) {
 // IsRepositoryInUse checks if a repository is currently locked/in use
 func IsRepositoryInUse(repoID uint64) bool {
 	if mutex, exists := repoMutexes.Load(repoID); exists {
-		rm := mutex.(*RefCountedMutex)
-		return atomic.LoadInt32(&rm.refCount) > 0
+		rm := mutex.(*RefCountedRWMutex)
+		return atomic.LoadInt32(&rm.readCount) > 0 || atomic.LoadInt32(&rm.writeCount) > 0
 	}
 	return false
 }
@@ -163,8 +196,8 @@ func IsRepositoryInUse(repoID uint64) bool {
 // IsAssetInUse checks if an asset is currently locked/in use
 func IsAssetInUse(sha string) bool {
 	if mutex, exists := assetMutexes.Load(sha); exists {
-		rm := mutex.(*RefCountedMutex)
-		return atomic.LoadInt32(&rm.refCount) > 0
+		rm := mutex.(*RefCountedRWMutex)
+		return atomic.LoadInt32(&rm.readCount) > 0 || atomic.LoadInt32(&rm.writeCount) > 0
 	}
 	return false
 }
@@ -172,8 +205,8 @@ func IsAssetInUse(sha string) bool {
 // IsLFSObjectInUse checks if an lfs object is currently locked/in use
 func IsLFSObjectInUse(oid string) bool {
 	if mutex, exists := lfsMutexes.Load(oid); exists {
-		rm := mutex.(*RefCountedMutex)
-		return atomic.LoadInt32(&rm.refCount) > 0
+		rm := mutex.(*RefCountedRWMutex)
+		return atomic.LoadInt32(&rm.readCount) > 0 || atomic.LoadInt32(&rm.writeCount) > 0
 	}
 	return false
 }
