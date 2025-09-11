@@ -149,35 +149,43 @@ func (h *LfsObjectUpdatedEventHandler) Process(ctx context.Context, event LfsObj
 
 		// Pin to external storage
 		if event.Cid != "" && h.storageManager.HasProviders() {
-			cacheDir := viper.GetString("LFS_OBJECTS_DIR")
-
-			// check if lfs object is cached
-			cached, err := utils.IsLFSObjectCached(event.Oid)
+			refCount, err := h.gc.StorageCidReferenceCount(ctx, event.Cid)
 			if err != nil {
-				logger.FromContext(ctx).WithError(err).Error("failed to check if lfs object is cached")
+				logger.FromContext(ctx).WithError(err).Error("failed to get reference count")
+				return err
 			}
-			if !cached {
-				err := utils.DownloadLFSObject(event.Cid, event.Oid)
+
+			if refCount == 1 {
+				cacheDir := viper.GetString("LFS_OBJECTS_DIR")
+
+				// check if lfs object is cached
+				cached, err := utils.IsLFSObjectCached(event.Oid)
 				if err != nil {
-					logger.FromContext(ctx).WithError(err).Error("failed to cache lfs object")
+					logger.FromContext(ctx).WithError(err).Error("failed to check if lfs object is cached")
 				}
-			}
+				if !cached {
+					err := utils.DownloadLFSObject(event.Cid, event.Oid)
+					if err != nil {
+						logger.FromContext(ctx).WithError(err).Error("failed to cache lfs object")
+					}
+				}
 
-			lfsObjectPath := path.Join(cacheDir, event.Oid)
-			err = h.storageManager.PinFile(ctx, lfsObjectPath, event.Oid)
-			if err != nil {
-				logger.FromContext(ctx).WithFields(logrus.Fields{
-					"repository_id": event.RepositoryId,
-					"oid":           event.Oid,
-					"cid":           event.Cid,
-				}).WithError(err).Error("failed to pin file to external storage")
-				// Don't fail the process, just log the error
-			} else {
-				logger.FromContext(ctx).WithFields(logrus.Fields{
-					"repository_id": event.RepositoryId,
-					"oid":           event.Oid,
-					"cid":           event.Cid,
-				}).Info("successfully pinned to external storage")
+				lfsObjectPath := path.Join(cacheDir, event.Oid)
+				err = h.storageManager.PinFile(ctx, lfsObjectPath, event.Oid)
+				if err != nil {
+					logger.FromContext(ctx).WithFields(logrus.Fields{
+						"repository_id": event.RepositoryId,
+						"oid":           event.Oid,
+						"cid":           event.Cid,
+					}).WithError(err).Error("failed to pin file to external storage")
+					// Don't fail the process, just log the error
+				} else {
+					logger.FromContext(ctx).WithFields(logrus.Fields{
+						"repository_id": event.RepositoryId,
+						"oid":           event.Oid,
+						"cid":           event.Cid,
+					}).Info("successfully pinned to external storage")
+				}
 			}
 		}
 	}

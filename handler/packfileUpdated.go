@@ -134,27 +134,35 @@ func (h *PackfileUpdatedEventHandler) Process(ctx context.Context, event Packfil
 	}).Info("processing packfile updated event")
 
 	if event.NewCid != "" && !event.Deleted && h.storageManager.HasProviders() {
-		cacheDir := viper.GetString("GIT_REPOS_DIR")
-
-		// cache repo
-		utils.LockRepository(event.RepositoryId)
-		defer utils.UnlockRepository(event.RepositoryId)
-
-		if err := utils.CacheRepository(event.RepositoryId, cacheDir); err != nil {
+		refCount, err := h.gc.StorageCidReferenceCount(ctx, event.NewCid)
+		if err != nil {
+			logger.FromContext(ctx).WithError(err).Error("failed to get reference count")
 			return err
 		}
 
-		packfilePath := path.Join(cacheDir, fmt.Sprintf("%v.git/objects/pack/", event.RepositoryId), event.NewName)
-		err := h.storageManager.PinFile(ctx, packfilePath, filepath.Base(packfilePath))
-		if err != nil {
-			logger.FromContext(ctx).WithError(err).Error("failed to pin file to external storage")
-			// Don't fail the process, just log the error
-		} else {
-			logger.FromContext(ctx).WithFields(logrus.Fields{
-				"repository_id": event.RepositoryId,
-				"packfile_name": event.NewName,
-				"cid":           event.NewCid,
-			}).Info("successfully pinned to external storage")
+		if refCount == 1 {
+			cacheDir := viper.GetString("GIT_REPOS_DIR")
+
+			// cache repo
+			utils.LockRepository(event.RepositoryId)
+			defer utils.UnlockRepository(event.RepositoryId)
+
+			if err := utils.CacheRepository(event.RepositoryId, cacheDir); err != nil {
+				return err
+			}
+
+			packfilePath := path.Join(cacheDir, fmt.Sprintf("%v.git/objects/pack/", event.RepositoryId), event.NewName)
+			err := h.storageManager.PinFile(ctx, packfilePath, filepath.Base(packfilePath))
+			if err != nil {
+				logger.FromContext(ctx).WithError(err).Error("failed to pin file to external storage")
+				// Don't fail the process, just log the error
+			} else {
+				logger.FromContext(ctx).WithFields(logrus.Fields{
+					"repository_id": event.RepositoryId,
+					"packfile_name": event.NewName,
+					"cid":           event.NewCid,
+				}).Info("successfully pinned to external storage")
+			}
 		}
 	}
 

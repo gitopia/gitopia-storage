@@ -173,31 +173,39 @@ func (h *ReleaseAssetsUpdatedEventHandler) Process(ctx context.Context, event Re
 
 			// Pin to external storage if enabled
 			if asset.Cid != "" && h.storageManager.HasProviders() {
-				cacheDir := viper.GetString("ATTACHMENT_DIR")
-
-				// check if release asset is cached
-				err := utils.CacheReleaseAsset(event.RepositoryId, event.Tag, asset.Name, cacheDir)
+				refCount, err := h.gc.StorageCidReferenceCount(ctx, asset.Cid)
 				if err != nil {
-					logger.FromContext(ctx).WithError(err).Error("failed to cache release asset")
+					logger.FromContext(ctx).WithError(err).Error("failed to get reference count")
+					return err
 				}
 
-				releaseAssetPath := path.Join(cacheDir, asset.Sha256)
-				err = h.storageManager.PinFile(ctx, releaseAssetPath, asset.Sha256)
-				if err != nil {
-					logger.FromContext(ctx).WithFields(logrus.Fields{
-						"repository_id": event.RepositoryId,
-						"tag":           event.Tag,
-						"name":          asset.Name,
-						"cid":           asset.Cid,
-					}).WithError(err).Error("failed to pin file to external storage")
-					// Don't fail the process, just log the error
-				} else {
-					logger.FromContext(ctx).WithFields(logrus.Fields{
-						"repository_id": event.RepositoryId,
-						"tag":           event.Tag,
-						"name":          asset.Name,
-						"cid":           asset.Cid,
-					}).Info("successfully pinned to external storage")
+				if refCount == 1 {
+					cacheDir := viper.GetString("ATTACHMENT_DIR")
+
+					// check if release asset is cached
+					err := utils.CacheReleaseAsset(event.RepositoryId, event.Tag, asset.Name, cacheDir)
+					if err != nil {
+						logger.FromContext(ctx).WithError(err).Error("failed to cache release asset")
+					}
+
+					releaseAssetPath := path.Join(cacheDir, asset.Sha256)
+					err = h.storageManager.PinFile(ctx, releaseAssetPath, asset.Sha256)
+					if err != nil {
+						logger.FromContext(ctx).WithFields(logrus.Fields{
+							"repository_id": event.RepositoryId,
+							"tag":           event.Tag,
+							"name":          asset.Name,
+							"cid":           asset.Cid,
+						}).WithError(err).Error("failed to pin file to external storage")
+						// Don't fail the process, just log the error
+					} else {
+						logger.FromContext(ctx).WithFields(logrus.Fields{
+							"repository_id": event.RepositoryId,
+							"tag":           event.Tag,
+							"name":          asset.Name,
+							"cid":           asset.Cid,
+						}).Info("successfully pinned to external storage")
+					}
 				}
 			}
 
