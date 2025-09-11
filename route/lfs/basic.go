@@ -64,6 +64,9 @@ func (h *BasicHandler) ServeDownloadHandler(w http.ResponseWriter, r *http.Reque
 	}
 	oid := lfsutil.OID(components[6])
 
+	utils.RLockLFSObject(string(oid))
+	defer utils.RUnlockLFSObject(string(oid))
+
 	s := h.DefaultStorager()
 	if s == nil {
 		internalServerError(w)
@@ -241,6 +244,9 @@ func (h *BasicHandler) ServeVerifyHandler(w http.ResponseWriter, r *http.Request
 		})
 		return
 	}
+
+	utils.RLockLFSObject(string(request.Oid))
+	defer utils.RUnlockLFSObject(string(request.Oid))
 
 	s := h.DefaultStorager()
 

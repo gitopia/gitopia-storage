@@ -154,6 +154,37 @@ func UnlockLFSObject(oid string) {
 	}
 }
 
+// RLockLFSObject acquires the lfs object-specific read lock and increments read reference count
+// Multiple read locks can be held concurrently, but read locks block write locks
+func RLockLFSObject(oid string) {
+	mutex := getLFSObjectMutex(oid)
+	atomic.AddInt32(&mutex.readCount, 1)
+	mutex.mu.RLock()
+	mutex.lastUsed = time.Now()
+}
+
+// RUnlockLFSObject releases the lfs object-specific read lock and decrements read reference count
+func RUnlockLFSObject(oid string) {
+	mutex := getLFSObjectMutex(oid)
+	// Check reference count before attempting to unlock to prevent double unlock panic
+	if atomic.LoadInt32(&mutex.readCount) <= 0 {
+		return
+	}
+	mutex.mu.RUnlock()
+	if atomic.AddInt32(&mutex.readCount, -1) == 0 && atomic.LoadInt32(&mutex.writeCount) == 0 {
+		// If no more references, schedule cleanup
+		go func() {
+			select {
+			case <-mutex.cleanupCh:
+				// Wait for cleanup signal
+			case <-time.After(5 * time.Minute):
+				// If no activity for 5 minutes, remove from map
+				lfsMutexes.Delete(oid)
+			}
+		}()
+	}
+}
+
 // LockRepository acquires the repository-specific write lock and increments reference count
 func LockRepository(repoID uint64) {
 	mutex := getRepoMutex(repoID)
@@ -551,6 +582,9 @@ func CacheReleaseAsset(repositoryId uint64, tag, name string, cacheDir string) e
 }
 
 func IsLFSObjectCached(oid string) (bool, error) {
+	RLockLFSObject(oid)
+	defer RUnlockLFSObject(oid)
+
 	lfsDir := viper.GetString("LFS_OBJECTS_DIR")
 	filePath := filepath.Join(lfsDir, oid)
 
@@ -561,6 +595,16 @@ func IsLFSObjectCached(oid string) (bool, error) {
 }
 
 func DownloadLFSObject(cid, oid string) error {
+	LockLFSObject(oid)
+	defer UnlockLFSObject(oid)
+
+	// Check if object already exists after acquiring lock to prevent duplicate downloads
+	lfsDir := viper.GetString("LFS_OBJECTS_DIR")
+	filePath := filepath.Join(lfsDir, oid)
+	if _, err := os.Stat(filePath); err == nil {
+		return nil // Object already exists
+	}
+
 	ipfsUrl := fmt.Sprintf("http://%s:%s/api/v0/cat?arg=/ipfs/%s&progress=false", viper.GetString("IPFS_HOST"), viper.GetString("IPFS_PORT"), cid)
 	resp, err := http.Post(ipfsUrl, "application/json", nil)
 	if err != nil {
@@ -571,9 +615,6 @@ func DownloadLFSObject(cid, oid string) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("failed to fetch lfs object from IPFS: %v", resp.Status)
 	}
-
-	lfsDir := viper.GetString("LFS_OBJECTS_DIR")
-	filePath := filepath.Join(lfsDir, oid)
 
 	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
 		return fmt.Errorf("failed to create lfs object directory: %v", err)
