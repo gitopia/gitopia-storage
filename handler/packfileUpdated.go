@@ -144,8 +144,8 @@ func (h *PackfileUpdatedEventHandler) Process(ctx context.Context, event Packfil
 			cacheDir := viper.GetString("GIT_REPOS_DIR")
 
 			// cache repo
-			utils.LockRepository(event.RepositoryId)
-			defer utils.UnlockRepository(event.RepositoryId)
+			utils.RLockRepository(event.RepositoryId)
+			defer utils.RUnlockRepository(event.RepositoryId)
 
 			if err := utils.CacheRepository(event.RepositoryId, cacheDir); err != nil {
 				return err

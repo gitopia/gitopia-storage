@@ -30,8 +30,8 @@ func CommitDiffHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// cache repo
-		utils.LockRepository(body.RepositoryID)
-		defer utils.UnlockRepository(body.RepositoryID)
+		utils.RLockRepository(body.RepositoryID)
+		defer utils.RUnlockRepository(body.RepositoryID)
 
 		cacheDir := viper.GetString("GIT_REPOS_DIR")
 		if err := utils.CacheRepository(body.RepositoryID, cacheDir); err != nil {

@@ -68,7 +68,7 @@ IPFS Cluster uses several ports for different purposes. Properly securing these 
 - **Cluster Swarm (`tcp:9096`):**
   - Controlled by `cluster.listen_multiaddress` (defaults to `/ip4/0.0.0.0/tcp/9096`).
   - Protected by the shared `CLUSTER_SECRET`.
-  - **It is generally safe to expose this port**, but ensure your cluster secret is strong.
+  - **You need to expose this port so that you can connect with the other peers in the cluster**, but ensure you don't share share the cluster secret with anyone else.
 
 - **HTTP API (`tcp:9094`) and IPFS Pinning Service API (`tcp:9097`):**
   - These endpoints provide full administrative control over the cluster peer.

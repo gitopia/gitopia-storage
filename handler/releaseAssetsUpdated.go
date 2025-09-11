@@ -229,6 +229,13 @@ func (h *ReleaseAssetsUpdatedEventHandler) Process(ctx context.Context, event Re
 							"name":          asset.Name,
 							"cid":           asset.OldCid,
 						}).WithError(err).Error("failed to unpin file from external storage")
+					} else {
+						logger.FromContext(ctx).WithFields(logrus.Fields{
+							"repository_id": event.RepositoryId,
+							"tag":           event.Tag,
+							"name":          asset.Name,
+							"cid":           asset.OldCid,
+						}).WithError(err).Error("successfully unpinned from external storage")
 					}
 				}
 			}

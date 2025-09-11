@@ -38,8 +38,8 @@ func (s *Server) ObjectsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		utils.LockRepository(repoId)
-		defer utils.UnlockRepository(repoId)
+		utils.RLockRepository(repoId)
+		defer utils.RUnlockRepository(repoId)
 
 		if err := s.CacheRepository(repoId); err != nil {
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
