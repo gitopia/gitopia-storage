@@ -93,6 +93,37 @@ func UnlockAsset(sha string) {
 	}
 }
 
+// RLockAsset acquires the asset-specific read lock and increments read reference count
+// Multiple read locks can be held concurrently, but read locks block write locks
+func RLockAsset(sha string) {
+	mutex := getAssetMutex(sha)
+	atomic.AddInt32(&mutex.readCount, 1)
+	mutex.mu.RLock()
+	mutex.lastUsed = time.Now()
+}
+
+// RUnlockAsset releases the asset-specific read lock and decrements read reference count
+func RUnlockAsset(sha string) {
+	mutex := getAssetMutex(sha)
+	// Check reference count before attempting to unlock to prevent double unlock panic
+	if atomic.LoadInt32(&mutex.readCount) <= 0 {
+		return
+	}
+	mutex.mu.RUnlock()
+	if atomic.AddInt32(&mutex.readCount, -1) == 0 && atomic.LoadInt32(&mutex.writeCount) == 0 {
+		// If no more references, schedule cleanup
+		go func() {
+			select {
+			case <-mutex.cleanupCh:
+				// Wait for cleanup signal
+			case <-time.After(5 * time.Minute):
+				// If no activity for 5 minutes, remove from map
+				assetMutexes.Delete(sha)
+			}
+		}()
+	}
+}
+
 // LockLFSObject acquires the lfs object-specific write lock and increments reference count
 func LockLFSObject(oid string) {
 	mutex := getLFSObjectMutex(oid)
