@@ -8,6 +8,7 @@ import (
 
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia-storage/app"
+	"github.com/gitopia/gitopia-storage/handler/storage"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
@@ -111,14 +112,14 @@ func UnmarshalRepositoryDeletedEvent(eventBuf []byte) ([]RepositoryDeletedEvent,
 }
 
 type RepositoryDeletedEventHandler struct {
-	gc           *app.GitopiaProxy
-	pinataClient *PinataClient
+	gc             *app.GitopiaProxy
+	storageManager *storage.Manager
 }
 
-func NewRepositoryDeletedEventHandler(g *app.GitopiaProxy, pinataClient *PinataClient) RepositoryDeletedEventHandler {
+func NewRepositoryDeletedEventHandler(g *app.GitopiaProxy, storageManager *storage.Manager) RepositoryDeletedEventHandler {
 	return RepositoryDeletedEventHandler{
-		gc:           g,
-		pinataClient: pinataClient,
+		gc:             g,
+		storageManager: storageManager,
 	}
 }
 
@@ -146,38 +147,36 @@ func (h *RepositoryDeletedEventHandler) Process(ctx context.Context, event Repos
 	}).Info("processing repository deleted event")
 
 	// Delete packfile
-	if event.PackfileCid != "" {
-		if h.pinataClient != nil {
-			err := h.pinataClient.UnpinFile(ctx, event.PackfileName)
-			if err != nil {
-				logger.FromContext(ctx).WithError(err).Error("failed to unpin packfile from Pinata")
-			} else {
-				logger.FromContext(ctx).WithField("packfile", event.PackfileName).Info("unpinned packfile from Pinata")
-			}
+	if event.PackfileCid != "" && h.storageManager.HasProviders() {
+		err := h.storageManager.UnpinFile(ctx, event.PackfileName)
+		if err != nil {
+			logger.FromContext(ctx).WithError(err).Error("failed to unpin packfile from external storage")
+		} else {
+			logger.FromContext(ctx).WithField("packfile", event.PackfileName).Info("unpinned packfile from external storage")
 		}
 	}
 
 	// Delete release assets
-	for _, asset := range event.ReleaseAssets {
-		if h.pinataClient != nil {
+	if h.storageManager.HasProviders() {
+		for _, asset := range event.ReleaseAssets {
 			name := fmt.Sprintf("release-%d-%s-%s-%s", event.RepositoryId, asset.Tag, asset.Name, asset.Sha)
-			err := h.pinataClient.UnpinFile(ctx, name)
+			err := h.storageManager.UnpinFile(ctx, name)
 			if err != nil {
-				logger.FromContext(ctx).WithError(err).WithField("asset", name).Error("failed to unpin release asset from Pinata")
+				logger.FromContext(ctx).WithError(err).WithField("asset", name).Error("failed to unpin release asset from external storage")
 			} else {
-				logger.FromContext(ctx).WithField("asset", name).Info("unpinned release asset from Pinata")
+				logger.FromContext(ctx).WithField("asset", name).Info("unpinned release asset from external storage")
 			}
 		}
 	}
 
 	// Delete LFS objects
-	for _, lfsObject := range event.LfsObjects {
-		if h.pinataClient != nil {
-			err := h.pinataClient.UnpinFile(ctx, lfsObject.Oid)
+	if h.storageManager.HasProviders() {
+		for _, lfsObject := range event.LfsObjects {
+			err := h.storageManager.UnpinFile(ctx, lfsObject.Oid)
 			if err != nil {
-				logger.FromContext(ctx).WithError(err).WithField("lfs_object", lfsObject.Oid).Error("failed to unpin LFS object from Pinata")
+				logger.FromContext(ctx).WithError(err).WithField("lfs_object", lfsObject.Oid).Error("failed to unpin LFS object from external storage")
 			} else {
-				logger.FromContext(ctx).WithField("lfs_object", lfsObject.Oid).Info("unpinned LFS object from Pinata")
+				logger.FromContext(ctx).WithField("lfs_object", lfsObject.Oid).Info("unpinned LFS object from external storage")
 			}
 		}
 	}

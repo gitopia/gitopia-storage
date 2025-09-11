@@ -358,6 +358,60 @@ sudo systemctl status ipfs ipfs-cluster gitopia-storaged
 
 ---
 
+## External Storage Providers
+
+The Gitopia Storage Provider supports configurable external storage providers for redundant data storage. This feature allows you to automatically pin your IPFS content to external services like Pinata and Filebase for additional data redundancy and availability.
+
+### Supported Providers
+
+- **Pinata**: IPFS pinning service
+- **Filebase**: S3-compatible decentralized storage
+
+### Configuration
+
+External storage is configured through the following settings in your configuration file:
+
+```toml
+# Enable/disable external storage providers
+ENABLE_EXTERNAL_PINNING = true
+
+# List of providers to use (can include: "pinata", "filebase")
+STORAGE_PROVIDERS = ["pinata", "filebase"]
+
+# Pinata Configuration
+PINATA_JWT = "your-pinata-jwt-token"
+
+# Filebase Configuration  
+FILEBASE_ACCESS_KEY = "your-filebase-access-key"
+FILEBASE_SECRET_KEY = "your-filebase-secret-key"
+FILEBASE_BUCKET = "your-filebase-bucket-name"
+FILEBASE_REGION = "us-east-1"
+FILEBASE_ENDPOINT = "https://s3.filebase.com"
+```
+
+### Provider Setup
+
+#### Pinata Setup
+1. Create an account at [Pinata](https://pinata.cloud/)
+2. Generate a JWT token with pinning permissions
+3. Set `PINATA_JWT` in your configuration
+
+#### Filebase Setup
+1. Create an account at [Filebase](https://filebase.com/)
+2. Create an S3 bucket for your storage
+3. Generate access credentials (Access Key and Secret Key)
+4. Configure the Filebase settings in your configuration file
+
+### Behavior
+
+When external storage is enabled:
+- **Pin Operations**: Content is automatically pinned to all configured providers when added to IPFS
+- **Unpin Operations**: Content is unpinned from all configured providers when removed
+- **Error Handling**: Individual provider failures don't affect other providers or core functionality
+- **Logging**: All operations are logged with provider-specific details
+
+---
+
 ## API and Configuration Details
 
 ### Configuration
@@ -383,8 +437,20 @@ IPFS_CLUSTER_PEER_HOST = "your-ipfs-host"
 IPFS_CLUSTER_PEER_PORT = "your-ipfs-port"
 IPFS_HOST = "your-ipfs-host"
 IPFS_PORT = "your-ipfs-port"
+
+# External Storage Configuration
 ENABLE_EXTERNAL_PINNING = false
-PINATA_JWT = "your-pinata-jwt"  # Required if ENABLE_EXTERNAL_PINNING is true
+STORAGE_PROVIDERS = ["pinata", "filebase"]  # Available providers: pinata, filebase
+
+# Pinata Configuration (required if "pinata" is in STORAGE_PROVIDERS)
+PINATA_JWT = "your-pinata-jwt"
+
+# Filebase Configuration (required if "filebase" is in STORAGE_PROVIDERS)
+FILEBASE_ACCESS_KEY = "your-filebase-access-key"
+FILEBASE_SECRET_KEY = "your-filebase-secret-key"
+FILEBASE_BUCKET = "your-filebase-bucket"
+FILEBASE_REGION = "us-east-1"
+FILEBASE_ENDPOINT = "https://s3.filebase.com"
 
 # Cache Configuration
 CACHE_REPO_MAX_AGE = "24h"           # Maximum age for repository cache entries

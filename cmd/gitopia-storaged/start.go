@@ -21,6 +21,7 @@ import (
 	"github.com/gitopia/gitopia-storage/app"
 	"github.com/gitopia/gitopia-storage/app/consumer"
 	"github.com/gitopia/gitopia-storage/handler"
+	"github.com/gitopia/gitopia-storage/handler/storage"
 	internalapp "github.com/gitopia/gitopia-storage/internal/app"
 	internalhandler "github.com/gitopia/gitopia-storage/internal/app/handler"
 	"github.com/gitopia/gitopia-storage/internal/app/handler/pr"
@@ -221,9 +222,33 @@ func startEventProcessor(ctx context.Context, gitopiaClient gitopia.Client, batc
 		return errors.WithMessage(err, "error creating consumer client")
 	}
 
-	var pinataClient *handler.PinataClient
+	// Initialize storage manager for external storage providers
+	var storageManager *storage.Manager
 	if viper.GetBool("ENABLE_EXTERNAL_PINNING") {
-		pinataClient = handler.NewPinataClient(viper.GetString("PINATA_JWT"))
+		storageConfig := storage.Config{
+			PinataJWT:         viper.GetString("PINATA_JWT"),
+			FilebaseAccessKey: viper.GetString("FILEBASE_ACCESS_KEY"),
+			FilebaseSecretKey: viper.GetString("FILEBASE_SECRET_KEY"),
+			FilebaseBucket:    viper.GetString("FILEBASE_BUCKET"),
+			FilebaseRegion:    viper.GetString("FILEBASE_REGION"),
+			FilebaseEndpoint:  viper.GetString("FILEBASE_ENDPOINT"),
+			EnabledProviders:  viper.GetStringSlice("STORAGE_PROVIDERS"),
+		}
+
+		factory := storage.NewFactory()
+		providers, err := factory.CreateProviders(storageConfig)
+		if err != nil {
+			return errors.Wrap(err, "failed to create storage providers")
+		}
+
+		storageManager = storage.NewManager(providers, logrus.StandardLogger())
+
+		if len(providers) > 0 {
+			logger.FromContext(ctx).WithField("providers", len(providers)).Info("external storage providers initialized")
+		}
+	} else {
+		// Create empty manager when external pinning is disabled
+		storageManager = storage.NewManager([]storage.StorageProvider{}, logrus.StandardLogger())
 	}
 
 	// core events
@@ -237,10 +262,10 @@ func startEventProcessor(ctx context.Context, gitopiaClient gitopia.Client, batc
 	deleteRepositoryHandler := handler.NewDeleteRepositoryEventHandler(gp)
 
 	// events for external pinning
-	packfileUpdatedHandler := handler.NewPackfileUpdatedEventHandler(gp, pinataClient)
-	releaseAssetsUpdatedHandler := handler.NewReleaseAssetsUpdatedEventHandler(gp, pinataClient)
-	lfsObjectUpdatedHandler := handler.NewLfsObjectUpdatedEventHandler(gp, pinataClient)
-	repositoryDeletedHandler := handler.NewRepositoryDeletedEventHandler(gp, pinataClient)
+	packfileUpdatedHandler := handler.NewPackfileUpdatedEventHandler(gp, storageManager)
+	releaseAssetsUpdatedHandler := handler.NewReleaseAssetsUpdatedEventHandler(gp, storageManager)
+	lfsObjectUpdatedHandler := handler.NewLfsObjectUpdatedEventHandler(gp, storageManager)
+	repositoryDeletedHandler := handler.NewRepositoryDeletedEventHandler(gp, storageManager)
 
 	// Create multiple WebSocket clients to distribute subscriptions and avoid hitting the 5 subscription limit
 
@@ -402,6 +427,7 @@ func routeEventToHandler(ctx context.Context, eventBuf []byte, handlers map[stri
 	// Find the handler for this query
 	if handler, ok := handlers[query]; ok {
 		logger.FromContext(ctx).WithFields(logrus.Fields{"query": query}).Debug("routing event to handler")
+		// logger.FromContext(ctx).WithFields(logrus.Fields{"event": string(eventBuf)}).Debug("routing event to handler")
 		return handler(ctx, eventBuf)
 	}
 

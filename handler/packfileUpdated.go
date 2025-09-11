@@ -9,6 +9,7 @@ import (
 
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia-storage/app"
+	"github.com/gitopia/gitopia-storage/handler/storage"
 	"github.com/gitopia/gitopia-storage/utils"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -93,14 +94,14 @@ func UnmarshalPackfileUpdatedEvent(eventBuf []byte) ([]PackfileUpdatedEvent, err
 }
 
 type PackfileUpdatedEventHandler struct {
-	gc           *app.GitopiaProxy
-	pinataClient *PinataClient
+	gc             *app.GitopiaProxy
+	storageManager *storage.Manager
 }
 
-func NewPackfileUpdatedEventHandler(g *app.GitopiaProxy, pinataClient *PinataClient) PackfileUpdatedEventHandler {
+func NewPackfileUpdatedEventHandler(g *app.GitopiaProxy, storageManager *storage.Manager) PackfileUpdatedEventHandler {
 	return PackfileUpdatedEventHandler{
-		gc:           g,
-		pinataClient: pinataClient,
+		gc:             g,
+		storageManager: storageManager,
 	}
 }
 
@@ -132,7 +133,7 @@ func (h *PackfileUpdatedEventHandler) Process(ctx context.Context, event Packfil
 		"deleted":       event.Deleted,
 	}).Info("processing packfile updated event")
 
-	if event.NewCid != "" && !event.Deleted {
+	if event.NewCid != "" && !event.Deleted && h.storageManager.HasProviders() {
 		cacheDir := viper.GetString("GIT_REPOS_DIR")
 
 		// cache repo
@@ -144,17 +145,16 @@ func (h *PackfileUpdatedEventHandler) Process(ctx context.Context, event Packfil
 		}
 
 		packfilePath := path.Join(cacheDir, fmt.Sprintf("%v.git/objects/pack/", event.RepositoryId), event.NewName)
-		resp, err := h.pinataClient.PinFile(ctx, packfilePath, filepath.Base(packfilePath))
+		err := h.storageManager.PinFile(ctx, packfilePath, filepath.Base(packfilePath))
 		if err != nil {
-			logger.FromContext(ctx).WithError(err).Error("failed to pin file to Pinata")
+			logger.FromContext(ctx).WithError(err).Error("failed to pin file to external storage")
 			// Don't fail the process, just log the error
 		} else {
 			logger.FromContext(ctx).WithFields(logrus.Fields{
 				"repository_id": event.RepositoryId,
 				"packfile_name": event.NewName,
 				"cid":           event.NewCid,
-				"pinata_id":     resp.Data.ID,
-			}).Info("successfully pinned to Pinata")
+			}).Info("successfully pinned to external storage")
 		}
 	}
 
@@ -166,16 +166,16 @@ func (h *PackfileUpdatedEventHandler) Process(ctx context.Context, event Packfil
 			return err
 		}
 
-		if refCount == 0 {
-			err := h.pinataClient.UnpinFile(ctx, event.OldName)
+		if refCount == 0 && h.storageManager.HasProviders() {
+			err := h.storageManager.UnpinFile(ctx, event.OldName)
 			if err != nil {
-				logger.FromContext(ctx).WithError(err).Error("failed to unpin file from Pinata")
+				logger.FromContext(ctx).WithError(err).Error("failed to unpin file from external storage")
 			}
 			logger.FromContext(ctx).WithFields(logrus.Fields{
 				"repository_id": event.RepositoryId,
 				"old_name":      event.OldName,
 				"old_cid":       event.OldCid,
-			}).Info("unpinned file from Pinata")
+			}).Info("unpinned file from external storage")
 		}
 	}
 
@@ -187,20 +187,20 @@ func (h *PackfileUpdatedEventHandler) Process(ctx context.Context, event Packfil
 			return err
 		}
 
-		if refCount == 0 {
-			err := h.pinataClient.UnpinFile(ctx, event.NewName)
+		if refCount == 0 && h.storageManager.HasProviders() {
+			err := h.storageManager.UnpinFile(ctx, event.NewName)
 			if err != nil {
 				logger.FromContext(ctx).WithFields(logrus.Fields{
 					"repository_id": event.RepositoryId,
 					"name":          event.NewName,
 					"cid":           event.NewCid,
-				}).WithError(err).Error("failed to unpin packfile from Pinata")
+				}).WithError(err).Error("failed to unpin packfile from external storage")
 			} else {
 				logger.FromContext(ctx).WithFields(logrus.Fields{
 					"repository_id": event.RepositoryId,
 					"name":          event.NewName,
 					"cid":           event.NewCid,
-				}).Info("successfully unpinned packfile from Pinata")
+				}).Info("successfully unpinned packfile from external storage")
 			}
 		}
 	}

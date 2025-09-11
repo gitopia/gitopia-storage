@@ -7,6 +7,7 @@ import (
 
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia-storage/app"
+	"github.com/gitopia/gitopia-storage/handler/storage"
 	"github.com/gitopia/gitopia-storage/utils"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -79,14 +80,14 @@ func Unmarshal(eventBuf []byte) ([]LfsObjectUpdatedEvent, error) {
 }
 
 type LfsObjectUpdatedEventHandler struct {
-	gc           *app.GitopiaProxy
-	pinataClient *PinataClient
+	gc             *app.GitopiaProxy
+	storageManager *storage.Manager
 }
 
-func NewLfsObjectUpdatedEventHandler(g *app.GitopiaProxy, pinataClient *PinataClient) LfsObjectUpdatedEventHandler {
+func NewLfsObjectUpdatedEventHandler(g *app.GitopiaProxy, storageManager *storage.Manager) LfsObjectUpdatedEventHandler {
 	return LfsObjectUpdatedEventHandler{
-		gc:           g,
-		pinataClient: pinataClient,
+		gc:             g,
+		storageManager: storageManager,
 	}
 }
 
@@ -117,18 +118,18 @@ func (h *LfsObjectUpdatedEventHandler) Process(ctx context.Context, event LfsObj
 			"cid":           event.Cid,
 		}).Info("processing lfs object deleted event")
 
-		// Unpin from Pinata
-		if event.Oid != "" {
-			err := h.pinataClient.UnpinFile(ctx, event.Oid)
+		// Unpin from external storage
+		if event.Oid != "" && h.storageManager.HasProviders() {
+			err := h.storageManager.UnpinFile(ctx, event.Oid)
 			if err != nil {
-				logger.FromContext(ctx).WithError(err).Error("failed to unpin file from Pinata")
+				logger.FromContext(ctx).WithError(err).Error("failed to unpin file from external storage")
 				// Don't fail the process, just log the error
 			} else {
 				logger.FromContext(ctx).WithFields(logrus.Fields{
 					"repository_id": event.RepositoryId,
 					"oid":           event.Oid,
 					"cid":           event.Cid,
-				}).Info("successfully unpinned from Pinata")
+				}).Info("successfully unpinned from external storage")
 			}
 		}
 	} else {
@@ -138,8 +139,8 @@ func (h *LfsObjectUpdatedEventHandler) Process(ctx context.Context, event LfsObj
 			"cid":           event.Cid,
 		}).Info("processing lfs object updated event")
 
-		// Pin to Pinata
-		if event.Cid != "" {
+		// Pin to external storage
+		if event.Cid != "" && h.storageManager.HasProviders() {
 			cacheDir := viper.GetString("LFS_OBJECTS_DIR")
 
 			// check if lfs object is cached
@@ -155,21 +156,20 @@ func (h *LfsObjectUpdatedEventHandler) Process(ctx context.Context, event LfsObj
 			}
 
 			lfsObjectPath := path.Join(cacheDir, event.Oid)
-			resp, err := h.pinataClient.PinFile(ctx, lfsObjectPath, event.Oid)
+			err = h.storageManager.PinFile(ctx, lfsObjectPath, event.Oid)
 			if err != nil {
 				logger.FromContext(ctx).WithFields(logrus.Fields{
 					"repository_id": event.RepositoryId,
 					"oid":           event.Oid,
 					"cid":           event.Cid,
-				}).WithError(err).Error("failed to pin file to Pinata")
+				}).WithError(err).Error("failed to pin file to external storage")
 				// Don't fail the process, just log the error
 			} else {
 				logger.FromContext(ctx).WithFields(logrus.Fields{
 					"repository_id": event.RepositoryId,
 					"oid":           event.Oid,
 					"cid":           event.Cid,
-					"pinata_id":     resp.Data.ID,
-				}).Info("successfully pinned to Pinata")
+				}).Info("successfully pinned to external storage")
 			}
 		}
 	}

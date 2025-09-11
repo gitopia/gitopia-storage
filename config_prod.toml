@@ -13,8 +13,20 @@ IPFS_CLUSTER_PEER_HOST = "ipfs-cluster"
 IPFS_CLUSTER_PEER_PORT = "9094"
 IPFS_HOST = "ipfs"
 IPFS_PORT = "5001"
+
+# External Storage Configuration
 ENABLE_EXTERNAL_PINNING = false
+STORAGE_PROVIDERS = []  # Available: "pinata", "filebase"
+
+# Pinata Configuration
 PINATA_JWT = ""
+
+# Filebase Configuration
+FILEBASE_ACCESS_KEY = ""
+FILEBASE_SECRET_KEY = ""
+FILEBASE_BUCKET = ""
+FILEBASE_REGION = "us-east-1"
+FILEBASE_ENDPOINT = "https://s3.filebase.com"
 
 # Cache Configuration
 CACHE_REPO_MAX_AGE = "24h"
