@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"path"
 	"strconv"
 
@@ -127,7 +128,8 @@ func (h *LfsObjectUpdatedEventHandler) Process(ctx context.Context, event LfsObj
 			}
 
 			if refCount == 0 && h.storageManager.HasProviders() {
-				err := h.storageManager.UnpinFile(ctx, event.Oid)
+				name := fmt.Sprintf("lfs-objects/%s", event.Oid)
+				err := h.storageManager.UnpinFile(ctx, name)
 				if err != nil {
 					logger.FromContext(ctx).WithError(err).Error("failed to unpin file from external storage")
 					// Don't fail the process, just log the error
@@ -171,7 +173,8 @@ func (h *LfsObjectUpdatedEventHandler) Process(ctx context.Context, event LfsObj
 				}
 
 				lfsObjectPath := path.Join(cacheDir, event.Oid)
-				err = h.storageManager.PinFile(ctx, lfsObjectPath, event.Oid)
+				name := fmt.Sprintf("lfs-objects/%s", event.Oid)
+				err = h.storageManager.PinFile(ctx, lfsObjectPath, name)
 				if err != nil {
 					logger.FromContext(ctx).WithFields(logrus.Fields{
 						"repository_id": event.RepositoryId,

@@ -152,7 +152,8 @@ func (h *PackfileUpdatedEventHandler) Process(ctx context.Context, event Packfil
 			}
 
 			packfilePath := path.Join(cacheDir, fmt.Sprintf("%v.git/objects/pack/", event.RepositoryId), event.NewName)
-			err := h.storageManager.PinFile(ctx, packfilePath, filepath.Base(packfilePath))
+			name := fmt.Sprintf("packfiles/%s", filepath.Base(packfilePath))
+			err := h.storageManager.PinFile(ctx, packfilePath, name)
 			if err != nil {
 				logger.FromContext(ctx).WithError(err).Error("failed to pin file to external storage")
 				// Don't fail the process, just log the error
@@ -175,7 +176,8 @@ func (h *PackfileUpdatedEventHandler) Process(ctx context.Context, event Packfil
 		}
 
 		if refCount == 0 && h.storageManager.HasProviders() {
-			err := h.storageManager.UnpinFile(ctx, event.OldName)
+			name := fmt.Sprintf("packfiles/%s", event.OldName)
+			err := h.storageManager.UnpinFile(ctx, name)
 			if err != nil {
 				logger.FromContext(ctx).WithError(err).Error("failed to unpin file from external storage")
 			}
@@ -196,7 +198,8 @@ func (h *PackfileUpdatedEventHandler) Process(ctx context.Context, event Packfil
 		}
 
 		if refCount == 0 && h.storageManager.HasProviders() {
-			err := h.storageManager.UnpinFile(ctx, event.NewName)
+			name := fmt.Sprintf("packfiles/%s", event.NewName)
+			err := h.storageManager.UnpinFile(ctx, name)
 			if err != nil {
 				logger.FromContext(ctx).WithFields(logrus.Fields{
 					"repository_id": event.RepositoryId,

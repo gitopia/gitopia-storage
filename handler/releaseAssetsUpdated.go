@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path"
 	"strconv"
 
@@ -144,7 +145,8 @@ func (h *ReleaseAssetsUpdatedEventHandler) Process(ctx context.Context, event Re
 				continue // Don't fail the entire process if one asset fails
 			}
 			if refCount == 0 && h.storageManager.HasProviders() {
-				err := h.storageManager.UnpinFile(ctx, asset.OldSha256)
+				name := fmt.Sprintf("release-assets/%s", asset.OldSha256)
+				err := h.storageManager.UnpinFile(ctx, name)
 				if err != nil {
 					logger.FromContext(ctx).WithFields(logrus.Fields{
 						"repository_id": event.RepositoryId,
@@ -189,7 +191,8 @@ func (h *ReleaseAssetsUpdatedEventHandler) Process(ctx context.Context, event Re
 					}
 
 					releaseAssetPath := path.Join(cacheDir, asset.Sha256)
-					err = h.storageManager.PinFile(ctx, releaseAssetPath, asset.Sha256)
+					name := fmt.Sprintf("release-assets/%s", asset.Sha256)
+					err = h.storageManager.PinFile(ctx, releaseAssetPath, name)
 					if err != nil {
 						logger.FromContext(ctx).WithFields(logrus.Fields{
 							"repository_id": event.RepositoryId,
@@ -217,7 +220,8 @@ func (h *ReleaseAssetsUpdatedEventHandler) Process(ctx context.Context, event Re
 					continue // Don't fail the entire process if one asset fails
 				}
 				if refCount == 0 {
-					err := h.storageManager.UnpinFile(ctx, asset.OldSha256)
+					name := fmt.Sprintf("release-assets/%s", asset.OldSha256)
+					err := h.storageManager.UnpinFile(ctx, name)
 					if err != nil {
 						logger.FromContext(ctx).WithFields(logrus.Fields{
 							"repository_id": event.RepositoryId,

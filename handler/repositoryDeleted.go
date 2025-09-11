@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
 
 	"github.com/gitopia/gitopia-go/logger"
@@ -154,7 +155,8 @@ func (h *RepositoryDeletedEventHandler) Process(ctx context.Context, event Repos
 		}
 
 		if refCount == 0 {
-			err := h.storageManager.UnpinFile(ctx, event.PackfileName)
+			name := fmt.Sprintf("packfiles/%s", event.PackfileName)
+			err := h.storageManager.UnpinFile(ctx, name)
 			if err != nil {
 				logger.FromContext(ctx).WithError(err).Error("failed to unpin packfile from external storage")
 			} else {
@@ -173,7 +175,8 @@ func (h *RepositoryDeletedEventHandler) Process(ctx context.Context, event Repos
 			}
 
 			if refCount == 0 {
-				err := h.storageManager.UnpinFile(ctx, asset.Sha)
+				name := fmt.Sprintf("release-assets/%s", asset.Sha)
+				err := h.storageManager.UnpinFile(ctx, name)
 				if err != nil {
 					logger.FromContext(ctx).WithError(err).WithField("asset", asset.Sha).Error("failed to unpin release asset from external storage")
 				} else {
@@ -193,7 +196,8 @@ func (h *RepositoryDeletedEventHandler) Process(ctx context.Context, event Repos
 			}
 
 			if refCount == 0 {
-				err := h.storageManager.UnpinFile(ctx, lfsObject.Oid)
+				name := fmt.Sprintf("lfs-objects/%s", lfsObject.Oid)
+				err := h.storageManager.UnpinFile(ctx, name)
 				if err != nil {
 					logger.FromContext(ctx).WithError(err).WithField("lfs_object", lfsObject.Oid).Error("failed to unpin LFS object from external storage")
 				} else {
