@@ -2,3 +2,6 @@ build
 compose
 .DS_Store
 .env
+
+# Local configuration overrides (not committed)
+config.local.toml

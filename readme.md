@@ -255,12 +255,13 @@ Be sure to update this list whenever the set of active storage providers changes
     This will copy `gitopia-storaged`, `gitopia-pre-receive`, and `gitopia-post-receive` to `/usr/local/bin`.
 
 ### 4. Configure Gitopia Storage Provider
-1.  Copy the production config file to a system location:
+1.  Copy the base config file to a system location:
     ```sh
     sudo mkdir -p /etc/gitopia-storage
-    sudo cp config_prod.toml /etc/gitopia-storage/config_prod.toml
+    sudo cp config.toml /etc/gitopia-storage/config.toml
     ```
-2.  Edit `/etc/gitopia-storage/config_prod.toml` and set the correct paths and values, especially for your data directories.
+2.  Edit `/etc/gitopia-storage/config.toml` and set the correct paths and values, especially for your data directories.
+3.  For local development, create a `config.local.toml` file to override specific settings without modifying the base config.
 
 ### 5. Run the Service
 1.  Create necessary directories:
@@ -416,7 +417,18 @@ When external storage is enabled:
 
 ### Configuration
 
-The storage provider can be configured using a TOML configuration file. Here's the complete configuration structure:
+The storage provider uses a unified configuration system with `config.toml` as the base configuration file containing production defaults. You can override any setting using:
+
+1. **Environment variables** (highest priority)
+2. **config.local.toml** file for development overrides (gitignored)
+3. **config.toml** base configuration (lowest priority)
+
+#### Configuration Hierarchy
+
+- **Production**: Uses `config.toml` with environment variable overrides
+- **Development**: Copy `config.local.toml.example` to `config.local.toml` and modify as needed
+
+Here's the complete configuration structure:
 
 ```toml
 # Server Configuration

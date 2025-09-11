@@ -1,7 +1,12 @@
-//go:build prod
-
 package config
 
-const (
-	GRPCHost = "gitopia-grpc.polkachu.com:11390"
-)
+import "os"
+
+func GetGRPCHost() string {
+	// Check environment variable first
+	if host := os.Getenv("GITOPIA_ADDR"); host != "" {
+		return host
+	}
+	// Default to production endpoint
+	return "gitopia-grpc.polkachu.com:11390"
+}

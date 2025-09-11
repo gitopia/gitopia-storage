@@ -34,14 +34,12 @@ COPY --from=builder /src/app/build/gitopia-storaged /usr/local/bin/
 COPY --from=builder /src/app/build/gitopia-pre-receive /usr/local/bin/
 COPY --from=builder /src/app/build/gitopia-post-receive /usr/local/bin/
 
-# Copy default production config and supervisor config
-COPY config_prod.toml /app/config_prod.toml
+# Copy base config and supervisor config
+COPY config.toml /app/config.toml
 COPY scripts/entrypoint.sh /app/entrypoint.sh
 COPY scripts/supervisord.conf /etc/supervisord.conf
 
 RUN chmod +x /app/entrypoint.sh
-
-ENV ENV="PRODUCTION"
 
 # Switch to the non-root user
 USER gitopia

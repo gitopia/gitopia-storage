@@ -25,24 +25,32 @@ var (
 )
 
 func initConfig() {
-	// Add system config path first, then current directory as fallback
+	// Set config paths - system config first, then current directory
 	viper.AddConfigPath("/etc/gitopia-storage")
 	viper.AddConfigPath(".")
-	if os.Getenv("ENV") == "PRODUCTION" {
-		viper.SetConfigName("config_prod")
-	} else if os.Getenv("ENV") == "DEVELOPMENT" {
-		viper.SetConfigName("config_dev")
-	} else {
-		viper.SetConfigName("config_local")
-	}
-
+	
+	// Always use config.toml as the base configuration
+	viper.SetConfigName("config")
+	viper.SetConfigType("toml")
+	
+	// Enable automatic environment variable binding
 	viper.AutomaticEnv()
-
+	
+	// Read the base config file
 	err := viper.ReadInConfig()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Error reading base config file: %v", err)
 	}
-
+	
+	// Try to read local override config (config.local.toml) if it exists
+	// This allows developers to override settings without modifying the base config
+	viper.SetConfigName("config.local")
+	localConfigErr := viper.MergeInConfig()
+	if localConfigErr == nil {
+		log.Println("Loaded local configuration overrides from config.local.toml")
+	}
+	
+	// Build environment variables for child processes
 	for _, key := range viper.AllKeys() {
 		env = append(env, strings.ToUpper(key)+"="+viper.GetString(key))
 	}

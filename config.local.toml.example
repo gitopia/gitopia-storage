@@ -1,0 +1,21 @@
+# Local Development Configuration Override Example
+# Copy this file to config.local.toml and modify values for local development
+# config.local.toml is gitignored and won't be committed
+
+# Development Network Configuration
+GITOPIA_ADDR = "host.docker.internal:9100"
+TM_ADDR = "http://host.docker.internal:26667"
+CHAIN_ID = "localgitopia"
+WORKING_DIR = "/src/app/"
+
+# Local IPFS Configuration
+IPFS_CLUSTER_PEER_HOST = "host.docker.internal"
+IPFS_HOST = "host.docker.internal"
+
+# Faster cache clearing for development
+CACHE_REPO_MAX_AGE = "10m"
+CACHE_ASSET_MAX_AGE = "24h"
+CACHE_ASSET_MAX_SIZE = 1073741824    # 1GB for development
+CACHE_LFS_MAX_AGE = "168h"
+CACHE_LFS_MAX_SIZE = 10737418240     # 10GB for development
+CACHE_CLEAR_INTERVAL = "1m"
