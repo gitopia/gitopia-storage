@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strconv"
 
 	"github.com/gitopia/gitopia-go/logger"
@@ -148,23 +147,38 @@ func (h *RepositoryDeletedEventHandler) Process(ctx context.Context, event Repos
 
 	// Delete packfile
 	if event.PackfileCid != "" && h.storageManager.HasProviders() {
-		err := h.storageManager.UnpinFile(ctx, event.PackfileName)
+		refCount, err := h.gc.StorageCidReferenceCount(ctx, event.PackfileCid)
 		if err != nil {
-			logger.FromContext(ctx).WithError(err).Error("failed to unpin packfile from external storage")
-		} else {
-			logger.FromContext(ctx).WithField("packfile", event.PackfileName).Info("unpinned packfile from external storage")
+			logger.FromContext(ctx).WithError(err).Error("failed to get packfile reference count")
+			return err
+		}
+
+		if refCount == 0 {
+			err := h.storageManager.UnpinFile(ctx, event.PackfileName)
+			if err != nil {
+				logger.FromContext(ctx).WithError(err).Error("failed to unpin packfile from external storage")
+			} else {
+				logger.FromContext(ctx).WithField("packfile", event.PackfileName).Info("unpinned packfile from external storage")
+			}
 		}
 	}
 
 	// Delete release assets
 	if h.storageManager.HasProviders() {
 		for _, asset := range event.ReleaseAssets {
-			name := fmt.Sprintf("release-%d-%s-%s-%s", event.RepositoryId, asset.Tag, asset.Name, asset.Sha)
-			err := h.storageManager.UnpinFile(ctx, name)
+			refCount, err := h.gc.StorageCidReferenceCount(ctx, asset.Cid)
 			if err != nil {
-				logger.FromContext(ctx).WithError(err).WithField("asset", name).Error("failed to unpin release asset from external storage")
-			} else {
-				logger.FromContext(ctx).WithField("asset", name).Info("unpinned release asset from external storage")
+				logger.FromContext(ctx).WithError(err).Error("failed to get reference count")
+				return err
+			}
+
+			if refCount == 0 {
+				err := h.storageManager.UnpinFile(ctx, asset.Sha)
+				if err != nil {
+					logger.FromContext(ctx).WithError(err).WithField("asset", asset.Sha).Error("failed to unpin release asset from external storage")
+				} else {
+					logger.FromContext(ctx).WithField("asset", asset.Sha).Info("unpinned release asset from external storage")
+				}
 			}
 		}
 	}
@@ -172,11 +186,19 @@ func (h *RepositoryDeletedEventHandler) Process(ctx context.Context, event Repos
 	// Delete LFS objects
 	if h.storageManager.HasProviders() {
 		for _, lfsObject := range event.LfsObjects {
-			err := h.storageManager.UnpinFile(ctx, lfsObject.Oid)
+			refCount, err := h.gc.StorageCidReferenceCount(ctx, lfsObject.Cid)
 			if err != nil {
-				logger.FromContext(ctx).WithError(err).WithField("lfs_object", lfsObject.Oid).Error("failed to unpin LFS object from external storage")
-			} else {
-				logger.FromContext(ctx).WithField("lfs_object", lfsObject.Oid).Info("unpinned LFS object from external storage")
+				logger.FromContext(ctx).WithError(err).Error("failed to get reference count")
+				return err
+			}
+
+			if refCount == 0 {
+				err := h.storageManager.UnpinFile(ctx, lfsObject.Oid)
+				if err != nil {
+					logger.FromContext(ctx).WithError(err).WithField("lfs_object", lfsObject.Oid).Error("failed to unpin LFS object from external storage")
+				} else {
+					logger.FromContext(ctx).WithField("lfs_object", lfsObject.Oid).Info("unpinned LFS object from external storage")
+				}
 			}
 		}
 	}

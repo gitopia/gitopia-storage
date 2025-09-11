@@ -120,16 +120,24 @@ func (h *LfsObjectUpdatedEventHandler) Process(ctx context.Context, event LfsObj
 
 		// Unpin from external storage
 		if event.Oid != "" && h.storageManager.HasProviders() {
-			err := h.storageManager.UnpinFile(ctx, event.Oid)
+			refCount, err := h.gc.StorageCidReferenceCount(ctx, event.Cid)
 			if err != nil {
-				logger.FromContext(ctx).WithError(err).Error("failed to unpin file from external storage")
-				// Don't fail the process, just log the error
-			} else {
-				logger.FromContext(ctx).WithFields(logrus.Fields{
-					"repository_id": event.RepositoryId,
-					"oid":           event.Oid,
-					"cid":           event.Cid,
-				}).Info("successfully unpinned from external storage")
+				logger.FromContext(ctx).WithError(err).Error("failed to get reference count")
+				return err
+			}
+
+			if refCount == 0 && h.storageManager.HasProviders() {
+				err := h.storageManager.UnpinFile(ctx, event.Oid)
+				if err != nil {
+					logger.FromContext(ctx).WithError(err).Error("failed to unpin file from external storage")
+					// Don't fail the process, just log the error
+				} else {
+					logger.FromContext(ctx).WithFields(logrus.Fields{
+						"repository_id": event.RepositoryId,
+						"oid":           event.Oid,
+						"cid":           event.Cid,
+					}).Info("successfully unpinned from external storage")
+				}
 			}
 		}
 	} else {
