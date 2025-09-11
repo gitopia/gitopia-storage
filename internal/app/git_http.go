@@ -228,7 +228,7 @@ func (s *Server) handleGitReceivePack(w http.ResponseWriter, r *Request, repoID 
 	}
 
 	if !storageParams.Params.StoragePricePerGb.IsZero() {
-		costInfo, err := utils.CalculateStorageCost(uint64(userQuotaResp.UserQuota.StorageUsed), uint64(storageDelta), storageParams.Params)
+		costInfo, err := utils.CalculateStorageCost(userQuotaResp.UserQuota.StorageUsed, userQuotaResp.UserQuota.StorageUsed+uint64(storageDelta), storageParams.Params)
 		if err != nil {
 			cleanupRepoDir()
 			return fmt.Errorf("failed to calculate storage cost: %w", err)

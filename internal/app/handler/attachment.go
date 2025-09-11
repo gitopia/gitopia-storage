@@ -273,7 +273,7 @@ func UploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 			storageDelta := handler.Size - oldSize
 			projectedUsage := uint64(userQuotaRes.UserQuota.StorageUsed) + uint64(pendingSize)
 
-			costInfo, err := utils.CalculateStorageCost(projectedUsage, uint64(storageDelta), storageParamsRes.Params)
+			costInfo, err := utils.CalculateStorageCost(projectedUsage, projectedUsage+uint64(storageDelta), storageParamsRes.Params)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return

@@ -133,7 +133,7 @@ func (h *BasicHandler) ServeUploadHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	if !storageParams.StoragePricePerGb.IsZero() {
-		costInfo, err := utils.CalculateStorageCost(uint64(userQuota.StorageUsed), uint64(r.ContentLength), storageParams)
+		costInfo, err := utils.CalculateStorageCost(userQuota.StorageUsed, userQuota.StorageUsed+uint64(r.ContentLength), storageParams)
 		if err != nil {
 			internalServerError(w)
 			log.WithError(err).Error("failed to calculate storage cost")

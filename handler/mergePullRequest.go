@@ -325,8 +325,8 @@ func (h *InvokeMergePullRequestEventHandler) handlePostMergeOperations(ctx conte
 	// Calculate storage cost
 	if !storageParams.StoragePricePerGb.IsZero() {
 		costInfo, err := utils.CalculateStorageCost(
-			uint64(userQuota.StorageUsed),
-			uint64(storageDelta),
+			userQuota.StorageUsed,
+			userQuota.StorageUsed+uint64(storageDelta),
 			storageParams,
 		)
 		if err != nil {
