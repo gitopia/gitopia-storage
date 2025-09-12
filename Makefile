@@ -14,7 +14,7 @@ endif
 build_tags += $(BUILD_TAGS)
 build_tags := $(strip $(build_tags))
 ldflags := $(strip $(ldflags))
-BUILD_FLAGS := -tags "$(build_tags) $(GITOPIA_ENV)" -ldflags="$(ldflags)"
+BUILD_FLAGS := -tags "$(build_tags) $(GITOPIA_ENV)" -ldflags '$(ldflags)'
 
 # check for nostrip option
 ifeq (,$(findstring nostrip,$(GIT_SERVER_BUILD_OPTIONS)))

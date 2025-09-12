@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path"
 	"strconv"
+	"sync"
 
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia-storage/app"
@@ -98,16 +99,36 @@ func (h *LfsObjectUpdatedEventHandler) Handle(ctx context.Context, eventBuf []by
 		return errors.WithMessage(err, "event parse error")
 	}
 
-	for _, event := range events {
-		if err := h.Process(ctx, event); err != nil {
-			// Log error and continue processing other events
-			logger.FromContext(ctx).WithFields(logrus.Fields{
-				"repository_id": event.RepositoryId,
-				"oid":           event.Oid,
-			}).WithError(err).Error("failed to process LfsObjectUpdatedEvent")
-		}
+	// Process events concurrently with a limited number of workers
+	// Limit to 5 concurrent LFS operations
+	maxWorkers := 5
+	if len(events) < maxWorkers {
+		maxWorkers = len(events)
 	}
 
+	semaphore := make(chan struct{}, maxWorkers)
+	var wg sync.WaitGroup
+
+	for _, event := range events {
+		wg.Add(1)
+		go func(e LfsObjectUpdatedEvent) {
+			defer wg.Done()
+			
+			// Acquire semaphore
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			if err := h.Process(ctx, e); err != nil {
+				// Log error and continue processing other events
+				logger.FromContext(ctx).WithFields(logrus.Fields{
+					"repository_id": e.RepositoryId,
+					"oid":           e.Oid,
+				}).WithError(err).Error("failed to process LfsObjectUpdatedEvent")
+			}
+		}(event)
+	}
+
+	wg.Wait()
 	return nil
 }
 

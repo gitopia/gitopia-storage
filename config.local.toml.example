@@ -12,6 +12,20 @@ WORKING_DIR = "/src/app/"
 IPFS_CLUSTER_PEER_HOST = "host.docker.internal"
 IPFS_HOST = "host.docker.internal"
 
+# External Storage Configuration
+ENABLE_EXTERNAL_PINNING = true
+STORAGE_PROVIDERS = ["filebase"]  # Available: "pinata", "filebase"
+
+# Pinata Configuration
+PINATA_JWT = ""
+
+# Filebase Configuration
+FILEBASE_ACCESS_KEY = ""
+FILEBASE_SECRET_KEY = ""
+FILEBASE_BUCKET = "filebase-test"
+FILEBASE_REGION = "us-east-1"
+FILEBASE_ENDPOINT = "https://s3.filebase.com"
+
 # Faster cache clearing for development
 CACHE_REPO_MAX_AGE = "10m"
 CACHE_ASSET_MAX_AGE = "24h"

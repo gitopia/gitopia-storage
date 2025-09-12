@@ -6,6 +6,7 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
+	"sync"
 
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia-storage/app"
@@ -111,17 +112,37 @@ func (h *PackfileUpdatedEventHandler) Handle(ctx context.Context, eventBuf []byt
 		return errors.WithMessage(err, "event parse error")
 	}
 
-	for _, event := range events {
-		if err := h.Process(ctx, event); err != nil {
-			// Log error and continue processing other events
-			logger.FromContext(ctx).WithFields(logrus.Fields{
-				"repository_id": event.RepositoryId,
-				"new_cid":       event.NewCid,
-				"old_cid":       event.OldCid,
-			}).WithError(err).Error("failed to process PackfileUpdatedEvent")
-		}
+	// Process events concurrently with a limited number of workers
+	// Limit to 5 concurrent packfile operations
+	maxWorkers := 5
+	if len(events) < maxWorkers {
+		maxWorkers = len(events)
 	}
 
+	semaphore := make(chan struct{}, maxWorkers)
+	var wg sync.WaitGroup
+
+	for _, event := range events {
+		wg.Add(1)
+		go func(e PackfileUpdatedEvent) {
+			defer wg.Done()
+			
+			// Acquire semaphore
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			if err := h.Process(ctx, e); err != nil {
+				// Log error and continue processing other events
+				logger.FromContext(ctx).WithFields(logrus.Fields{
+					"repository_id": e.RepositoryId,
+					"new_cid":       e.NewCid,
+					"old_cid":       e.OldCid,
+				}).WithError(err).Error("failed to process PackfileUpdatedEvent")
+			}
+		}(event)
+	}
+
+	wg.Wait()
 	return nil
 }
 
