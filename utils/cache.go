@@ -461,18 +461,22 @@ func SyncRepositoryRefs(id uint64, cacheDir string) error {
 	repoDir := filepath.Join(cacheDir, fmt.Sprintf("%d.git", id))
 	var failedRefs []string
 
-	// Fetch branches and tags concurrently
-	type refData struct {
+	// Fetch branches and tags in parallel
+	type branchResult struct {
 		branches []gitopiatypes.Branch
-		tags     []gitopiatypes.Tag
 		err      error
 	}
+	
+	type tagResult struct {
+		tags []gitopiatypes.Tag
+		err  error
+	}
 
-	refChan := make(chan refData, 1)
+	branchChan := make(chan branchResult, 1)
+	tagChan := make(chan tagResult, 1)
+
+	// Fetch branches in parallel
 	go func() {
-		var data refData
-		
-		// Fetch branches
 		branchAllRes, err := queryClient.Gitopia.RepositoryBranchAll(context.Background(), &gitopiatypes.QueryAllRepositoryBranchRequest{
 			Id:             res.Repository.Owner.Id,
 			RepositoryName: res.Repository.Name,
@@ -481,13 +485,14 @@ func SyncRepositoryRefs(id uint64, cacheDir string) error {
 			},
 		})
 		if err != nil {
-			data.err = err
-			refChan <- data
+			branchChan <- branchResult{err: err}
 			return
 		}
-		data.branches = branchAllRes.Branch
+		branchChan <- branchResult{branches: branchAllRes.Branch}
+	}()
 
-		// Fetch tags
+	// Fetch tags in parallel
+	go func() {
 		tagAllRes, err := queryClient.Gitopia.RepositoryTagAll(context.Background(), &gitopiatypes.QueryAllRepositoryTagRequest{
 			Id:             res.Repository.Owner.Id,
 			RepositoryName: res.Repository.Name,
@@ -496,24 +501,27 @@ func SyncRepositoryRefs(id uint64, cacheDir string) error {
 			},
 		})
 		if err != nil {
-			data.err = err
-			refChan <- data
+			tagChan <- tagResult{err: err}
 			return
 		}
-		data.tags = tagAllRes.Tag
-		
-		refChan <- data
+		tagChan <- tagResult{tags: tagAllRes.Tag}
 	}()
 
-	// Wait for ref data
-	data := <-refChan
-	if data.err != nil {
-		return data.err
+	// Wait for both branch and tag results
+	branchRes := <-branchChan
+	tagRes := <-tagChan
+	
+	// Check for errors
+	if branchRes.err != nil {
+		return branchRes.err
+	}
+	if tagRes.err != nil {
+		return tagRes.err
 	}
 
 	// Use git update-ref for efficient batch updates
-	if len(data.branches) > 0 || len(data.tags) > 0 {
-		failedRefs = append(failedRefs, syncRefsWithUpdateRef(repoDir, data.branches, data.tags, id)...)
+	if len(branchRes.branches) > 0 || len(tagRes.tags) > 0 {
+		failedRefs = append(failedRefs, syncRefsWithUpdateRef(repoDir, branchRes.branches, tagRes.tags, id)...)
 	}
 
 	// Log summary of failed refs but don't fail the entire operation
