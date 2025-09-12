@@ -9,6 +9,10 @@
 - add check for pending packfile update proposal before proceeding to pin and propose update
 - clear local repo cache on any error in push handler
 - simplify configuration system with unified hierarchy
+- rewrite SyncRepositoryRefs for better performance using batch git update-ref
+- add graceful degradation for missing refs instead of failing entire repo load
+- fix GitCommand error handling and CleanUpProcessGroup race conditions
+- prevent zombie processes and resource leaks in git operations
 
 ## [v4.0.0] - 2025-09-04
 

@@ -53,7 +53,12 @@ func (s *Server) GetInfoRefs(_ string, w http.ResponseWriter, r *Request) {
 		return
 	}
 
-	cmd, pipe := utils.GitCommand(s.Config.GitPath, subCommand(rpc), "--stateless-rpc", "--advertise-refs", r.RepoPath)
+	cmd, pipe, err := utils.GitCommand(s.Config.GitPath, subCommand(rpc), "--stateless-rpc", "--advertise-refs", r.RepoPath)
+	if err != nil {
+		utils.LogError(logContext, err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
 	if err := cmd.Start(); err != nil {
 		utils.LogError(logContext, err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -110,7 +115,11 @@ func (s *Server) PostRPC(service string, w http.ResponseWriter, r *Request) {
 		return
 	}
 
-	cmd, outPipe := utils.GitCommand(s.Config.GitPath, subCommand(service), "--stateless-rpc", r.RepoPath)
+	cmd, outPipe, err := utils.GitCommand(s.Config.GitPath, subCommand(service), "--stateless-rpc", r.RepoPath)
+	if err != nil {
+		fail500(w, logContext, err)
+		return
+	}
 	defer outPipe.Close()
 
 	stdin, err := cmd.StdinPipe()

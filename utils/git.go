@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/pkg/errors"
 )
@@ -85,16 +86,18 @@ func CountCommits(repoPath, revision string, path string) (string, error) {
 	return strings.TrimSpace(count), nil
 }
 
-func GitCommand(name string, args ...string) (*exec.Cmd, io.ReadCloser) {
+func GitCommand(name string, args ...string) (*exec.Cmd, io.ReadCloser, error) {
 	cmd := exec.Command(name, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Env = os.Environ()
-	// cmd.Env = append(cmd.Env, env...)
 
-	r, _ := cmd.StdoutPipe()
+	r, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "failed to create stdout pipe")
+	}
 	cmd.Stderr = cmd.Stdout
 
-	return cmd, r
+	return cmd, r, nil
 }
 
 func CleanUpProcessGroup(cmd *exec.Cmd) {
@@ -103,11 +106,35 @@ func CleanUpProcessGroup(cmd *exec.Cmd) {
 	}
 
 	process := cmd.Process
-	if process != nil && process.Pid > 0 {
-		syscall.Kill(-process.Pid, syscall.SIGTERM)
+	if process == nil {
+		return
 	}
 
-	go cmd.Wait()
+	// Check if process is still running
+	if process.Pid <= 0 {
+		return
+	}
+
+	// Try to kill the process group
+	if err := syscall.Kill(-process.Pid, syscall.SIGTERM); err != nil {
+		// If SIGTERM fails, try SIGKILL
+		syscall.Kill(-process.Pid, syscall.SIGKILL)
+	}
+
+	// Wait for process to finish (with timeout to prevent hanging)
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	select {
+	case <-done:
+		// Process finished normally
+	case <-time.After(5 * time.Second):
+		// Force kill if process doesn't terminate within 5 seconds
+		syscall.Kill(-process.Pid, syscall.SIGKILL)
+		<-done // Wait for the goroutine to finish
+	}
 }
 
 func GetPackfileName(repoPath string) (string, error) {
