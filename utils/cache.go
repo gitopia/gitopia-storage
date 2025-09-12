@@ -423,7 +423,10 @@ func downloadPackfile(cid string, packfileName string, repoDir string) error {
 	}
 
 	// Build pack index file
-	cmd, outPipe := GitCommand("git", "index-pack", packfilePath)
+	cmd, outPipe, err := GitCommand("git", "index-pack", packfilePath)
+	if err != nil {
+		return err
+	}
 	cmd.Dir = repoDir
 	if err := cmd.Start(); err != nil {
 		return err
@@ -455,64 +458,214 @@ func SyncRepositoryRefs(id uint64, cacheDir string) error {
 		return err
 	}
 
-	branchAllRes, err := queryClient.Gitopia.RepositoryBranchAll(context.Background(), &gitopiatypes.QueryAllRepositoryBranchRequest{
-		Id:             res.Repository.Owner.Id,
-		RepositoryName: res.Repository.Name,
-		Pagination: &query.PageRequest{
-			Limit: math.MaxUint64,
-		},
-	})
-	if err != nil {
-		return err
-	}
-
 	repoDir := filepath.Join(cacheDir, fmt.Sprintf("%d.git", id))
-	for _, branch := range branchAllRes.Branch {
-		cmd, outPipe := GitCommand("git", "branch", "-f", branch.Name, branch.Sha)
-		cmd.Dir = repoDir
-		if err := cmd.Start(); err != nil {
-			return err
-		}
-		defer CleanUpProcessGroup(cmd)
+	var failedRefs []string
 
-		_, err = io.Copy(io.Discard, outPipe)
+	// Fetch branches and tags concurrently
+	type refData struct {
+		branches []gitopiatypes.Branch
+		tags     []gitopiatypes.Tag
+		err      error
+	}
+
+	refChan := make(chan refData, 1)
+	go func() {
+		var data refData
+		
+		// Fetch branches
+		branchAllRes, err := queryClient.Gitopia.RepositoryBranchAll(context.Background(), &gitopiatypes.QueryAllRepositoryBranchRequest{
+			Id:             res.Repository.Owner.Id,
+			RepositoryName: res.Repository.Name,
+			Pagination: &query.PageRequest{
+				Limit: math.MaxUint64,
+			},
+		})
 		if err != nil {
-			return err
+			data.err = err
+			refChan <- data
+			return
 		}
+		data.branches = branchAllRes.Branch
 
-		if err := cmd.Wait(); err != nil {
-			return err
-		}
-	}
-
-	tagAllRes, err := queryClient.Gitopia.RepositoryTagAll(context.Background(), &gitopiatypes.QueryAllRepositoryTagRequest{
-		Id:             res.Repository.Owner.Id,
-		RepositoryName: res.Repository.Name,
-		Pagination: &query.PageRequest{
-			Limit: math.MaxUint64,
-		},
-	})
-	if err != nil {
-		return err
-	}
-	for _, tag := range tagAllRes.Tag {
-		cmd, outPipe := GitCommand("git", "tag", "-f", tag.Name, tag.Sha)
-		cmd.Dir = repoDir
-		if err := cmd.Start(); err != nil {
-			return err
-		}
-		defer CleanUpProcessGroup(cmd)
-
-		_, err = io.Copy(io.Discard, outPipe)
+		// Fetch tags
+		tagAllRes, err := queryClient.Gitopia.RepositoryTagAll(context.Background(), &gitopiatypes.QueryAllRepositoryTagRequest{
+			Id:             res.Repository.Owner.Id,
+			RepositoryName: res.Repository.Name,
+			Pagination: &query.PageRequest{
+				Limit: math.MaxUint64,
+			},
+		})
 		if err != nil {
-			return err
+			data.err = err
+			refChan <- data
+			return
 		}
+		data.tags = tagAllRes.Tag
+		
+		refChan <- data
+	}()
 
-		if err := cmd.Wait(); err != nil {
-			return err
-		}
+	// Wait for ref data
+	data := <-refChan
+	if data.err != nil {
+		return data.err
 	}
+
+	// Use git update-ref for efficient batch updates
+	if len(data.branches) > 0 || len(data.tags) > 0 {
+		failedRefs = append(failedRefs, syncRefsWithUpdateRef(repoDir, data.branches, data.tags, id)...)
+	}
+
+	// Log summary of failed refs but don't fail the entire operation
+	if len(failedRefs) > 0 {
+		LogError("warning", fmt.Errorf("Repository %d loaded successfully but %d refs failed to sync: %v", id, len(failedRefs), failedRefs))
+	}
+
 	return nil
+}
+
+// syncRefsWithUpdateRef uses git update-ref for efficient batch ref updates
+func syncRefsWithUpdateRef(repoDir string, branches []gitopiatypes.Branch, tags []gitopiatypes.Tag, repoId uint64) []string {
+	var failedRefs []string
+
+	// Create update-ref commands for all refs
+	var updateCommands []string
+	
+	// Add branch updates
+	for _, branch := range branches {
+		updateCommands = append(updateCommands, fmt.Sprintf("update refs/heads/%s %s", branch.Name, branch.Sha))
+	}
+	
+	// Add tag updates  
+	for _, tag := range tags {
+		updateCommands = append(updateCommands, fmt.Sprintf("update refs/tags/%s %s", tag.Name, tag.Sha))
+	}
+
+	if len(updateCommands) == 0 {
+		return failedRefs
+	}
+
+	// Use git update-ref --stdin for atomic batch updates
+	cmd, outPipe, err := GitCommand("git", "update-ref", "--stdin")
+	if err != nil {
+		LogError("error", fmt.Errorf("Failed to create git update-ref command for repo %d: %v", repoId, err))
+		return syncRefsIndividually(repoDir, branches, tags, repoId)
+	}
+	cmd.Dir = repoDir
+	
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		LogError("error", fmt.Errorf("Failed to create stdin pipe for repo %d: %v", repoId, err))
+		// Fallback to individual updates
+		return syncRefsIndividually(repoDir, branches, tags, repoId)
+	}
+
+	if err := cmd.Start(); err != nil {
+		LogError("error", fmt.Errorf("Failed to start git update-ref for repo %d: %v", repoId, err))
+		stdin.Close()
+		// Fallback to individual updates
+		return syncRefsIndividually(repoDir, branches, tags, repoId)
+	}
+
+	// Write all update commands
+	go func() {
+		defer stdin.Close()
+		for _, updateCmd := range updateCommands {
+			if _, err := fmt.Fprintln(stdin, updateCmd); err != nil {
+				LogError("error", fmt.Errorf("Failed to write update command for repo %d: %v", repoId, err))
+				return
+			}
+		}
+	}()
+
+	// Read output
+	_, err = io.Copy(io.Discard, outPipe)
+	if err != nil {
+		LogError("error", fmt.Errorf("Failed to read git update-ref output for repo %d: %v", repoId, err))
+		CleanUpProcessGroup(cmd)
+		// Fallback to individual updates
+		return syncRefsIndividually(repoDir, branches, tags, repoId)
+	}
+
+	if err := cmd.Wait(); err != nil {
+		LogError("error", fmt.Errorf("Batch ref update failed for repo %d: %v", repoId, err))
+		// Fallback to individual updates to identify specific failures
+		return syncRefsIndividually(repoDir, branches, tags, repoId)
+	}
+
+	CleanUpProcessGroup(cmd)
+	return failedRefs
+}
+
+// syncRefsIndividually falls back to individual ref updates when batch fails
+func syncRefsIndividually(repoDir string, branches []gitopiatypes.Branch, tags []gitopiatypes.Tag, repoId uint64) []string {
+	var failedRefs []string
+
+	// Update branches individually
+	for _, branch := range branches {
+		cmd, outPipe, err := GitCommand("git", "update-ref", fmt.Sprintf("refs/heads/%s", branch.Name), branch.Sha)
+		if err != nil {
+			LogError("error", fmt.Errorf("Failed to create git update-ref command for repo %d, branch %s: %v", repoId, branch.Name, err))
+			failedRefs = append(failedRefs, fmt.Sprintf("branch:%s", branch.Name))
+			continue
+		}
+		cmd.Dir = repoDir
+		
+		if err := cmd.Start(); err != nil {
+			LogError("error", fmt.Errorf("Failed to start git update-ref for repo %d, branch %s: %v", repoId, branch.Name, err))
+			failedRefs = append(failedRefs, fmt.Sprintf("branch:%s", branch.Name))
+			continue
+		}
+
+		_, err = io.Copy(io.Discard, outPipe)
+		if err != nil {
+			LogError("error", fmt.Errorf("Failed to read git update-ref output for repo %d, branch %s: %v", repoId, branch.Name, err))
+			CleanUpProcessGroup(cmd)
+			failedRefs = append(failedRefs, fmt.Sprintf("branch:%s", branch.Name))
+			continue
+		}
+
+		if err := cmd.Wait(); err != nil {
+			LogError("error", fmt.Errorf("Failed to update branch %s (SHA: %s) for repo %d: %v", branch.Name, branch.Sha, repoId, err))
+			failedRefs = append(failedRefs, fmt.Sprintf("branch:%s", branch.Name))
+			continue
+		}
+		CleanUpProcessGroup(cmd)
+	}
+
+	// Update tags individually
+	for _, tag := range tags {
+		cmd, outPipe, err := GitCommand("git", "update-ref", fmt.Sprintf("refs/tags/%s", tag.Name), tag.Sha)
+		if err != nil {
+			LogError("error", fmt.Errorf("Failed to create git update-ref command for repo %d, tag %s: %v", repoId, tag.Name, err))
+			failedRefs = append(failedRefs, fmt.Sprintf("tag:%s", tag.Name))
+			continue
+		}
+		cmd.Dir = repoDir
+		
+		if err := cmd.Start(); err != nil {
+			LogError("error", fmt.Errorf("Failed to start git update-ref for repo %d, tag %s: %v", repoId, tag.Name, err))
+			failedRefs = append(failedRefs, fmt.Sprintf("tag:%s", tag.Name))
+			continue
+		}
+
+		_, err = io.Copy(io.Discard, outPipe)
+		if err != nil {
+			LogError("error", fmt.Errorf("Failed to read git update-ref output for repo %d, tag %s: %v", repoId, tag.Name, err))
+			CleanUpProcessGroup(cmd)
+			failedRefs = append(failedRefs, fmt.Sprintf("tag:%s", tag.Name))
+			continue
+		}
+
+		if err := cmd.Wait(); err != nil {
+			LogError("error", fmt.Errorf("Failed to update tag %s (SHA: %s) for repo %d: %v", tag.Name, tag.Sha, repoId, err))
+			failedRefs = append(failedRefs, fmt.Sprintf("tag:%s", tag.Name))
+			continue
+		}
+		CleanUpProcessGroup(cmd)
+	}
+
+	return failedRefs
 }
 
 func IsReleaseAssetCached(sha256, cacheDir string) (bool, error) {
