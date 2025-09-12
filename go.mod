@@ -6,6 +6,7 @@ toolchain go1.23.2
 
 require (
 	cosmossdk.io/errors v1.0.1
+	github.com/aws/aws-sdk-go v1.55.8
 	github.com/buger/jsonparser v1.1.1
 	github.com/cosmos/cosmos-sdk v0.47.13
 	github.com/gitopia/gitopia-go v0.7.0
@@ -47,7 +48,6 @@ require (
 	github.com/acomagu/bufpipe v1.0.3 // indirect
 	github.com/alecthomas/units v0.0.0-20240927000941-0f3dac36c52b // indirect
 	github.com/armon/go-metrics v0.4.1 // indirect
-	github.com/aws/aws-sdk-go v1.55.5 // indirect
 	github.com/benbjohnson/clock v1.3.5 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bgentry/go-netrc v0.0.0-20140422174119-9fd32a8b3d3d // indirect

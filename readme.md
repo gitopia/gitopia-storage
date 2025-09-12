@@ -68,7 +68,7 @@ IPFS Cluster uses several ports for different purposes. Properly securing these 
 - **Cluster Swarm (`tcp:9096`):**
   - Controlled by `cluster.listen_multiaddress` (defaults to `/ip4/0.0.0.0/tcp/9096`).
   - Protected by the shared `CLUSTER_SECRET`.
-  - **It is generally safe to expose this port**, but ensure your cluster secret is strong.
+  - **You need to expose this port so that you can connect with the other peers in the cluster**, but ensure you don't share share the cluster secret with anyone else.
 
 - **HTTP API (`tcp:9094`) and IPFS Pinning Service API (`tcp:9097`):**
   - These endpoints provide full administrative control over the cluster peer.
@@ -183,7 +183,65 @@ volumes:
 This method is for advanced users who want to manage each service directly on the host machine.
 
 ### 1. Install Dependencies
-Install Go, Git, IPFS Kubo, and IPFS Cluster by following their official documentation.
+
+#### Install Go and Git
+Install Go (1.23+) and Git by following their official documentation:
+- [Go Installation Guide](https://golang.org/doc/install)
+- [Git Installation Guide](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git)
+
+#### Install IPFS Kubo Binary
+Download and install IPFS Kubo v0.37.0:
+
+```bash
+# Download IPFS Kubo
+wget https://dist.ipfs.tech/kubo/v0.37.0/kubo_v0.37.0_linux-amd64.tar.gz
+
+# Extract the archive
+tar -xvzf kubo_v0.37.0_linux-amd64.tar.gz
+
+# Move to system PATH
+cd kubo
+sudo mv ipfs /usr/local/bin/
+
+# Verify installation
+ipfs version
+```
+
+#### Install IPFS Cluster Service
+Download and install IPFS Cluster Service v1.1.4:
+
+```bash
+# Download IPFS Cluster Service
+curl -O https://dist.ipfs.tech/ipfs-cluster-service/v1.1.4/ipfs-cluster-service_v1.1.4_linux-amd64.tar.gz
+
+# Extract the archive
+tar -xvzf ipfs-cluster-service_v1.1.4_linux-amd64.tar.gz
+
+# Move to system PATH
+cd ipfs-cluster-service/
+sudo mv ipfs-cluster-service /usr/local/bin/
+
+# Verify installation
+ipfs-cluster-service --version
+```
+
+#### Install IPFS Cluster Control Tool
+Download and install IPFS Cluster Control Tool v1.1.4:
+
+```bash
+# Download IPFS Cluster Control Tool
+curl -O https://dist.ipfs.tech/ipfs-cluster-ctl/v1.1.4/ipfs-cluster-ctl_v1.1.4_linux-amd64.tar.gz
+
+# Extract the archive
+tar -xvzf ipfs-cluster-ctl_v1.1.4_linux-amd64.tar.gz
+
+# Move to system PATH
+cd ipfs-cluster-ctl/
+sudo mv ipfs-cluster-ctl /usr/local/bin/
+
+# Verify installation
+ipfs-cluster-ctl --version
+```
 
 ### 2. IPFS and IPFS Cluster Setup
 
@@ -255,12 +313,13 @@ Be sure to update this list whenever the set of active storage providers changes
     This will copy `gitopia-storaged`, `gitopia-pre-receive`, and `gitopia-post-receive` to `/usr/local/bin`.
 
 ### 4. Configure Gitopia Storage Provider
-1.  Copy the production config file to a system location:
+1.  Copy the base config file to a system location:
     ```sh
     sudo mkdir -p /etc/gitopia-storage
-    sudo cp config_prod.toml /etc/gitopia-storage/config_prod.toml
+    sudo cp config.toml /etc/gitopia-storage/config.toml
     ```
-2.  Edit `/etc/gitopia-storage/config_prod.toml` and set the correct paths and values, especially for your data directories.
+2.  Edit `/etc/gitopia-storage/config.toml` and set the correct paths and values, especially for your data directories.
+3.  For local development, create a `config.local.toml` file to override specific settings without modifying the base config.
 
 ### 5. Run the Service
 1.  Create necessary directories:
@@ -282,14 +341,45 @@ Be sure to update this list whenever the set of active storage providers changes
 
 For a manual installation in a production environment, you should run `ipfs`, `ipfs-cluster-service`, and `gitopia-storaged` as systemd services.
 
+### Initial Setup
+
 Create a dedicated user to run the services:
 ```sh
-sudo useradd --system --no-create-home --shell /bin/false gitopia
+# Create system user for gitopia services
+sudo useradd --system --create-home --shell /bin/false gitopia
+
+# Create necessary directories
+sudo mkdir -p /var/repos /var/lfs-objects /var/attachments /etc/gitopia-storage
+sudo mkdir -p /home/gitopia/.ipfs /home/gitopia/.ipfs-cluster
+
 # Grant ownership of data directories
 sudo chown -R gitopia:gitopia /var/repos /var/lfs-objects /var/attachments /etc/gitopia-storage
-# Grant ownership of IPFS/IPFS-Cluster config
 sudo chown -R gitopia:gitopia /home/gitopia/.ipfs /home/gitopia/.ipfs-cluster
+
+# Initialize IPFS and IPFS Cluster as the gitopia user
+sudo -u gitopia ipfs init --profile=server
+sudo -u gitopia ipfs-cluster-service init
 ```
+
+### Configure IPFS and IPFS Cluster
+
+Before creating the systemd services, ensure IPFS and IPFS Cluster are properly configured:
+
+```sh
+# Configure IPFS to listen on all interfaces (optional, for cluster communication)
+sudo -u gitopia ipfs config Addresses.API /ip4/127.0.0.1/tcp/5001
+sudo -u gitopia ipfs config Addresses.Gateway /ip4/127.0.0.1/tcp/8080
+
+# Configure IPFS StorageMax (adjust based on your disk space)
+sudo -u gitopia ipfs config Datastore.StorageMax 500GB
+
+# Edit IPFS Cluster configuration
+sudo -u gitopia nano /home/gitopia/.ipfs-cluster/service.json
+```
+
+Make sure to configure the `service.json` file with your cluster secret and trusted peers as described in the manual installation section.
+
+### Systemd Service Files
 
 #### 1. `ipfs.service`
 _File: `/etc/systemd/system/ipfs.service`_
@@ -297,12 +387,20 @@ _File: `/etc/systemd/system/ipfs.service`_
 [Unit]
 Description=IPFS Daemon
 After=network.target
+Documentation=https://docs.ipfs.tech/
 
 [Service]
+Type=notify
 User=gitopia
 Group=gitopia
-ExecStart=/usr/local/bin/ipfs daemon
+Environment=IPFS_PATH="/home/gitopia/.ipfs"
+ExecStart=/usr/local/bin/ipfs daemon --enable-gc
+ExecStop=/usr/local/bin/ipfs shutdown
 Restart=always
+RestartSec=10
+KillMode=mixed
+KillSignal=SIGINT
+TimeoutStopSec=30
 LimitNOFILE=10240
 
 [Install]
@@ -316,12 +414,19 @@ _File: `/etc/systemd/system/ipfs-cluster.service`_
 Description=IPFS Cluster Daemon
 After=ipfs.service
 Requires=ipfs.service
+Documentation=https://ipfscluster.io/
 
 [Service]
+Type=simple
 User=gitopia
 Group=gitopia
+Environment=IPFS_CLUSTER_PATH=/home/gitopia/.ipfs-cluster
 ExecStart=/usr/local/bin/ipfs-cluster-service daemon
+ExecStop=/usr/local/bin/ipfs-cluster-ctl shutdown
 Restart=always
+RestartSec=10
+KillMode=mixed
+TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target
@@ -334,15 +439,20 @@ _File: `/etc/systemd/system/gitopia-storaged.service`_
 Description=Gitopia Storage Provider
 After=network.target ipfs-cluster.service
 Requires=ipfs-cluster.service
+Documentation=https://github.com/gitopia/gitopia-storage
 
 [Service]
+Type=simple
 User=gitopia
 Group=gitopia
-Type=simple
 Environment=ENV=PRODUCTION
+Environment=HOME=/home/gitopia
+WorkingDirectory=/home/gitopia
 ExecStart=/usr/local/bin/gitopia-storaged start --from gitopia-storage --keyring-backend test
 Restart=on-failure
 RestartSec=10
+KillMode=mixed
+TimeoutStopSec=30
 LimitNOFILE=65535
 
 [Install]
@@ -350,19 +460,161 @@ WantedBy=multi-user.target
 ```
 
 #### Enable and Start Services
+
+After creating all service files, enable and start the services:
+
 ```sh
+# Reload systemd configuration
 sudo systemctl daemon-reload
-sudo systemctl enable --now ipfs ipfs-cluster gitopia-storaged
+
+# Enable services to start on boot
+sudo systemctl enable ipfs ipfs-cluster gitopia-storaged
+
+# Start services in order
+sudo systemctl start ipfs
+sudo systemctl start ipfs-cluster
+sudo systemctl start gitopia-storaged
+
+# Check service status
 sudo systemctl status ipfs ipfs-cluster gitopia-storaged
+
+# View logs if needed
+sudo journalctl -u ipfs -f
+sudo journalctl -u ipfs-cluster -f
+sudo journalctl -u gitopia-storaged -f
 ```
+
+#### Service Management Commands
+
+Useful commands for managing the services:
+
+```sh
+# Stop services
+sudo systemctl stop gitopia-storaged ipfs-cluster ipfs
+
+# Restart services
+sudo systemctl restart ipfs ipfs-cluster gitopia-storaged
+
+# Check if services are running
+sudo systemctl is-active ipfs ipfs-cluster gitopia-storaged
+
+# View detailed service information
+sudo systemctl show ipfs
+sudo systemctl show ipfs-cluster
+sudo systemctl show gitopia-storaged
+```
+
+---
+
+## External Storage Providers
+
+The Gitopia Storage Provider supports configurable external storage providers for redundant data storage. This feature allows you to automatically pin your IPFS content to external services like Pinata and Filebase for additional data redundancy and availability.
+
+### Supported Providers
+
+- **Pinata**: IPFS pinning service
+- **Filebase**: S3-compatible decentralized storage
+
+### Configuration
+
+External storage is configured through the following settings in your configuration file:
+
+```toml
+# Enable/disable external storage providers
+ENABLE_EXTERNAL_PINNING = true
+
+# List of providers to use (can include: "pinata", "filebase")
+STORAGE_PROVIDERS = ["pinata", "filebase"]
+
+# Pinata Configuration
+PINATA_JWT = "your-pinata-jwt-token"
+
+# Filebase Configuration  
+FILEBASE_ACCESS_KEY = "your-filebase-access-key"
+FILEBASE_SECRET_KEY = "your-filebase-secret-key"
+FILEBASE_BUCKET = "your-filebase-bucket-name"
+FILEBASE_REGION = "us-east-1"
+FILEBASE_ENDPOINT = "https://s3.filebase.com"
+```
+
+### Provider Setup
+
+#### Pinata Setup
+1. Create an account at [Pinata](https://pinata.cloud/)
+2. Generate a JWT token with pinning permissions
+3. Set `PINATA_JWT` in your configuration
+
+#### Filebase Setup
+1. Create an account at [Filebase](https://filebase.com/)
+2. Create an S3 bucket for your storage
+3. Generate access credentials (Access Key and Secret Key)
+4. Configure the Filebase settings in your configuration file
+
+### Behavior
+
+When external storage is enabled:
+- **Pin Operations**: Content is automatically pinned to all configured providers when added to IPFS
+- **Unpin Operations**: Content is unpinned from all configured providers when removed
+- **Error Handling**: Individual provider failures don't affect other providers or core functionality
+- **Logging**: All operations are logged with provider-specific details
 
 ---
 
 ## API and Configuration Details
 
+### IPFS Storage Configuration
+
+#### Increasing IPFS StorageMax
+
+The IPFS `StorageMax` setting controls the maximum amount of data that IPFS will store locally. For gitopia-storage deployments, you may need to increase this limit based on your storage requirements.
+
+**For Docker Setup:**
+```bash
+# Access the IPFS container
+docker exec -it ipfs sh
+
+# Check current StorageMax setting
+ipfs config Datastore.StorageMax
+
+# Set new StorageMax (example: 500GB)
+ipfs config Datastore.StorageMax 500GB
+
+# Restart the IPFS container to apply changes
+docker restart ipfs
+```
+
+**For Manual Installation:**
+```bash
+# Check current StorageMax setting
+ipfs config Datastore.StorageMax
+
+# Set new StorageMax (example: 500GB)
+ipfs config Datastore.StorageMax 500GB
+
+# Restart IPFS daemon
+sudo systemctl restart ipfs
+```
+
+**Important Notes:**
+- Ensure sufficient disk space: The StorageMax should not exceed your available disk space
+- For Docker, this affects the `ipfs_data` volume
+- Monitor usage with `ipfs repo stat`
+- IPFS will automatically run garbage collection when approaching the limit
+
 ### Configuration
 
-The storage provider can be configured using a TOML configuration file. Here's the complete configuration structure:
+The storage provider uses a unified configuration system with `config.toml` as the base configuration file containing production defaults. You can override any setting using:
+
+1. **Environment variables** (highest priority)
+2. **config.local.toml** file for development overrides (gitignored)
+3. **config.toml** base configuration (lowest priority)
+
+#### Configuration Hierarchy
+
+- **Production**: Uses `config.toml` with environment variable overrides
+- **Development**: Copy `config.local.toml.example` to `config.local.toml` and modify as needed
+
+Here's the complete configuration structure:
 
 ```toml
 # Server Configuration
@@ -383,8 +635,20 @@ IPFS_CLUSTER_PEER_HOST = "your-ipfs-host"
 IPFS_CLUSTER_PEER_PORT = "your-ipfs-port"
 IPFS_HOST = "your-ipfs-host"
 IPFS_PORT = "your-ipfs-port"
+
+# External Storage Configuration
 ENABLE_EXTERNAL_PINNING = false
-PINATA_JWT = "your-pinata-jwt"  # Required if ENABLE_EXTERNAL_PINNING is true
+STORAGE_PROVIDERS = ["pinata", "filebase"]  # Available providers: pinata, filebase
+
+# Pinata Configuration (required if "pinata" is in STORAGE_PROVIDERS)
+PINATA_JWT = "your-pinata-jwt"
+
+# Filebase Configuration (required if "filebase" is in STORAGE_PROVIDERS)
+FILEBASE_ACCESS_KEY = "your-filebase-access-key"
+FILEBASE_SECRET_KEY = "your-filebase-secret-key"
+FILEBASE_BUCKET = "your-filebase-bucket"
+FILEBASE_REGION = "us-east-1"
+FILEBASE_ENDPOINT = "https://s3.filebase.com"
 
 # Cache Configuration
 CACHE_REPO_MAX_AGE = "24h"           # Maximum age for repository cache entries

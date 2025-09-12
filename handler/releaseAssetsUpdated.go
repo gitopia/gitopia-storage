@@ -9,6 +9,7 @@ import (
 
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia-storage/app"
+	"github.com/gitopia/gitopia-storage/handler/storage"
 	"github.com/gitopia/gitopia-storage/utils"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -90,14 +91,14 @@ func UnmarshalReleaseAssetsUpdatedEvent(eventBuf []byte) ([]ReleaseAssetsUpdated
 }
 
 type ReleaseAssetsUpdatedEventHandler struct {
-	gc           *app.GitopiaProxy
-	pinataClient *PinataClient
+	gc             *app.GitopiaProxy
+	storageManager *storage.Manager
 }
 
-func NewReleaseAssetsUpdatedEventHandler(g *app.GitopiaProxy, pinataClient *PinataClient) ReleaseAssetsUpdatedEventHandler {
+func NewReleaseAssetsUpdatedEventHandler(g *app.GitopiaProxy, storageManager *storage.Manager) ReleaseAssetsUpdatedEventHandler {
 	return ReleaseAssetsUpdatedEventHandler{
-		gc:           g,
-		pinataClient: pinataClient,
+		gc:             g,
+		storageManager: storageManager,
 	}
 }
 
@@ -137,29 +138,29 @@ func (h *ReleaseAssetsUpdatedEventHandler) Process(ctx context.Context, event Re
 				"cid":           asset.Cid,
 			}).Info("processing release asset delete")
 
-			// Unpin old asset from Pinata
+			// Unpin old asset from external storage
 			refCount, err := h.gc.StorageCidReferenceCount(ctx, asset.OldCid)
 			if err != nil {
 				logger.FromContext(ctx).WithError(err).Error("failed to get attachment reference count")
 				continue // Don't fail the entire process if one asset fails
 			}
-			if refCount == 0 {
-				name := fmt.Sprintf("release-%d-%s-%s-%s", event.RepositoryId, event.Tag, asset.Name, asset.OldSha256)
-				err := h.pinataClient.UnpinFile(ctx, name)
+			if refCount == 0 && h.storageManager.HasProviders() {
+				name := fmt.Sprintf("release-assets/%s", asset.OldSha256)
+				err := h.storageManager.UnpinFile(ctx, name)
 				if err != nil {
 					logger.FromContext(ctx).WithFields(logrus.Fields{
 						"repository_id": event.RepositoryId,
 						"tag":           event.Tag,
 						"name":          asset.Name,
 						"cid":           asset.OldCid,
-					}).WithError(err).Error("failed to unpin file from Pinata")
+					}).WithError(err).Error("failed to unpin file from external storage")
 				} else {
 					logger.FromContext(ctx).WithFields(logrus.Fields{
 						"repository_id": event.RepositoryId,
 						"tag":           event.Tag,
 						"name":          asset.Name,
 						"cid":           asset.OldCid,
-					}).Info("successfully unpinned file from Pinata")
+					}).Info("successfully unpinned file from external storage")
 				}
 			}
 		} else {
@@ -172,55 +173,69 @@ func (h *ReleaseAssetsUpdatedEventHandler) Process(ctx context.Context, event Re
 				"old_cid":       asset.OldCid,
 			}).Info("processing release asset update")
 
-			// Pin to Pinata if enabled
-			if asset.Cid != "" {
-				cacheDir := viper.GetString("ATTACHMENT_DIR")
-
-				// check if release asset is cached
-				err := utils.CacheReleaseAsset(event.RepositoryId, event.Tag, asset.Name, cacheDir)
+			// Pin to external storage if enabled
+			if asset.Cid != "" && h.storageManager.HasProviders() {
+				refCount, err := h.gc.StorageCidReferenceCount(ctx, asset.Cid)
 				if err != nil {
-					logger.FromContext(ctx).WithError(err).Error("failed to cache release asset")
+					logger.FromContext(ctx).WithError(err).Error("failed to get reference count")
+					return err
 				}
 
-				releaseAssetPath := path.Join(cacheDir, asset.Sha256)
-				name := fmt.Sprintf("release-%d-%s-%s-%s", event.RepositoryId, event.Tag, asset.Name, asset.Sha256)
-				resp, err := h.pinataClient.PinFile(ctx, releaseAssetPath, name)
-				if err != nil {
-					logger.FromContext(ctx).WithFields(logrus.Fields{
-						"repository_id": event.RepositoryId,
-						"tag":           event.Tag,
-						"name":          asset.Name,
-						"cid":           asset.Cid,
-					}).WithError(err).Error("failed to pin file to Pinata")
-					// Don't fail the process, just log the error
-				} else {
-					logger.FromContext(ctx).WithFields(logrus.Fields{
-						"repository_id": event.RepositoryId,
-						"tag":           event.Tag,
-						"name":          asset.Name,
-						"cid":           asset.Cid,
-						"pinata_id":     resp.Data.ID,
-					}).Info("successfully pinned to Pinata")
+				if refCount == 1 {
+					cacheDir := viper.GetString("ATTACHMENT_DIR")
+
+					// check if release asset is cached
+					err := utils.CacheReleaseAsset(event.RepositoryId, event.Tag, asset.Name, cacheDir)
+					if err != nil {
+						logger.FromContext(ctx).WithError(err).Error("failed to cache release asset")
+					}
+
+					releaseAssetPath := path.Join(cacheDir, asset.Sha256)
+					name := fmt.Sprintf("release-assets/%s", asset.Sha256)
+					err = h.storageManager.PinFile(ctx, releaseAssetPath, name)
+					if err != nil {
+						logger.FromContext(ctx).WithFields(logrus.Fields{
+							"repository_id": event.RepositoryId,
+							"tag":           event.Tag,
+							"name":          asset.Name,
+							"cid":           asset.Cid,
+						}).WithError(err).Error("failed to pin file to external storage")
+						// Don't fail the process, just log the error
+					} else {
+						logger.FromContext(ctx).WithFields(logrus.Fields{
+							"repository_id": event.RepositoryId,
+							"tag":           event.Tag,
+							"name":          asset.Name,
+							"cid":           asset.Cid,
+						}).Info("successfully pinned to external storage")
+					}
 				}
 			}
 
-			// Unpin old asset from Pinata if enabled and no longer referenced
-			if asset.OldCid != "" && asset.OldCid != asset.Cid {
+			// Unpin old asset from external storage if enabled and no longer referenced
+			if asset.OldCid != "" && asset.OldCid != asset.Cid && h.storageManager.HasProviders() {
 				refCount, err := h.gc.StorageCidReferenceCount(ctx, asset.OldCid)
 				if err != nil {
 					logger.FromContext(ctx).WithError(err).Error("failed to get attachment reference count")
 					continue // Don't fail the entire process if one asset fails
 				}
 				if refCount == 0 {
-					name := fmt.Sprintf("release-%d-%s-%s-%s", event.RepositoryId, event.Tag, asset.Name, asset.OldSha256)
-					err := h.pinataClient.UnpinFile(ctx, name)
+					name := fmt.Sprintf("release-assets/%s", asset.OldSha256)
+					err := h.storageManager.UnpinFile(ctx, name)
 					if err != nil {
 						logger.FromContext(ctx).WithFields(logrus.Fields{
 							"repository_id": event.RepositoryId,
 							"tag":           event.Tag,
 							"name":          asset.Name,
 							"cid":           asset.OldCid,
-						}).WithError(err).Error("failed to unpin file from Pinata")
+						}).WithError(err).Error("failed to unpin file from external storage")
+					} else {
+						logger.FromContext(ctx).WithFields(logrus.Fields{
+							"repository_id": event.RepositoryId,
+							"tag":           event.Tag,
+							"name":          asset.Name,
+							"cid":           asset.OldCid,
+						}).WithError(err).Error("successfully unpinned from external storage")
 					}
 				}
 			}

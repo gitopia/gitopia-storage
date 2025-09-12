@@ -1,5 +1,15 @@
 # Changelog
 
+## [v4.1.0] - 2025-09-12
+
+- use RWMutex for concurrent read of repository, release assets and lfs objects
+- add support for filebase storage service for storage redundancy
+- implement concurrent event processing in all event handlers
+- fix storage cost calculation after free limit
+- add check for pending packfile update proposal before proceeding to pin and propose update
+- clear local repo cache on any error in push handler
+- simplify configuration system with unified hierarchy
+
 ## [v4.0.0] - 2025-09-04
 
 - implement gitopia storage provider requirements

@@ -2,11 +2,14 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"path"
 	"strconv"
+	"sync"
 
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia-storage/app"
+	"github.com/gitopia/gitopia-storage/handler/storage"
 	"github.com/gitopia/gitopia-storage/utils"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -79,14 +82,14 @@ func Unmarshal(eventBuf []byte) ([]LfsObjectUpdatedEvent, error) {
 }
 
 type LfsObjectUpdatedEventHandler struct {
-	gc           *app.GitopiaProxy
-	pinataClient *PinataClient
+	gc             *app.GitopiaProxy
+	storageManager *storage.Manager
 }
 
-func NewLfsObjectUpdatedEventHandler(g *app.GitopiaProxy, pinataClient *PinataClient) LfsObjectUpdatedEventHandler {
+func NewLfsObjectUpdatedEventHandler(g *app.GitopiaProxy, storageManager *storage.Manager) LfsObjectUpdatedEventHandler {
 	return LfsObjectUpdatedEventHandler{
-		gc:           g,
-		pinataClient: pinataClient,
+		gc:             g,
+		storageManager: storageManager,
 	}
 }
 
@@ -96,16 +99,36 @@ func (h *LfsObjectUpdatedEventHandler) Handle(ctx context.Context, eventBuf []by
 		return errors.WithMessage(err, "event parse error")
 	}
 
-	for _, event := range events {
-		if err := h.Process(ctx, event); err != nil {
-			// Log error and continue processing other events
-			logger.FromContext(ctx).WithFields(logrus.Fields{
-				"repository_id": event.RepositoryId,
-				"oid":           event.Oid,
-			}).WithError(err).Error("failed to process LfsObjectUpdatedEvent")
-		}
+	// Process events concurrently with a limited number of workers
+	// Limit to 5 concurrent LFS operations
+	maxWorkers := 5
+	if len(events) < maxWorkers {
+		maxWorkers = len(events)
 	}
 
+	semaphore := make(chan struct{}, maxWorkers)
+	var wg sync.WaitGroup
+
+	for _, event := range events {
+		wg.Add(1)
+		go func(e LfsObjectUpdatedEvent) {
+			defer wg.Done()
+			
+			// Acquire semaphore
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			if err := h.Process(ctx, e); err != nil {
+				// Log error and continue processing other events
+				logger.FromContext(ctx).WithFields(logrus.Fields{
+					"repository_id": e.RepositoryId,
+					"oid":           e.Oid,
+				}).WithError(err).Error("failed to process LfsObjectUpdatedEvent")
+			}
+		}(event)
+	}
+
+	wg.Wait()
 	return nil
 }
 
@@ -117,18 +140,27 @@ func (h *LfsObjectUpdatedEventHandler) Process(ctx context.Context, event LfsObj
 			"cid":           event.Cid,
 		}).Info("processing lfs object deleted event")
 
-		// Unpin from Pinata
-		if event.Oid != "" {
-			err := h.pinataClient.UnpinFile(ctx, event.Oid)
+		// Unpin from external storage
+		if event.Oid != "" && h.storageManager.HasProviders() {
+			refCount, err := h.gc.StorageCidReferenceCount(ctx, event.Cid)
 			if err != nil {
-				logger.FromContext(ctx).WithError(err).Error("failed to unpin file from Pinata")
-				// Don't fail the process, just log the error
-			} else {
-				logger.FromContext(ctx).WithFields(logrus.Fields{
-					"repository_id": event.RepositoryId,
-					"oid":           event.Oid,
-					"cid":           event.Cid,
-				}).Info("successfully unpinned from Pinata")
+				logger.FromContext(ctx).WithError(err).Error("failed to get reference count")
+				return err
+			}
+
+			if refCount == 0 && h.storageManager.HasProviders() {
+				name := fmt.Sprintf("lfs-objects/%s", event.Oid)
+				err := h.storageManager.UnpinFile(ctx, name)
+				if err != nil {
+					logger.FromContext(ctx).WithError(err).Error("failed to unpin file from external storage")
+					// Don't fail the process, just log the error
+				} else {
+					logger.FromContext(ctx).WithFields(logrus.Fields{
+						"repository_id": event.RepositoryId,
+						"oid":           event.Oid,
+						"cid":           event.Cid,
+					}).Info("successfully unpinned from external storage")
+				}
 			}
 		}
 	} else {
@@ -138,38 +170,46 @@ func (h *LfsObjectUpdatedEventHandler) Process(ctx context.Context, event LfsObj
 			"cid":           event.Cid,
 		}).Info("processing lfs object updated event")
 
-		// Pin to Pinata
-		if event.Cid != "" {
-			cacheDir := viper.GetString("LFS_OBJECTS_DIR")
-
-			// check if lfs object is cached
-			cached, err := utils.IsLFSObjectCached(event.Oid)
+		// Pin to external storage
+		if event.Cid != "" && h.storageManager.HasProviders() {
+			refCount, err := h.gc.StorageCidReferenceCount(ctx, event.Cid)
 			if err != nil {
-				logger.FromContext(ctx).WithError(err).Error("failed to check if lfs object is cached")
+				logger.FromContext(ctx).WithError(err).Error("failed to get reference count")
+				return err
 			}
-			if !cached {
-				err := utils.DownloadLFSObject(event.Cid, event.Oid)
+
+			if refCount == 1 {
+				cacheDir := viper.GetString("LFS_OBJECTS_DIR")
+
+				// check if lfs object is cached
+				cached, err := utils.IsLFSObjectCached(event.Oid)
 				if err != nil {
-					logger.FromContext(ctx).WithError(err).Error("failed to cache lfs object")
+					logger.FromContext(ctx).WithError(err).Error("failed to check if lfs object is cached")
 				}
-			}
+				if !cached {
+					err := utils.DownloadLFSObject(event.Cid, event.Oid)
+					if err != nil {
+						logger.FromContext(ctx).WithError(err).Error("failed to cache lfs object")
+					}
+				}
 
-			lfsObjectPath := path.Join(cacheDir, event.Oid)
-			resp, err := h.pinataClient.PinFile(ctx, lfsObjectPath, event.Oid)
-			if err != nil {
-				logger.FromContext(ctx).WithFields(logrus.Fields{
-					"repository_id": event.RepositoryId,
-					"oid":           event.Oid,
-					"cid":           event.Cid,
-				}).WithError(err).Error("failed to pin file to Pinata")
-				// Don't fail the process, just log the error
-			} else {
-				logger.FromContext(ctx).WithFields(logrus.Fields{
-					"repository_id": event.RepositoryId,
-					"oid":           event.Oid,
-					"cid":           event.Cid,
-					"pinata_id":     resp.Data.ID,
-				}).Info("successfully pinned to Pinata")
+				lfsObjectPath := path.Join(cacheDir, event.Oid)
+				name := fmt.Sprintf("lfs-objects/%s", event.Oid)
+				err = h.storageManager.PinFile(ctx, lfsObjectPath, name)
+				if err != nil {
+					logger.FromContext(ctx).WithFields(logrus.Fields{
+						"repository_id": event.RepositoryId,
+						"oid":           event.Oid,
+						"cid":           event.Cid,
+					}).WithError(err).Error("failed to pin file to external storage")
+					// Don't fail the process, just log the error
+				} else {
+					logger.FromContext(ctx).WithFields(logrus.Fields{
+						"repository_id": event.RepositoryId,
+						"oid":           event.Oid,
+						"cid":           event.Cid,
+					}).Info("successfully pinned to external storage")
+				}
 			}
 		}
 	}

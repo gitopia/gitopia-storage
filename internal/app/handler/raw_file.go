@@ -90,8 +90,8 @@ func GetRawFileHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// cache repo
-		utils.LockRepository(branch.RepositoryId)
-		defer utils.UnlockRepository(branch.RepositoryId)
+		utils.RLockRepository(branch.RepositoryId)
+		defer utils.RUnlockRepository(branch.RepositoryId)
 
 		cacheDir := viper.GetString("GIT_REPOS_DIR")
 		if err := utils.CacheRepository(branch.RepositoryId, cacheDir); err != nil {

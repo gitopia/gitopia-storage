@@ -10,7 +10,7 @@ import (
 )
 
 func IsForcePushAllowedForBranch(repo uint64, branch string) (bool, error) {
-	qc, err := gitopia.GetQueryClient(config.GRPCHost)
+	qc, err := gitopia.GetQueryClient(config.GetGRPCHost())
 	if err != nil {
 		return false, errors.Wrap(err, "error connecting to gitopia")
 	}

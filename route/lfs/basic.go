@@ -64,6 +64,9 @@ func (h *BasicHandler) ServeDownloadHandler(w http.ResponseWriter, r *http.Reque
 	}
 	oid := lfsutil.OID(components[6])
 
+	utils.RLockLFSObject(string(oid))
+	defer utils.RUnlockLFSObject(string(oid))
+
 	s := h.DefaultStorager()
 	if s == nil {
 		internalServerError(w)
@@ -130,7 +133,7 @@ func (h *BasicHandler) ServeUploadHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	if !storageParams.StoragePricePerGb.IsZero() {
-		costInfo, err := utils.CalculateStorageCost(uint64(userQuota.StorageUsed), uint64(r.ContentLength), storageParams)
+		costInfo, err := utils.CalculateStorageCost(userQuota.StorageUsed, userQuota.StorageUsed+uint64(r.ContentLength), storageParams)
 		if err != nil {
 			internalServerError(w)
 			log.WithError(err).Error("failed to calculate storage cost")
@@ -241,6 +244,9 @@ func (h *BasicHandler) ServeVerifyHandler(w http.ResponseWriter, r *http.Request
 		})
 		return
 	}
+
+	utils.RLockLFSObject(string(request.Oid))
+	defer utils.RUnlockLFSObject(string(request.Oid))
 
 	s := h.DefaultStorager()
 

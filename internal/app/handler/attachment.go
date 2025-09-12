@@ -273,7 +273,7 @@ func UploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 			storageDelta := handler.Size - oldSize
 			projectedUsage := uint64(userQuotaRes.UserQuota.StorageUsed) + uint64(pendingSize)
 
-			costInfo, err := utils.CalculateStorageCost(projectedUsage, uint64(storageDelta), storageParamsRes.Params)
+			costInfo, err := utils.CalculateStorageCost(projectedUsage, projectedUsage+uint64(storageDelta), storageParamsRes.Params)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
@@ -396,8 +396,8 @@ func GetAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		utils.LockAsset(res.Release.Attachments[i].Sha)
-		defer utils.UnlockAsset(res.Release.Attachments[i].Sha)
+		utils.RLockAsset(res.Release.Attachments[i].Sha)
+		defer utils.RUnlockAsset(res.Release.Attachments[i].Sha)
 
 		err = utils.CacheReleaseAsset(res.Release.RepositoryId, res.Release.TagName, fileName, viper.GetString("ATTACHMENT_DIR"))
 		if err != nil {

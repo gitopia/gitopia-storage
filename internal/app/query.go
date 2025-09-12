@@ -19,6 +19,7 @@ type QueryService interface {
 	StorageParams(ctx context.Context, req *storagetypes.QueryParamsRequest) (*storagetypes.QueryParamsResponse, error)
 	CosmosBankBalance(ctx context.Context, req *banktypes.QueryBalanceRequest) (*banktypes.QueryBalanceResponse, error)
 	StorageCidReferenceCount(ctx context.Context, req *storagetypes.QueryCidReferenceCountRequest) (*storagetypes.QueryCidReferenceCountResponse, error)
+	StoragePackfileUpdateProposal(ctx context.Context, req *storagetypes.QueryPackfileUpdateProposalRequest) (*storagetypes.QueryPackfileUpdateProposalResponse, error)
 }
 
 // QueryServiceImpl implements the QueryService interface.
@@ -56,4 +57,8 @@ func (qs *QueryServiceImpl) CosmosBankBalance(ctx context.Context, req *banktype
 
 func (qs *QueryServiceImpl) StorageCidReferenceCount(ctx context.Context, req *storagetypes.QueryCidReferenceCountRequest) (*storagetypes.QueryCidReferenceCountResponse, error) {
 	return qs.Query.Storage.CidReferenceCount(ctx, req)
+}
+
+func (qs *QueryServiceImpl) StoragePackfileUpdateProposal(ctx context.Context, req *storagetypes.QueryPackfileUpdateProposalRequest) (*storagetypes.QueryPackfileUpdateProposalResponse, error) {
+	return qs.Query.Storage.PackfileUpdateProposal(ctx, req)
 }

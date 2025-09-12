@@ -1,20 +1,39 @@
+# Gitopia Storage Provider Configuration
+# This is the base configuration file with production defaults
+# Override values using environment variables or config.local.toml for development
+
+# Server Configuration
 WEB_SERVER_PORT = 5000
-GITOPIA_ADDR = "gitopia-grpc.polkachu.com:11390"
 GIT_REPOS_DIR = "/var/repos"
 LFS_OBJECTS_DIR = "/var/lfs-objects"
 ATTACHMENT_DIR = "/var/attachments"
-TM_ADDR = "https://gitopia-rpc.polkachu.com:443"
 WORKING_DIR = "/app"
-GAS_PRICES = "0.001ulore"
+
+# Gitopia Network Configuration (Production)
+GITOPIA_ADDR = "gitopia-grpc.polkachu.com:11390"
+TM_ADDR = "https://gitopia-rpc.polkachu.com:443"
 CHAIN_ID = "gitopia"
+GAS_PRICES = "0.001ulore"
 
 # IPFS Configuration
 IPFS_CLUSTER_PEER_HOST = "ipfs-cluster"
 IPFS_CLUSTER_PEER_PORT = "9094"
 IPFS_HOST = "ipfs"
 IPFS_PORT = "5001"
+
+# External Storage Configuration
 ENABLE_EXTERNAL_PINNING = false
+STORAGE_PROVIDERS = []  # Available: "pinata", "filebase"
+
+# Pinata Configuration
 PINATA_JWT = ""
+
+# Filebase Configuration
+FILEBASE_ACCESS_KEY = ""
+FILEBASE_SECRET_KEY = ""
+FILEBASE_BUCKET = ""
+FILEBASE_REGION = "us-east-1"
+FILEBASE_ENDPOINT = "https://s3.filebase.com"
 
 # Cache Configuration
 CACHE_REPO_MAX_AGE = "24h"

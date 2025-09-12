@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/gitopia/gitopia-go/logger"
@@ -120,12 +121,32 @@ func (h *InvokeMergePullRequestEventHandler) Handle(ctx context.Context, eventBu
 		return errors.WithMessage(err, "event parse error")
 	}
 
-	for _, event := range events {
-		if err := h.Process(ctx, event); err != nil {
-			logger.FromContext(ctx).WithField("event", event).WithError(err).Error("failed to process InvokeMergePullRequestEvent")
-		}
+	// Process events concurrently with a limited number of workers
+	// Limit to 3 concurrent merge operations to avoid overwhelming the system
+	maxWorkers := 3
+	if len(events) < maxWorkers {
+		maxWorkers = len(events)
 	}
 
+	semaphore := make(chan struct{}, maxWorkers)
+	var wg sync.WaitGroup
+
+	for _, event := range events {
+		wg.Add(1)
+		go func(e InvokeMergePullRequestEvent) {
+			defer wg.Done()
+			
+			// Acquire semaphore
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			if err := h.Process(ctx, e); err != nil {
+				logger.FromContext(ctx).WithField("event", e).WithError(err).Error("failed to process InvokeMergePullRequestEvent")
+			}
+		}(event)
+	}
+
+	wg.Wait()
 	return nil
 }
 
@@ -325,8 +346,8 @@ func (h *InvokeMergePullRequestEventHandler) handlePostMergeOperations(ctx conte
 	// Calculate storage cost
 	if !storageParams.StoragePricePerGb.IsZero() {
 		costInfo, err := utils.CalculateStorageCost(
-			uint64(userQuota.StorageUsed),
-			uint64(storageDelta),
+			userQuota.StorageUsed,
+			userQuota.StorageUsed+uint64(storageDelta),
 			storageParams,
 		)
 		if err != nil {
