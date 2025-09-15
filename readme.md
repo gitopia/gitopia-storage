@@ -178,6 +178,48 @@ volumes:
 
 ---
 
+### 6. File Permissions and User Mapping
+
+By default, the Gitopia Storage Provider container runs as a non-root user:
+
+```
+UID = 100
+GID = 101
+```
+
+This means that when you mount host directories (e.g. `/var/repos`, `/var/lfs-objects`, `/var/attachments`), the container process will need write access for UID 100 / GID 101.
+
+If you encounter “permission denied” errors when starting the service, you have two options:
+
+1. **Adjust host directory ownership (recommended):**
+
+   ```sh
+   sudo chown -R 100:101 ./data/repos ./data/lfs-objects ./data/attachments
+   ```
+
+   This ensures the container user can write to the mounted volumes.
+
+2. **Loosen permissions (not recommended for production):**
+
+   ```sh
+   chmod -R 777 ./data/repos ./data/lfs-objects ./data/attachments
+   ```
+
+   This works but is insecure and should only be used for testing.
+
+3. **Override the container user (alternative):**
+   If you prefer to run the container as your host user, you can set the `user` in `docker-compose.yml`:
+
+   ```yaml
+   services:
+     gitopia-storage:
+       user: "${UID}:${GID}"
+   ```
+
+   Replace `UID` and `GID` with your host user’s values (`id -u` and `id -g`).
+
+---
+
 ## Manual Installation
 
 This method is for advanced users who want to manage each service directly on the host machine.
