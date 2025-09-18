@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gitopia/gitopia-go/logger"
 	"github.com/gitopia/gitopia-storage/app"
+	"github.com/gitopia/gitopia-storage/monitoring"
 	"github.com/gitopia/gitopia-storage/pkg/merkleproof"
 	storagetypes "github.com/gitopia/gitopia/v6/x/storage/types"
 	"github.com/ipfs/boxo/files"
@@ -65,11 +67,20 @@ func UnmarshalChallengeEvent(eventBuf []byte) ([]ChallengeEvent, error) {
 }
 
 type ChallengeEventHandler struct {
-	gc *app.GitopiaProxy
+	gc      *app.GitopiaProxy
+	monitor *monitoring.ChallengeMonitor
 }
 
 func NewChallengeEventHandler(g *app.GitopiaProxy) *ChallengeEventHandler {
-	return &ChallengeEventHandler{g}
+	// Create monitor with alert threshold of 3 consecutive failures
+	monitor := monitoring.NewChallengeMonitor(3, func(reason string) {
+		logger.FromContext(context.Background()).WithField("reason", reason).Error("Challenge response alert triggered")
+	})
+
+	return &ChallengeEventHandler{
+		gc:      g,
+		monitor: monitor,
+	}
 }
 
 func (h *ChallengeEventHandler) Handle(ctx context.Context, eventBuf []byte) error {
@@ -92,6 +103,9 @@ func (h *ChallengeEventHandler) Handle(ctx context.Context, eventBuf []byte) err
 }
 
 func (h *ChallengeEventHandler) Process(ctx context.Context, event ChallengeEvent) error {
+	startTime := time.Now()
+	h.monitor.RecordChallengeReceived()
+
 	logger.FromContext(ctx).WithFields(logrus.Fields{
 		"challenge_id": event.ChallengeId,
 		"provider":     event.Provider,
@@ -189,9 +203,14 @@ func (h *ChallengeEventHandler) Process(ctx context.Context, event ChallengeEven
 		}
 	}
 
+	// Record successful challenge response
+	duration := time.Since(startTime)
+	h.monitor.RecordChallengeSuccess(challenge.ChallengeType.String(), duration)
+
 	logger.FromContext(ctx).WithFields(logrus.Fields{
 		"challengeId": event.ChallengeId,
 		"provider":    event.Provider,
+		"duration":    duration,
 	}).Info("challenge response submitted")
 
 	return nil

@@ -10,6 +10,7 @@ import (
 
 	"github.com/buger/jsonparser"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
@@ -174,6 +175,7 @@ func setupWebServer(cmd *cobra.Command, batchTxManager *app.BatchTxManager) (*ht
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
+	mux.Handle("/metrics", promhttp.Handler())
 	mux.Handle("/objects/", http.HandlerFunc(serverWrapper.Server.ObjectsHandler))
 	mux.Handle("/commits", http.HandlerFunc(internalhandler.CommitsHandler))
 	mux.Handle("/commits/", http.HandlerFunc(internalhandler.CommitsHandler))
@@ -269,7 +271,21 @@ func startEventProcessor(ctx context.Context, gitopiaClient gitopia.Client, batc
 
 	// Create multiple WebSocket clients to distribute subscriptions and avoid hitting the 5 subscription limit
 
-	// Client 1: Merge, Challenge and DeleteStorageObject events (4 subscriptions)
+	// Initialize redundant challenge manager for critical challenge responses
+	challengeManager, err := handler.NewChallengeManager(ctx, challengeHandler)
+	if err != nil {
+		return errors.Wrap(err, "failed to create challenge manager")
+	}
+	defer challengeManager.Close()
+
+	// Start challenge manager with redundant connections
+	if err := challengeManager.Start(); err != nil {
+		return errors.Wrap(err, "failed to start challenge manager")
+	}
+
+	logger.FromContext(ctx).WithField("healthy_connections", challengeManager.GetHealthyConnectionCount()).Info("challenge manager started with redundant connections")
+
+	// Client 1: Merge and DeleteStorageObject events (4 subscriptions, excluding challenges)
 	client1, err := gitopia.NewWSEvents(ctx)
 	if err != nil {
 		return errors.Wrap(err, "failed to create WebSocket client 1")
@@ -279,7 +295,6 @@ func startEventProcessor(ctx context.Context, gitopiaClient gitopia.Client, batc
 	client1Queries := []string{
 		InvokeMergePullRequestQuery,
 		InvokeDaoMergePullRequestQuery,
-		ChallengeCreatedQuery,
 		DeleteStorageObjectQuery,
 		ProposalTimeoutQuery,
 	}
@@ -295,7 +310,6 @@ func startEventProcessor(ctx context.Context, gitopiaClient gitopia.Client, batc
 		InvokeDaoMergePullRequestQuery: func(ctx context.Context, eventBuf []byte) error {
 			return daoMergeHandler.Handle(ctx, eventBuf, handler.EventTypeInvokeDaoMergePullRequest)
 		},
-		ChallengeCreatedQuery:    challengeHandler.Handle,
 		DeleteStorageObjectQuery: deleteStorageObjectHandler.Handle,
 		ProposalTimeoutQuery:     proposalTimeoutHandler.Handle,
 	}

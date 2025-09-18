@@ -8,6 +8,16 @@ TM_ADDR = "http://host.docker.internal:26667"
 CHAIN_ID = "localgitopia"
 WORKING_DIR = "/src/app/"
 
+# Development RPC Endpoints (can use single endpoint for local testing)
+TM_RPC_ENDPOINTS = [
+    "http://host.docker.internal:26667"
+]
+
+# Development Challenge Response Configuration
+CHALLENGE_RESPONSE_TIMEOUT = "8s"
+CHALLENGE_MAX_CONCURRENT_RESPONSES = 1   # Single connection for dev
+CHALLENGE_CONNECTION_HEALTH_CHECK = "10s"
+
 # Local IPFS Configuration
 IPFS_CLUSTER_PEER_HOST = "host.docker.internal"
 IPFS_HOST = "host.docker.internal"

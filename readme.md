@@ -39,6 +39,52 @@ The Gitopia Storage Provider leverages a layered storage architecture, with the 
 
 ---
 
+## Challenge Response Redundancy
+
+The Gitopia Storage Provider implements a **critical redundant WebSocket architecture** for challenge response submission to ensure maximum reliability and prevent storage provider penalties due to network failures.
+
+### Why Redundancy is Critical
+
+Challenge responses have a strict **10-second deadline**. Missing even a single challenge can result in:
+- Reduced reputation score
+- Potential slashing of staked tokens
+- Loss of storage provider status
+
+### Redundant Connection Architecture
+
+The system now supports:
+
+1. **Multiple RPC Endpoints**: Configure multiple Tendermint RPC endpoints as fallbacks
+2. **Racing Logic**: First successful response wins, preventing duplicate submissions
+3. **Health Monitoring**: Continuous monitoring of connection health with automatic failover
+
+### Configuration
+
+Add multiple RPC endpoints to your configuration:
+
+```toml
+# Redundant RPC Endpoints for Challenge Response Reliability
+TM_RPC_ENDPOINTS = [
+    "https://gitopia-rpc.polkachu.com:443"
+]
+
+# Challenge Response Configuration
+CHALLENGE_MAX_CONCURRENT_RESPONSES = 3   # Max concurrent responses to same challenge
+CHALLENGE_CONNECTION_HEALTH_CHECK = "30s" # Health check interval for WebSocket connections
+```
+
+### How It Works
+
+1. **Multiple Connections**: Creates WebSocket connections to each configured RPC endpoint
+2. **Event Racing**: When a challenge is received on multiple connections, the first one to process wins
+3. **Deduplication**: Prevents duplicate challenge submissions using challenge ID tracking
+4. **Health Monitoring**: Continuously monitors connection health and attempts reconnection
+5. **Automatic Failover**: If primary connections fail, backup connections continue processing
+
+This architecture significantly improves challenge response reliability and reduces the risk of missed challenges due to network issues.
+
+---
+
 ## Security Considerations
 
 When deploying the Gitopia Storage Provider in a production environment, it's crucial to follow security best practices to protect your data and infrastructure. This section outlines key security considerations based on IPFS Cluster's guidelines.

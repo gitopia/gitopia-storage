@@ -15,6 +15,17 @@ TM_ADDR = "https://gitopia-rpc.polkachu.com:443"
 CHAIN_ID = "gitopia"
 GAS_PRICES = "0.001ulore"
 
+# Redundant RPC Endpoints for Challenge Response Reliability
+# Primary and backup Tendermint RPC endpoints for WebSocket connections
+TM_RPC_ENDPOINTS = [
+    "https://gitopia-rpc.polkachu.com:443"
+]
+
+# Challenge Response Configuration
+CHALLENGE_RESPONSE_TIMEOUT = "8s"        # Response timeout (less than 10s deadline)
+CHALLENGE_MAX_CONCURRENT_RESPONSES = 3   # Max concurrent responses to same challenge
+CHALLENGE_CONNECTION_HEALTH_CHECK = "30s" # Health check interval for WebSocket connections
+
 # IPFS Configuration
 IPFS_CLUSTER_PEER_HOST = "ipfs-cluster"
 IPFS_CLUSTER_PEER_PORT = "9094"
