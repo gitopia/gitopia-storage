@@ -89,16 +89,22 @@ func start(cmd *cobra.Command, args []string) error {
 	batchTxManager.Start()
 	defer batchTxManager.Stop()
 
-	// Start pprof server for performance monitoring.
-	g.Go(func() error {
-		return startPprofServer(ctx, 6060)
-	})
+	// Start pprof server for performance monitoring (if enabled).
+	if enablePprof, _ := cmd.Flags().GetBool("enable-pprof"); enablePprof {
+		pprofPort, _ := cmd.Flags().GetInt("pprof-port")
+		g.Go(func() error {
+			return startPprofServer(ctx, pprofPort)
+		})
+	}
 
-	// Start memory monitor to log memory usage periodically.
-	g.Go(func() error {
-		startMemoryMonitor(ctx)
-		return nil
-	})
+	// Start memory monitor to log memory usage periodically (if enabled).
+	if enableMemoryMonitor, _ := cmd.Flags().GetBool("enable-memory-monitor"); enableMemoryMonitor {
+		memoryInterval, _ := cmd.Flags().GetDuration("memory-monitor-interval")
+		g.Go(func() error {
+			startMemoryMonitorWithInterval(ctx, memoryInterval)
+			return nil
+		})
+	}
 
 	// Start the main web server.
 	g.Go(func() error {

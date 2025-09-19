@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"time"
 )
 
 func startPprofServer(ctx context.Context, port int) error {
@@ -12,5 +13,9 @@ func startPprofServer(ctx context.Context, port int) error {
 }
 
 func startMemoryMonitor(ctx context.Context) {
+	// No-op for production builds
+}
+
+func startMemoryMonitorWithInterval(ctx context.Context, interval time.Duration) {
 	// No-op for production builds
 }

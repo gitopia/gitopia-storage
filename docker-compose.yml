@@ -56,10 +56,74 @@ services:
     # The new entrypoint handles key import, then starts the service
     entrypoint: supervisord -c /etc/supervisord.conf
 
+  # Optional monitoring services
+  # Uncomment the services below to enable Prometheus and Grafana monitoring
+  
+  # prometheus:
+  #   container_name: prometheus
+  #   image: prom/prometheus
+  #   ports:
+  #     - "${PROMETHEUS_PORT:-9090}:9090"
+  #   volumes:
+  #     - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+  #     - ./monitoring/alert_rules.yml:/etc/prometheus/alert_rules.yml
+  #     - prometheus_data:/prometheus
+  #   command:
+  #     - '--config.file=/etc/prometheus/prometheus.yml'
+  #     - '--storage.tsdb.path=/prometheus'
+  #     - '--web.console.libraries=/etc/prometheus/console_libraries'
+  #     - '--web.console.templates=/etc/prometheus/consoles'
+  #     - '--storage.tsdb.retention.time=15d'
+  #     - '--web.enable-lifecycle'
+  #     - '--web.enable-admin-api'
+  #   networks:
+  #     - gitopia-network
+  #   restart: unless-stopped
+
+  # grafana:
+  #   container_name: grafana
+  #   image: grafana/grafana
+  #   ports:
+  #     - "${GRAFANA_PORT:-3000}:3000"
+  #   environment:
+  #     - GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin123}
+  #     - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+  #     - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin123}
+  #     - GF_USERS_ALLOW_SIGN_UP=false
+  #   volumes:
+  #     - ./monitoring/grafana/grafana.ini:/etc/grafana/grafana.ini
+  #     - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+  #     - grafana_data:/var/lib/grafana
+  #   networks:
+  #     - gitopia-network
+  #   depends_on:
+  #     - prometheus
+  #   restart: unless-stopped
+
+  # node-exporter:
+  #   container_name: node-exporter
+  #   image: prom/node-exporter
+  #   ports:
+  #     - "${NODE_EXPORTER_PORT:-9100}:9100"
+  #   volumes:
+  #     - /proc:/host/proc:ro
+  #     - /sys:/host/sys:ro
+  #     - /:/rootfs:ro
+  #   command:
+  #     - '--path.procfs=/host/proc'
+  #     - '--path.rootfs=/rootfs'
+  #     - '--path.sysfs=/host/sys'
+  #     - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+  #   networks:
+  #     - gitopia-network
+  #   restart: unless-stopped
 
 volumes:
   ipfs_data:
   cluster_data:
+  # Uncomment the volumes below when enabling monitoring
+  # prometheus_data:
+  # grafana_data:
 
 networks:
   gitopia-network:

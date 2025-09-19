@@ -138,6 +138,90 @@ For Docker deployments, review the port mappings in `docker-compose.yml` and ens
 
 ---
 
+## Monitoring and Observability
+
+The Gitopia Storage Provider includes optional monitoring capabilities using Prometheus and Grafana to help you monitor the health, performance, and operational metrics of your storage provider.
+
+### Features
+
+- **Real-time Metrics**: Monitor service availability, resource usage, and performance metrics
+- **Pre-built Dashboards**: Comprehensive Grafana dashboards for storage provider overview
+- **Alerting**: Configurable alerts for critical issues like service downtime, high resource usage, and challenge response failures
+- **System Metrics**: Optional Node Exporter integration for system-level monitoring
+
+### Quick Setup
+
+**Option 1: Using the monitoring override file (Recommended)**
+
+1. **Configure monitoring settings** in your `.env` file:
+   ```bash
+   # Copy from .env.example and customize
+   PROMETHEUS_PORT=9090
+   GRAFANA_PORT=3000
+   GRAFANA_ADMIN_USER=admin
+   GRAFANA_ADMIN_PASSWORD=your-secure-password
+   NODE_EXPORTER_PORT=9100
+   ```
+
+2. **Start with monitoring enabled**:
+   ```bash
+   docker-compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
+   ```
+
+**Option 2: Manual setup**
+
+1. **Enable monitoring services** in `docker-compose.yml` by uncommenting the monitoring section:
+   ```bash
+   # Uncomment the prometheus, grafana, and node-exporter services
+   # Also uncomment the corresponding volumes: prometheus_data and grafana_data
+   ```
+
+2. **Configure monitoring settings** in your `.env` file (same as Option 1)
+
+3. **Start the monitoring stack**:
+   ```bash
+   docker-compose up -d
+   ```
+
+4. **Access the dashboards**:
+   - Grafana: http://localhost:3000 (admin/your-password)
+   - Prometheus: http://localhost:9090
+
+### Available Metrics
+
+The storage provider exposes metrics on the `/metrics` endpoint including:
+
+- **Service Health**: Uptime and availability status
+- **Performance**: HTTP request rates, response times, and error rates
+- **Resource Usage**: Memory consumption, CPU usage, and goroutine counts
+- **Storage Operations**: Repository operations, LFS object handling, and IPFS interactions
+- **Challenge Responses**: Success/failure rates for storage provider challenges
+
+### Monitoring Architecture
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Gitopia       │    │      IPFS       │    │  IPFS Cluster   │
+│   Storage       │───▶│     Node        │───▶│                 │
+│   Provider      │    │                 │    │                 │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         │                       │                       │
+         ▼                       ▼                       ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                        Prometheus                               │
+│                    (Metrics Collection)                         │
+└─────────────────────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                         Grafana                                 │
+│                  (Visualization & Alerting)                     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## Installation Guide
 
 We offer two methods for installation. The Docker method is recommended for ease of deployment and management.
@@ -208,7 +292,55 @@ You need to register your provider on the Gitopia blockchain. You only need to d
 
 Your storage provider is now set up and registered.
 
-### 5. Managing Data and External Disks
+### 5. Optional: Enable Monitoring (Recommended)
+
+To monitor your storage provider's health and performance:
+
+**Easy approach using the monitoring override:**
+
+1. **Configure monitoring** in your `.env` file:
+   ```bash
+   # Add these lines to your .env file
+   GRAFANA_ADMIN_PASSWORD=your-secure-password-here
+   PROMETHEUS_PORT=9090
+   GRAFANA_PORT=3000
+   NODE_EXPORTER_PORT=9100
+   ```
+
+2. **Start with monitoring enabled**:
+   ```bash
+   docker-compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
+   ```
+
+**Alternative: Manual setup**
+
+1. **Uncomment monitoring services** in `docker-compose.yml`:
+   ```bash
+   # Remove the # comments from the prometheus, grafana, and node-exporter services
+   # Also uncomment the prometheus_data and grafana_data volumes
+   ```
+
+2. **Configure monitoring** in your `.env` file (same as above)
+
+3. **Start all services**:
+   ```bash
+   docker-compose up -d
+   ```
+
+4. **Access monitoring dashboards**:
+   - **Grafana Dashboard**: http://your-server:3000
+     - Username: `admin`
+     - Password: `your-secure-password-here`
+   - **Prometheus Metrics**: http://your-server:9090
+
+The Grafana dashboard provides real-time monitoring of:
+- Service availability and uptime
+- Resource usage (CPU, memory)
+- HTTP request rates and response times
+- Storage operations and IPFS metrics
+- Challenge response success rates
+
+### 6. Managing Data and External Disks
 The `docker-compose.yml` file maps host directories to container volumes for data persistence.
 - `./data/repos` -> `/var/repos` in container
 - `./data/attachments` -> `/var/attachments` in container
@@ -224,7 +356,7 @@ volumes:
 
 ---
 
-### 6. File Permissions and User Mapping
+### 7. File Permissions and User Mapping
 
 By default, the Gitopia Storage Provider container runs as a non-root user:
 

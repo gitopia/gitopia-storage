@@ -1,0 +1,88 @@
+groups:
+  - name: gitopia-storage-alerts
+    rules:
+      # Service availability alerts
+      - alert: GitopiaStorageDown
+        expr: up{job="gitopia-storage"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Gitopia Storage Provider is down"
+          description: "Gitopia Storage Provider has been down for more than 1 minute."
+
+      - alert: IPFSDown
+        expr: up{job="ipfs"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "IPFS node is down"
+          description: "IPFS node has been down for more than 2 minutes."
+
+      - alert: IPFSClusterDown
+        expr: up{job="ipfs-cluster"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "IPFS Cluster is down"
+          description: "IPFS Cluster has been down for more than 2 minutes."
+
+      # Performance alerts
+      - alert: HighMemoryUsage
+        expr: (process_resident_memory_bytes / 1024 / 1024) > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage detected"
+          description: "Process is using more than 1GB of memory for 5 minutes."
+
+      - alert: HighCPUUsage
+        expr: rate(process_cpu_seconds_total[5m]) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage detected"
+          description: "Process CPU usage is above 80% for 5 minutes."
+
+      # HTTP request alerts
+      - alert: HighErrorRate
+        expr: rate(promhttp_metric_handler_requests_total{code!="200"}[5m]) / rate(promhttp_metric_handler_requests_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High HTTP error rate"
+          description: "HTTP error rate is above 10% for 2 minutes."
+
+      # Challenge response alerts (if metrics are available)
+      - alert: ChallengeResponseFailure
+        expr: increase(gitopia_challenge_failures_total[5m]) > 0
+        for: 0s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Challenge response failure detected"
+          description: "Storage provider failed to respond to a challenge."
+
+      # Storage alerts
+      - alert: DiskSpaceRunningLow
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk space running low"
+          description: "Available disk space is below 10%."
+
+      - alert: DiskSpaceCritical
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 5
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Disk space critically low"
+          description: "Available disk space is below 5%."

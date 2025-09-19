@@ -35,8 +35,14 @@ func startPprofServer(ctx context.Context, port int) error {
 }
 
 func startMemoryMonitor(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Minute)
+	startMemoryMonitorWithInterval(ctx, 5*time.Minute)
+}
+
+func startMemoryMonitorWithInterval(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+
+	logrus.Infof("starting memory monitor with %v interval", interval)
 
 	for {
 		select {
