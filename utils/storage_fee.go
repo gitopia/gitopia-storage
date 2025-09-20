@@ -20,8 +20,9 @@ func CalculateStorageCost(currentUsage, newUsage uint64, storageParams storagety
 
 	// If current usage is already above free limit, charge for the entire diff
 	if currentUsage > freeStorageBytes {
-		diff := newUsage - currentUsage
-		if diff <= 0 {
+		// Handle negative diff correctly by checking before subtraction
+		if newUsage <= currentUsage {
+			// Storage decreased or stayed same, no charge
 			return &StorageCostInfo{
 				StorageCharge: sdk.NewCoin(storageParams.StoragePricePerGb.Denom, sdk.ZeroInt()),
 				CurrentUsage:  currentUsage,
@@ -29,6 +30,7 @@ func CalculateStorageCost(currentUsage, newUsage uint64, storageParams storagety
 				FreeLimit:     freeStorageBytes,
 			}, nil
 		}
+		diff := newUsage - currentUsage
 		// Calculate charge in GB and multiply by price per GB
 		diffGb := float64(diff) / (1024 * 1024 * 1024)
 		chargeAmount := sdk.NewDec(int64(diffGb)).Mul(sdk.NewDecFromInt(storageParams.StoragePricePerGb.Amount))
