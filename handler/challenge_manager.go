@@ -21,6 +21,8 @@ type ChallengeManager struct {
 	ctx              context.Context
 	cancel           context.CancelFunc
 	grpcClient       *RedundantGrpcClient
+	firstProcessed   bool
+	processingMu     sync.Mutex
 }
 
 // ChallengeConnection represents a single WebSocket connection with health monitoring
@@ -32,15 +34,6 @@ type ChallengeConnection struct {
 	lastSeen     time.Time
 	failures     int
 	mu           sync.RWMutex
-}
-
-// ChallengeResponse tracks responses to prevent duplicate submissions
-type ChallengeResponse struct {
-	challengeID string
-	submitted   bool
-	submittedAt time.Time
-	endpoint    string
-	mu          sync.Mutex
 }
 
 // NewChallengeManager creates a new challenge manager with redundant connections
@@ -249,16 +242,6 @@ func (cm *ChallengeManager) handleChallengeEvent(ctx context.Context, eventBuf [
 			continue
 		}
 
-		// Check if we should submit this challenge based on provider liveness
-		if !cm.shouldSubmitChallenge(ctx, event.ChallengeId, event.Provider, conn.rpcEndpoint) {
-			logger.FromContext(ctx).WithFields(logrus.Fields{
-				"challenge_id": event.ChallengeId,
-				"provider":     event.Provider,
-				"rpc_endpoint": conn.rpcEndpoint,
-			}).Info("skipping challenge submission based on liveness check")
-			continue
-		}
-
 		// Create timeout context for challenge processing
 		timeout := viper.GetDuration("CHALLENGE_RESPONSE_TIMEOUT")
 		if timeout == 0 {
@@ -296,52 +279,27 @@ func (cm *ChallengeManager) handleChallengeEvent(ctx context.Context, eventBuf [
 	return nil
 }
 
-// shouldProcessChallenge implements racing logic - first connection wins
+// shouldProcessChallenge implements racing logic - only process the first received challenge event
 func (cm *ChallengeManager) shouldProcessChallenge(challengeID, endpoint string) bool {
-	return true
-}
+	cm.processingMu.Lock()
+	defer cm.processingMu.Unlock()
 
-// shouldSubmitChallenge determines if this provider should submit a challenge response
-// based on ProviderLiveness information and challenge history
-func (cm *ChallengeManager) shouldSubmitChallenge(ctx context.Context, challengeId uint64, providerAddress, rpcEndpoint string) bool {
-	// If no gRPC client available, default to submitting (legacy behavior)
-	if cm.grpcClient == nil {
-		logger.FromContext(ctx).WithField("challenge_id", challengeId).Debug("no gRPC client available, defaulting to submit challenge")
+	// If this is the first challenge, mark it as processed and allow it
+	if !cm.firstProcessed {
+		cm.firstProcessed = true
+		logger.FromContext(cm.ctx).WithFields(logrus.Fields{
+			"challenge_id": challengeID,
+			"endpoint":     endpoint,
+		}).Info("processing first challenge event")
 		return true
 	}
 
-	// Query provider liveness information using the paired gRPC endpoint
-	livenessInfo, err := cm.grpcClient.ProviderLivenessForRpcEndpoint(ctx, providerAddress, rpcEndpoint)
-	if err != nil {
-		logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
-			"challenge_id":     challengeId,
-			"provider_address": providerAddress,
-			"rpc_endpoint":     rpcEndpoint,
-		}).Warn("failed to query provider liveness, defaulting to submit challenge")
-		return true
-	}
-
-	logger.FromContext(ctx).WithFields(logrus.Fields{
-		"challenge_id":              challengeId,
-		"provider_address":          providerAddress,
-		"rpc_endpoint":              rpcEndpoint,
-		"last_submission_challenge": livenessInfo.LastSubmissionChallenge,
-		"current_challenge":         challengeId,
-	}).Debug("provider liveness info retrieved")
-
-	// Submit if this challenge ID is greater than the last submitted challenge
-	// This prevents resubmitting old challenges and ensures we only respond to new ones
-	shouldSubmit := challengeId > livenessInfo.LastSubmissionChallenge
-
-	if !shouldSubmit {
-		logger.FromContext(ctx).WithFields(logrus.Fields{
-			"challenge_id":              challengeId,
-			"rpc_endpoint":              rpcEndpoint,
-			"last_submission_challenge": livenessInfo.LastSubmissionChallenge,
-		}).Info("skipping challenge - already submitted or older challenge")
-	}
-
-	return shouldSubmit
+	// All subsequent challenges are ignored
+	logger.FromContext(cm.ctx).WithFields(logrus.Fields{
+		"challenge_id": challengeID,
+		"endpoint":     endpoint,
+	}).Debug("ignoring subsequent challenge event - first already processed")
+	return false
 }
 
 // handleConnectionError handles connection errors and updates health status
