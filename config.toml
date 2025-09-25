@@ -15,10 +15,12 @@ TM_ADDR = "https://gitopia-rpc.polkachu.com:443"
 CHAIN_ID = "gitopia"
 GAS_PRICES = "0.001ulore"
 
-# Redundant RPC Endpoints for Challenge Response Reliability
-# Primary and backup Tendermint RPC endpoints for WebSocket connections
-TM_RPC_ENDPOINTS = [
-    "https://gitopia-rpc.polkachu.com:443"
+# Redundant Validator Endpoints for Challenge Response Reliability
+# Each validator provides both RPC (WebSocket) and gRPC (queries) endpoints
+# Format: [[rpc_endpoint, grpc_endpoint], ...]
+VALIDATOR_ENDPOINTS = [
+    ["https://gitopia-rpc.polkachu.com:443", "gitopia-grpc.polkachu.com:11390"],
+    ["https://gitopia-rpc.stakeme.pro:443", "gitopia-grpc.stakeme.pro:11390"]
 ]
 
 # Challenge Response Configuration

@@ -52,20 +52,27 @@ Challenge responses have a strict **10-second deadline**. Missing even a single 
 
 ### Redundant Connection Architecture
 
-The system now supports:
+The system now supports comprehensive redundancy across multiple layers:
 
-1. **Multiple RPC Endpoints**: Configure multiple Tendermint RPC endpoints as fallbacks
-2. **Racing Logic**: First successful response wins, preventing duplicate submissions
-3. **Health Monitoring**: Continuous monitoring of connection health with automatic failover
+1. **Paired Validator Endpoints**: Configure both RPC and gRPC endpoints from multiple validators
+2. **WebSocket Redundancy**: Multiple Tendermint RPC endpoints for challenge event subscriptions
+3. **gRPC Redundancy**: Multiple gRPC endpoints for storage queries with automatic failover
+4. **ProviderLiveness Integration**: Smart challenge submission based on provider liveness data
+5. **Racing Logic**: First successful response wins, preventing duplicate submissions
+6. **Health Monitoring**: Continuous monitoring of both connection types with automatic failover
 
 ### Configuration
 
-Add multiple RPC endpoints to your configuration:
+Configure paired RPC/gRPC endpoints from multiple validators for maximum redundancy:
 
 ```toml
-# Redundant RPC Endpoints for Challenge Response Reliability
-TM_RPC_ENDPOINTS = [
-    "https://gitopia-rpc.polkachu.com:443"
+# Redundant Validator Endpoints for Challenge Response Reliability
+# Each validator provides both RPC (WebSocket) and gRPC (queries) endpoints
+# Format: [[rpc_endpoint, grpc_endpoint], ...]
+VALIDATOR_ENDPOINTS = [
+    ["https://gitopia-rpc.polkachu.com:443", "gitopia-grpc.polkachu.com:11390"],
+    ["https://gitopia-rpc.publicnode.com:443", "gitopia-grpc.publicnode.com:11390"],
+    ["https://gitopia-rpc.nodestake.top:443", "gitopia-grpc.nodestake.top:11390"]
 ]
 
 # Challenge Response Configuration
@@ -75,13 +82,23 @@ CHALLENGE_CONNECTION_HEALTH_CHECK = "30s" # Health check interval for WebSocket 
 
 ### How It Works
 
-1. **Multiple Connections**: Creates WebSocket connections to each configured RPC endpoint
-2. **Event Racing**: When a challenge is received on multiple connections, the first one to process wins
-3. **Deduplication**: Prevents duplicate challenge submissions using challenge ID tracking
-4. **Health Monitoring**: Continuously monitors connection health and attempts reconnection
-5. **Automatic Failover**: If primary connections fail, backup connections continue processing
+1. **Paired Endpoints**: Each validator provides both RPC (WebSocket events) and gRPC (queries) endpoints
+2. **Multiple Connections**: Creates WebSocket connections to each configured RPC endpoint
+3. **gRPC Redundancy**: Uses multiple gRPC endpoints for storage queries with automatic failover
+4. **Smart Challenge Logic**: Uses ProviderLiveness query to determine if challenges should be submitted
+5. **Event Racing**: When a challenge is received on multiple connections, the first one to process wins
+6. **Deduplication**: Prevents duplicate challenge submissions using challenge ID tracking and liveness info
+7. **Health Monitoring**: Continuously monitors both WebSocket and gRPC connection health
+8. **Automatic Failover**: If primary connections fail, backup connections continue processing
 
-This architecture significantly improves challenge response reliability and reduces the risk of missed challenges due to network issues.
+### Enhanced Features
+
+- **ProviderLiveness Integration**: Queries the last submission challenge to avoid resubmitting old challenges
+- **Dual Redundancy**: Both WebSocket (events) and gRPC (queries) connections have redundancy
+- **Intelligent Submission**: Only submits challenges that haven't been processed based on provider liveness
+- **Comprehensive Monitoring**: Health checks for both connection types with detailed logging
+
+This architecture significantly improves challenge response reliability and reduces the risk of missed challenges due to network issues or redundant submissions.
 
 ---
 

@@ -15,23 +15,23 @@ import (
 
 // ChallengeManager manages multiple WebSocket connections for challenge response redundancy
 type ChallengeManager struct {
-	connections    []*ChallengeConnection
+	connections      []*ChallengeConnection
 	challengeHandler *ChallengeEventHandler
-	mu             sync.RWMutex
-	ctx            context.Context
-	cancel         context.CancelFunc
-	responseTracker map[string]*ChallengeResponse
-	trackerMu      sync.RWMutex
+	mu               sync.RWMutex
+	ctx              context.Context
+	cancel           context.CancelFunc
+	grpcClient       *RedundantGrpcClient
 }
 
 // ChallengeConnection represents a single WebSocket connection with health monitoring
 type ChallengeConnection struct {
-	client     *gitopia.WSEvents
-	endpoint   string
-	isHealthy  bool
-	lastSeen   time.Time
-	failures   int
-	mu         sync.RWMutex
+	client       *gitopia.WSEvents
+	rpcEndpoint  string
+	grpcEndpoint string
+	isHealthy    bool
+	lastSeen     time.Time
+	failures     int
+	mu           sync.RWMutex
 }
 
 // ChallengeResponse tracks responses to prevent duplicate submissions
@@ -46,35 +46,43 @@ type ChallengeResponse struct {
 // NewChallengeManager creates a new challenge manager with redundant connections
 func NewChallengeManager(ctx context.Context, challengeHandler *ChallengeEventHandler) (*ChallengeManager, error) {
 	childCtx, cancel := context.WithCancel(ctx)
-	
+
 	cm := &ChallengeManager{
 		challengeHandler: challengeHandler,
-		ctx:             childCtx,
-		cancel:          cancel,
-		responseTracker: make(map[string]*ChallengeResponse),
+		ctx:              childCtx,
+		cancel:           cancel,
 	}
 
-	// Get RPC endpoints from configuration
-	endpoints := viper.GetStringSlice("TM_RPC_ENDPOINTS")
-	if len(endpoints) == 0 {
-		// Fallback to single endpoint if array not configured
-		endpoints = []string{viper.GetString("TM_ADDR")}
+	// Parse validator endpoints (paired RPC/gRPC)
+	validatorEndpoints := parseValidatorEndpoints()
+
+	// Create gRPC client for storage queries using paired endpoints
+	if len(validatorEndpoints) > 0 {
+		grpcClient, err := NewRedundantGrpcClient(ctx, validatorEndpoints)
+		if err != nil {
+			logger.FromContext(ctx).WithError(err).Warn("failed to create redundant gRPC client, continuing without gRPC redundancy")
+		} else {
+			cm.grpcClient = grpcClient
+		}
 	}
 
 	maxConnections := viper.GetInt("CHALLENGE_MAX_CONCURRENT_RESPONSES")
 	if maxConnections == 0 {
-		maxConnections = min(len(endpoints), 3) // Default to 3 or number of endpoints
+		maxConnections = min(len(validatorEndpoints), 3) // Default to 3 or number of endpoints
 	}
 
-	// Create connections up to the maximum configured
-	for i, endpoint := range endpoints {
+	// Create WebSocket connections up to the maximum configured
+	for i, ve := range validatorEndpoints {
 		if i >= maxConnections {
 			break
 		}
 
-		conn, err := cm.createConnection(endpoint)
+		conn, err := cm.createConnection(ve.RpcEndpoint, ve.GrpcEndpoint)
 		if err != nil {
-			logger.FromContext(ctx).WithError(err).WithField("endpoint", endpoint).Warn("failed to create challenge connection, continuing with others")
+			logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
+				"rpc_endpoint":  ve.RpcEndpoint,
+				"grpc_endpoint": ve.GrpcEndpoint,
+			}).Warn("failed to create challenge connection, continuing with others")
 			continue
 		}
 		cm.connections = append(cm.connections, conn)
@@ -84,36 +92,72 @@ func NewChallengeManager(ctx context.Context, challengeHandler *ChallengeEventHa
 		return nil, errors.New("failed to create any challenge connections")
 	}
 
+	// gRPC client is now managed internally by the challenge manager
+	if cm.grpcClient != nil {
+		logger.FromContext(ctx).Info("gRPC client configured for enhanced challenge processing")
+	}
+
 	logger.FromContext(ctx).WithField("connections", len(cm.connections)).Info("challenge manager initialized with redundant connections")
 	return cm, nil
 }
 
-// createConnection creates and configures a single WebSocket connection
-func (cm *ChallengeManager) createConnection(endpoint string) (*ChallengeConnection, error) {
-	// Temporarily set the TM_ADDR to the desired endpoint
-	originalAddr := viper.GetString("TM_ADDR")
-	viper.Set("TM_ADDR", endpoint)
-	defer viper.Set("TM_ADDR", originalAddr) // Restore original
+// parseValidatorEndpoints parses validator endpoints from configuration
+func parseValidatorEndpoints() []ValidatorEndpoint {
+	// Try new paired endpoint format first
+	validatorEndpoints := viper.Get("VALIDATOR_ENDPOINTS")
+	if validatorEndpoints != nil {
+		if endpoints, ok := validatorEndpoints.([]interface{}); ok {
+			var result []ValidatorEndpoint
+			for _, ep := range endpoints {
+				if pair, ok := ep.([]interface{}); ok && len(pair) == 2 {
+					if rpc, ok := pair[0].(string); ok {
+						if grpc, ok := pair[1].(string); ok {
+							result = append(result, ValidatorEndpoint{
+								RpcEndpoint:  rpc,
+								GrpcEndpoint: grpc,
+							})
+						}
+					}
+				}
+			}
+			if len(result) > 0 {
+				return result
+			}
+		}
+	}
 
-	// Create WebSocket client with the temporarily set endpoint
-	client, err := gitopia.NewWSEvents(cm.ctx)
+	rpcEndpoint := viper.GetString("TM_ADDR")
+	grpcEndpoint := viper.GetString("GITOPIA_ADDR")
+	result := []ValidatorEndpoint{{
+		RpcEndpoint:  rpcEndpoint,
+		GrpcEndpoint: grpcEndpoint,
+	}}
+
+	return result
+}
+
+// createConnection creates and configures a single WebSocket connection
+func (cm *ChallengeManager) createConnection(rpcEndpoint, grpcEndpoint string) (*ChallengeConnection, error) {
+	// Create WebSocket client with the RPC endpoint
+	client, err := gitopia.NewWSEventsWithEndpoint(cm.ctx, rpcEndpoint)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to create WebSocket client for endpoint %s", endpoint)
+		return nil, errors.Wrapf(err, "failed to create WebSocket client for endpoint %s", rpcEndpoint)
 	}
 
 	conn := &ChallengeConnection{
-		client:    client,
-		endpoint:  endpoint,
-		isHealthy: true,
-		lastSeen:  time.Now(),
-		failures:  0,
+		client:       client,
+		rpcEndpoint:  rpcEndpoint,
+		grpcEndpoint: grpcEndpoint,
+		isHealthy:    true,
+		lastSeen:     time.Now(),
+		failures:     0,
 	}
 
 	// Subscribe to challenge events
 	challengeQuery := "tm.event='NewBlock' AND gitopia.gitopia.storage.EventChallengeCreated.challenge_id EXISTS"
 	if err := client.SubscribeQueries(cm.ctx, challengeQuery); err != nil {
 		client.Close()
-		return nil, errors.Wrapf(err, "failed to subscribe to challenges on endpoint %s", endpoint)
+		return nil, errors.Wrapf(err, "failed to subscribe to challenges on endpoint %s", rpcEndpoint)
 	}
 
 	return conn, nil
@@ -141,7 +185,7 @@ func (cm *ChallengeManager) Start() error {
 func (cm *ChallengeManager) processConnectionEvents(connIndex int, conn *ChallengeConnection) {
 	logger := logger.FromContext(cm.ctx).WithFields(logrus.Fields{
 		"connection_index": connIndex,
-		"endpoint":        conn.endpoint,
+		"endpoint":         conn.rpcEndpoint,
 	})
 
 	defer func() {
@@ -180,7 +224,7 @@ func (cm *ChallengeManager) processConnectionEvents(connIndex int, conn *Challen
 	}
 }
 
-// handleChallengeEvent processes a challenge event with deduplication
+// handleChallengeEvent processes a challenge event with deduplication and submission checking
 func (cm *ChallengeManager) handleChallengeEvent(ctx context.Context, eventBuf []byte, conn *ChallengeConnection) error {
 	// Update connection health
 	conn.mu.Lock()
@@ -189,106 +233,115 @@ func (cm *ChallengeManager) handleChallengeEvent(ctx context.Context, eventBuf [
 	conn.failures = 0
 	conn.mu.Unlock()
 
-	// Extract challenge ID for deduplication
-	challengeID, err := cm.extractChallengeID(eventBuf)
+	// Extract challenge events from buffer
+	events, err := UnmarshalChallengeEvent(eventBuf)
 	if err != nil {
-		return errors.Wrap(err, "failed to extract challenge ID")
+		return errors.Wrap(err, "failed to unmarshal challenge events")
 	}
 
-	// Check if we should process this challenge (racing logic)
-	if !cm.shouldProcessChallenge(challengeID, conn.endpoint) {
+	for _, event := range events {
+		// Check if we should process this challenge (racing logic)
+		if !cm.shouldProcessChallenge(fmt.Sprintf("%d", event.ChallengeId), conn.rpcEndpoint) {
+			logger.FromContext(ctx).WithFields(logrus.Fields{
+				"challenge_id": event.ChallengeId,
+				"endpoint":     conn.rpcEndpoint,
+			}).Debug("challenge already being processed by another connection")
+			continue
+		}
+
+		// Check if we should submit this challenge based on provider liveness
+		if !cm.shouldSubmitChallenge(ctx, event.ChallengeId, event.Provider, conn.rpcEndpoint) {
+			logger.FromContext(ctx).WithFields(logrus.Fields{
+				"challenge_id": event.ChallengeId,
+				"provider":     event.Provider,
+				"rpc_endpoint": conn.rpcEndpoint,
+			}).Info("skipping challenge submission based on liveness check")
+			continue
+		}
+
+		// Create timeout context for challenge processing
+		timeout := viper.GetDuration("CHALLENGE_RESPONSE_TIMEOUT")
+		if timeout == 0 {
+			timeout = 8 * time.Second // Default timeout
+		}
+
+		challengeCtx, cancel := context.WithTimeout(ctx, timeout)
+
+		// Process the challenge
 		logger.FromContext(ctx).WithFields(logrus.Fields{
-			"challenge_id": challengeID,
-			"endpoint":     conn.endpoint,
-		}).Debug("challenge already being processed by another connection")
-		return nil
+			"challenge_id": event.ChallengeId,
+			"endpoint":     conn.rpcEndpoint,
+			"timeout":      timeout,
+		}).Info("processing challenge event")
+
+		// Process individual challenge event
+		err = cm.challengeHandler.Process(challengeCtx, event)
+		cancel()
+
+		if err != nil {
+			logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
+				"challenge_id": event.ChallengeId,
+				"endpoint":     conn.rpcEndpoint,
+			}).Error("challenge processing failed")
+			// Continue processing other challenges instead of returning error
+			continue
+		}
+
+		logger.FromContext(ctx).WithFields(logrus.Fields{
+			"challenge_id": event.ChallengeId,
+			"endpoint":     conn.rpcEndpoint,
+		}).Info("challenge processed successfully")
 	}
-
-	// Create timeout context for challenge processing
-	timeout := viper.GetDuration("CHALLENGE_RESPONSE_TIMEOUT")
-	if timeout == 0 {
-		timeout = 8 * time.Second // Default timeout
-	}
-
-	challengeCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	// Process the challenge
-	logger.FromContext(ctx).WithFields(logrus.Fields{
-		"challenge_id": challengeID,
-		"endpoint":     conn.endpoint,
-		"timeout":      timeout,
-	}).Info("processing challenge event")
-
-	err = cm.challengeHandler.Handle(challengeCtx, eventBuf)
-	
-	// Mark as submitted regardless of success/failure to prevent retries
-	cm.markChallengeSubmitted(challengeID, conn.endpoint)
-
-	if err != nil {
-		logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
-			"challenge_id": challengeID,
-			"endpoint":     conn.endpoint,
-		}).Error("challenge processing failed")
-		return err
-	}
-
-	logger.FromContext(ctx).WithFields(logrus.Fields{
-		"challenge_id": challengeID,
-		"endpoint":     conn.endpoint,
-	}).Info("challenge processed successfully")
 
 	return nil
 }
 
 // shouldProcessChallenge implements racing logic - first connection wins
 func (cm *ChallengeManager) shouldProcessChallenge(challengeID, endpoint string) bool {
-	cm.trackerMu.Lock()
-	defer cm.trackerMu.Unlock()
-
-	response, exists := cm.responseTracker[challengeID]
-	if !exists {
-		// First time seeing this challenge, create tracker and allow processing
-		cm.responseTracker[challengeID] = &ChallengeResponse{
-			challengeID: challengeID,
-			submitted:   false,
-			endpoint:    endpoint,
-		}
-		return true
-	}
-
-	response.mu.Lock()
-	defer response.mu.Unlock()
-
-	// If already submitted, don't process again
-	if response.submitted {
-		return false
-	}
-
-	// If not submitted yet, this connection wins the race
 	return true
 }
 
-// markChallengeSubmitted marks a challenge as submitted
-func (cm *ChallengeManager) markChallengeSubmitted(challengeID, endpoint string) {
-	cm.trackerMu.Lock()
-	defer cm.trackerMu.Unlock()
-
-	if response, exists := cm.responseTracker[challengeID]; exists {
-		response.mu.Lock()
-		response.submitted = true
-		response.submittedAt = time.Now()
-		response.endpoint = endpoint
-		response.mu.Unlock()
+// shouldSubmitChallenge determines if this provider should submit a challenge response
+// based on ProviderLiveness information and challenge history
+func (cm *ChallengeManager) shouldSubmitChallenge(ctx context.Context, challengeId uint64, providerAddress, rpcEndpoint string) bool {
+	// If no gRPC client available, default to submitting (legacy behavior)
+	if cm.grpcClient == nil {
+		logger.FromContext(ctx).WithField("challenge_id", challengeId).Debug("no gRPC client available, defaulting to submit challenge")
+		return true
 	}
-}
 
-// extractChallengeID extracts challenge ID from event buffer
-func (cm *ChallengeManager) extractChallengeID(eventBuf []byte) (string, error) {
-	// This would need to be implemented based on the actual event structure
-	// For now, using a placeholder implementation
-	// In practice, you'd parse the JSON to extract the challenge ID
-	return fmt.Sprintf("challenge_%d", time.Now().UnixNano()), nil
+	// Query provider liveness information using the paired gRPC endpoint
+	livenessInfo, err := cm.grpcClient.ProviderLivenessForRpcEndpoint(ctx, providerAddress, rpcEndpoint)
+	if err != nil {
+		logger.FromContext(ctx).WithError(err).WithFields(logrus.Fields{
+			"challenge_id":     challengeId,
+			"provider_address": providerAddress,
+			"rpc_endpoint":     rpcEndpoint,
+		}).Warn("failed to query provider liveness, defaulting to submit challenge")
+		return true
+	}
+
+	logger.FromContext(ctx).WithFields(logrus.Fields{
+		"challenge_id":              challengeId,
+		"provider_address":          providerAddress,
+		"rpc_endpoint":              rpcEndpoint,
+		"last_submission_challenge": livenessInfo.LastSubmissionChallenge,
+		"current_challenge":         challengeId,
+	}).Debug("provider liveness info retrieved")
+
+	// Submit if this challenge ID is greater than the last submitted challenge
+	// This prevents resubmitting old challenges and ensures we only respond to new ones
+	shouldSubmit := challengeId > livenessInfo.LastSubmissionChallenge
+
+	if !shouldSubmit {
+		logger.FromContext(ctx).WithFields(logrus.Fields{
+			"challenge_id":              challengeId,
+			"rpc_endpoint":              rpcEndpoint,
+			"last_submission_challenge": livenessInfo.LastSubmissionChallenge,
+		}).Info("skipping challenge - already submitted or older challenge")
+	}
+
+	return shouldSubmit
 }
 
 // handleConnectionError handles connection errors and updates health status
@@ -300,7 +353,7 @@ func (cm *ChallengeManager) handleConnectionError(conn *ChallengeConnection, err
 	conn.isHealthy = false
 
 	logger.FromContext(cm.ctx).WithError(err).WithFields(logrus.Fields{
-		"endpoint": conn.endpoint,
+		"endpoint": conn.rpcEndpoint,
 		"failures": conn.failures,
 	}).Warn("challenge connection error")
 }
@@ -316,9 +369,12 @@ func (cm *ChallengeManager) reconnectConnection(conn *ChallengeConnection) bool 
 	}
 
 	// Create new connection
-	newConn, err := cm.createConnection(conn.endpoint)
+	newConn, err := cm.createConnection(conn.rpcEndpoint, conn.grpcEndpoint)
 	if err != nil {
-		logger.FromContext(cm.ctx).WithError(err).WithField("endpoint", conn.endpoint).Error("failed to reconnect challenge connection")
+		logger.FromContext(cm.ctx).WithError(err).WithFields(logrus.Fields{
+			"rpc_endpoint":  conn.rpcEndpoint,
+			"grpc_endpoint": conn.grpcEndpoint,
+		}).Error("failed to reconnect challenge connection")
 		return false
 	}
 
@@ -368,10 +424,10 @@ func (cm *ChallengeManager) checkConnectionHealth() {
 
 		logger.FromContext(cm.ctx).WithFields(logrus.Fields{
 			"connection_index": i,
-			"endpoint":        conn.endpoint,
-			"healthy":         isHealthy,
-			"failures":        conn.failures,
-			"last_seen":       conn.lastSeen,
+			"endpoint":         conn.rpcEndpoint,
+			"healthy":          isHealthy,
+			"failures":         conn.failures,
+			"last_seen":        conn.lastSeen,
 		}).Debug("challenge connection health check")
 	}
 
@@ -399,6 +455,11 @@ func (cm *ChallengeManager) Close() {
 		if conn.client != nil {
 			conn.client.Close()
 		}
+	}
+
+	// Close gRPC client if available
+	if cm.grpcClient != nil {
+		cm.grpcClient.Close()
 	}
 
 	logger.FromContext(cm.ctx).Info("challenge manager closed")
